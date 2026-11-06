@@ -216,6 +216,70 @@ func TestGenerate_WritesAPathExampleInTheStyleOfItsParameter(t *testing.T) {
 	}
 }
 
+func TestGenerate_WritesAPathExampleOfAParameterWithContentInItsMediaType(t *testing.T) {
+	// A parameter with content is written in its media type, as a body is: JSON in JSON, text as is. Data can't be
+	// text: that example is left out, with a warning.
+	tests := []struct {
+		mediaType string
+		value     any
+		path      string // "" for no example mock
+	}{
+		{mediaType: "application/json", value: "blue", path: `/c/"blue"`},
+		{mediaType: "application/json", value: map[string]any{"R": float64(100), "B": float64(150)}, path: `/c/{"B":150,"R":100}`},
+		{mediaType: "text/plain", value: "blue", path: "/c/blue"},
+		{mediaType: "text/plain", value: []any{"blue"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s %v", tt.mediaType, tt.value), func(t *testing.T) {
+			mocks, warnings := generateWithWarnings(t, &openapi.Document{Operations: []openapi.Operation{{
+				Method: "GET", Path: "/c/{color}",
+				PathParams: []openapi.Parameter{{Name: "color", Style: "simple", MediaType: tt.mediaType, Examples: []openapi.Example{{Value: tt.value}}}},
+				Responses:  []openapi.Response{{Status: "200"}},
+			}}})
+
+			if tt.path == "" {
+				require.NotContains(t, mocks, "c-_color-get-200-example")
+				require.Equal(t, []map[string]any{{
+					"level": "warn", "mock": "c-_color-get-200", "method": "GET", "route": "/c/{color}", "status": "200",
+					"message": "path parameter color is data, not text: left out: give a string example",
+				}}, warnings)
+
+				return
+			}
+
+			require.Equal(t, []any{"equal", tt.path}, mocks["c-_color-get-200-example"].Request.Path)
+			require.Empty(t, warnings)
+		})
+	}
+}
+
+func TestGenerate_WarnsOfAPathExampleOnlyForTheMocksOfItsOperation(t *testing.T) {
+	// An operation without a success makes no example mock: an example it can't write is no news, and a warning
+	// must not land on the mock of another operation.
+	_, warnings := generateWithWarnings(t, &openapi.Document{Operations: []openapi.Operation{
+		{
+			Method: "GET", Path: "/a/{c}",
+			PathParams: []openapi.Parameter{{Name: "c", Style: "simple", MediaType: "text/plain", Examples: []openapi.Example{{Value: []any{"blue"}}}}},
+			Responses:  []openapi.Response{{Status: "400"}},
+		},
+		{Method: "GET", Path: "/b", Responses: []openapi.Response{{Status: "200"}}},
+	}})
+
+	require.Empty(t, warnings)
+}
+
+func TestGenerate_EscapesInAPathTemplateAPercentThatStartsNoEscape(t *testing.T) {
+	// A % that starts no escape is a percent sign, which a path template writes %25: the escapes beside it stay.
+	mocks := generate(t, &openapi.Document{Operations: []openapi.Operation{
+		{Method: "GET", Path: "/rate/50%/{id}", Responses: []openapi.Response{{Status: "200"}}},
+		{Method: "GET", Path: "/off%2010%/{id}", Responses: []openapi.Response{{Status: "200"}}},
+	}})
+
+	require.Equal(t, "/rate/50%25/{id}", mocks["rate-50-_id-get-200"].Request.PathTemplate)
+	require.Equal(t, "/off%2010%25/{id}", mocks["off-2010-_id-get-200"].Request.PathTemplate)
+}
+
 func TestGenerate_A404AnswersInTheMediaTypeTheClientPrefers(t *testing.T) {
 	// A 404 is a response like the others: a client gets it in the media type its Accept prefers, and one whose
 	// Accept takes none of them still learns the id is unknown, in the first.
@@ -461,12 +525,13 @@ func TestGenerate_MatchesAParameterInsideASegmentWithARegularExpression(t *testi
 }
 
 func TestGenerate_PutsEveryPathUnderTheBasePath(t *testing.T) {
+	// A path of the spec is appended to the base path: / under /v1 is /v1/.
 	mocks := generate(t, &openapi.Document{Operations: []openapi.Operation{
 		{Method: "GET", Path: "/", BasePath: "/v1/", Responses: []openapi.Response{{Status: "200"}}},
 		{Method: "GET", Path: "/pets", BasePath: "/v1/", Responses: []openapi.Response{{Status: "200"}}},
 	}})
 
-	require.Equal(t, []any{"equal", "/v1"}, mocks["v1-get-200"].Request.Path)
+	require.Equal(t, []any{"equal", "/v1/"}, mocks["v1-get-200"].Request.Path)
 	require.Equal(t, []any{"equal", "/v1/pets"}, mocks["v1-pets-get-200"].Request.Path)
 }
 
@@ -505,7 +570,8 @@ func TestGenerate_LeavesOutWriteOnlyPropertiesOfASharedSchemaOfAnyName(t *testin
 
 func TestGenerate_LeavesOutAPropertyThatRefersToAWriteOnlySchema(t *testing.T) {
 	// A property's schema may be shared, through any number of references: it is writeOnly when the schema they end
-	// at is. A cycle of references ends nowhere, and doesn't keep the generator from finishing.
+	// at is, or one allOf applies to it. A cycle of references ends nowhere, and doesn't keep the generator from
+	// finishing.
 	mocks := generate(t, &openapi.Document{
 		Defs: map[string]any{
 			"Password": map[string]any{"$ref": "#/$defs/Secret"},
@@ -516,17 +582,19 @@ func TestGenerate_LeavesOutAPropertyThatRefersToAWriteOnlySchema(t *testing.T) {
 		Operations: []openapi.Operation{{
 			Method: "GET", Path: "/a",
 			Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{MediaType: "application/json", Schema: map[string]any{
-				"type": "object", "required": []any{"password", "name"},
+				"type": "object", "required": []any{"password", "token", "name", "nick"},
 				"properties": map[string]any{
 					"password": map[string]any{"$ref": "#/$defs/Password"},
+					"token":    map[string]any{"allOf": []any{map[string]any{"minLength": 1}, map[string]any{"$ref": "#/$defs/Password"}}},
 					"name":     map[string]any{"const": "rex"},
+					"nick":     map[string]any{"allOf": []any{map[string]any{"type": "string"}, map[string]any{"const": "r"}}},
 					"loop":     map[string]any{"$ref": "#/$defs/Loop"},
 				},
 			}}}}},
 		}},
 	})
 
-	require.Equal(t, map[string]any{"name": "rex"}, mocks["a-get-200-json"].Reply.Body)
+	require.Equal(t, map[string]any{"name": "rex", "nick": "r"}, mocks["a-get-200-json"].Reply.Body)
 }
 
 func TestGenerate_FakesWhatHasNoExample(t *testing.T) {

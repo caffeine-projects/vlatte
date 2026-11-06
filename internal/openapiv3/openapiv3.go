@@ -51,9 +51,9 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		return nil, fmt.Errorf("%w: %w", openapi.ErrInvalid, err)
 	}
 
-	r := readRaw(t, location, files)
+	r, nullAt := readRaw(t, location, files)
 
-	if err := validate(ctx, t, r); err != nil {
+	if err := validate(ctx, t, r, nullAt); err != nil {
 		return nil, fmt.Errorf("%w: %w", openapi.ErrInvalid, err)
 	}
 
@@ -131,7 +131,7 @@ func refNames(location *url.URL) openapi3.RefNameResolver {
 
 		file := ""
 		if !local {
-			file = strings.TrimPrefix(target.Path, path.Dir(location.Path)+"/")
+			file = relative(location, target)
 			file = strings.TrimSuffix(file, path.Ext(file))
 		}
 
@@ -156,6 +156,11 @@ func refNames(location *url.URL) openapi3.RefNameResolver {
 	}
 }
 
+// relative returns the path of u, a file of the spec at location, relative to location's folder: pets.yaml.
+func relative(location, u *url.URL) string {
+	return strings.TrimPrefix(u.Path, path.Dir(location.Path)+"/")
+}
+
 // hasComponent reports whether t has a component name in collection, such as schemas.
 func hasComponent(t *openapi3.T, collection, name string) bool {
 	if t.Components == nil {
@@ -168,9 +173,9 @@ func hasComponent(t *openapi3.T, collection, name string) bool {
 }
 
 // validate validates t as kin-openapi does, but for the examples of media types that aren't JSON: OpenAPI writes
-// those as the body itself, such as XML text, which their schema, describing the data, rejects. An example whose
-// value r says is null, which kin-openapi reads as no value, is checked as null.
-func validate(ctx context.Context, t *openapi3.T, r raw) error {
+// those as the body itself, such as XML text, which their schema, describing the data, rejects. An example or a
+// default r says is null, which kin-openapi reads as no value, is checked as null: nullAt says where each is.
+func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string) error {
 	type stashed struct {
 		media    *openapi3.MediaType
 		example  any
@@ -349,6 +354,49 @@ func validate(ctx context.Context, t *openapi3.T, r raw) error {
 		}
 	}
 
+	return validateNulls(t, nullAt, func(mt *openapi3.MediaType) bool {
+		return slices.ContainsFunc(stash, func(st stashed) bool { return st.media == mt })
+	})
+}
+
+// validateNulls checks each example and default of nullAt, which is null, as kin-openapi checks one that isn't,
+// against its schema, in the order of where they are, but those of the media types outside, as validate leaves them.
+func validateNulls(t *openapi3.T, nullAt map[field]string, outside func(mt *openapi3.MediaType) bool) error {
+	opts := []openapi3.SchemaValidationOption{openapi3.MultiErrors()}
+	if t.IsOpenAPI31OrLater() {
+		opts = append(opts, openapi3.EnableJSONSchema2020())
+	}
+
+	byPlace := func(a, b field) int { return cmp.Or(cmp.Compare(nullAt[a], nullAt[b]), cmp.Compare(a.name, b.name)) }
+
+	for _, f := range slices.SortedFunc(maps.Keys(nullAt), byPlace) {
+		var schema *openapi3.SchemaRef
+
+		// A named example is checked by kin-openapi, as validate has it, and the examples of a schema are a list.
+		switch o := f.object.(type) {
+		case *openapi3.MediaType:
+			if !outside(o) {
+				schema = o.Schema
+			}
+		case *openapi3.Parameter:
+			schema = o.Schema
+		case *openapi3.Header:
+			schema = o.Schema
+		case *openapi3.Schema:
+			if f.name != "examples" {
+				schema = &openapi3.SchemaRef{Value: o}
+			}
+		}
+
+		if schema == nil || schema.Value == nil {
+			continue
+		}
+
+		if err := t.ValidateSchemaJSON(schema.Value, nil, opts...); err != nil {
+			return fmt.Errorf("invalid %s of %s: %w", f.name, nullAt[f], err)
+		}
+	}
+
 	return nil
 }
 
@@ -398,9 +446,16 @@ func (c converter) operation(path, method string, common openapi3.Parameters, op
 
 	for _, name := range slices.Sorted(maps.Keys(params)) {
 		p := params[name]
+		examples, schema, mediaType := c.examplesOf(p, p.Example, p.Examples), p.Schema, ""
 
-		examples := c.examplesOf(p, p.Example, p.Examples)
-		if s := p.Schema; s != nil && s.Value != nil {
+		// A parameter has a schema or content, of one media type.
+		if len(p.Content) > 0 {
+			mediaType = slices.Min(slices.Collect(maps.Keys(p.Content)))
+			media := p.Content[mediaType]
+			examples, schema = append(examples, c.examplesOf(media, media.Example, media.Examples)...), media.Schema
+		}
+
+		if s := schema; s != nil && s.Value != nil {
 			examples = append(examples, c.examplesOf(s.Value, s.Value.Example, nil)...)
 
 			var kin any
@@ -417,7 +472,7 @@ func (c converter) operation(path, method string, common openapi3.Parameters, op
 		}
 
 		o.PathParams = append(o.PathParams, openapi.Parameter{
-			Name: name, Style: cmp.Or(p.Style, openapi3.SerializationSimple), Explode: p.Explode != nil && *p.Explode, Examples: examples,
+			Name: name, Style: cmp.Or(p.Style, openapi3.SerializationSimple), Explode: p.Explode != nil && *p.Explode, MediaType: mediaType, Examples: examples,
 		})
 	}
 
@@ -489,7 +544,8 @@ func (c converter) examplesOf(owner, example any, named openapi3.Examples) []ope
 }
 
 // schema translates the schema of ref into JSON Schema 2020-12, or returns nil for no schema. kin-openapi read the
-// schema from JSON, which it writes back, with each integer as the spec writes it.
+// schema from JSON, which it writes back, with each integer as the spec writes it: a $ref as written, with the
+// keywords beside it.
 func (c converter) schema(ref *openapi3.SchemaRef) any {
 	if ref == nil {
 		return nil
@@ -498,7 +554,10 @@ func (c converter) schema(ref *openapi3.SchemaRef) any {
 	data, _ := json.Marshal(ref)
 	v, _ := value.DecodeJSON(data)
 
-	if ref.Value != nil {
+	switch {
+	case ref.Ref != "":
+		v = exact(v, c.raw[field{object: ref}])
+	case ref.Value != nil:
 		v = exact(v, c.raw[field{object: ref.Value}])
 	}
 

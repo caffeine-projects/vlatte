@@ -247,28 +247,110 @@ func TestLoad_TakesANullExampleWhereverTheSpecPutsIt(t *testing.T) {
 	}
 }
 
-func TestLoad_FailsOnANullExampleItsSchemaRejects(t *testing.T) {
-	// null is a value, which its schema checks as any other.
-	data := []byte(`
+func TestLoad_ChecksANullExampleAgainstItsSchema(t *testing.T) {
+	// null is a value, which its schema checks as any other, wherever the spec writes it: kin-openapi reads it as no
+	// value, which it doesn't check. A default is checked as an example.
+	tests := []struct {
+		name  string
+		place string // where the null is, with %s for the type of its schema
+		error string
+	}{
+		{
+			name:  "a named example",
+			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: %s}, examples: {none: {value: null}}}}}}",
+			error: `example none: validation failed due to: at '': got null, want object`,
+		},
+		{
+			name:  "the example of a media type",
+			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: %s}, example: null}}}}",
+			error: `invalid example of spec.yaml#/paths/~1pets/get/responses/200/content/application~1json: `,
+		},
+		{
+			name:  "the example of a parameter",
+			place: "parameters: [{name: q, in: query, schema: {type: %s}, example: null}]\n      responses: {\"204\": {description: OK}}",
+			error: `invalid example of spec.yaml#/paths/~1pets/get/parameters/0: `,
+		},
+		{
+			name:  "the example of a header",
+			place: "responses: {\"204\": {description: OK, headers: {X-A: {schema: {type: %s}, example: null}}}}",
+			error: `invalid example of spec.yaml#/paths/~1pets/get/responses/204/headers/X-A: `,
+		},
+		{
+			name:  "the example of a schema",
+			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {$ref: \"#/components/schemas/S\"}}}}}\ncomponents: {schemas: {S: {type: %s, example: null}}}",
+			error: `invalid example of spec.yaml#/components/schemas/S: `,
+		},
+		{
+			name:  "the default of a schema",
+			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {properties: {a: {type: %s, default: null}}}}}}}",
+			error: `invalid default of spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/schema/properties/a: `,
+		},
+		{
+			name: "the example of a schema beside a $ref",
+			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {$ref: \"#/components/schemas/Any\", properties: {a: {type: %s, example: null}}}}}}}" +
+				"\ncomponents: {schemas: {Any: {}}}",
+			error: `invalid example of spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/schema/properties/a: `,
+		},
+		// An example outside JSON is the body, which its schema doesn't describe, and examples is a list.
+		{
+			name:  "the example of a media type outside JSON",
+			place: "responses: {\"200\": {description: OK, content: {text/plain: {schema: {type: %s}, example: null}}}}",
+		},
+		{
+			name:  "the examples of a schema",
+			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: %s, examples: null}}}}}",
+		},
+	}
+
+	nop := zerolog.Nop()
+
+	for _, tt := range tests {
+		spec := func(types string) map[string]string {
+			return map[string]string{"spec.yaml": "openapi: 3.1.0\ninfo: {title: Pets, version: \"1\"}\npaths:\n  /pets:\n    get:\n      " +
+				fmt.Sprintf(tt.place, types) + "\n"}
+		}
+
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadFiles(t, spec("object"), &nop)
+			if tt.error == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.ErrorIs(t, err, openapi.ErrInvalid)
+			require.ErrorContains(t, err, tt.error)
+			require.ErrorContains(t, err, "got null, want object")
+		})
+
+		t.Run(tt.name+" its schema allows", func(t *testing.T) {
+			_, err := loadFiles(t, spec(`[object, "null"]`), &nop)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestLoad_NamesTheFirstNullItsSchemaRejectsOnEveryRun(t *testing.T) {
+	// Of the nulls a spec gets wrong, the one first in it is named, the same on every run.
+	files := map[string]string{"spec.yaml": `
 openapi: 3.1.0
 info: {title: Pets, version: "1"}
 paths:
   /pets:
     get:
+      parameters: [{name: q, in: query, schema: {type: object}, example: null}]
       responses:
         "200":
           description: OK
-          content:
-            application/json:
-              schema: {type: object}
-              examples:
-                none: {value: null}
-`)
+          headers: {X-A: {schema: {type: object}, example: null}}
+          content: {application/json: {schema: {type: object}, example: null}}
+`}
 
-	log := zerolog.Nop()
-	_, err := openapiv3.Load(t.Context(), data, &url.URL{Path: filepath.ToSlash(filepath.Join(t.TempDir(), "spec.yaml"))}, read(t), &log)
-	require.ErrorIs(t, err, openapi.ErrInvalid)
-	require.ErrorContains(t, err, `example none: validation failed due to: at '': got null, want object`)
+	nop := zerolog.Nop()
+
+	for range 10 {
+		_, err := loadFiles(t, files, &nop)
+		require.ErrorContains(t, err, `invalid example of spec.yaml#/paths/~1pets/get/parameters/0: `)
+	}
 }
 
 func TestLoad_ReadsAReferenceToAnythingOfASpec(t *testing.T) {
@@ -341,8 +423,8 @@ components:
 
 func TestLoad_ReadsTheNumbersOfASchemaAsTheSpecWritesThem(t *testing.T) {
 	// A fake value comes from its schema's const, enum or default: 9007199254740993 read as a float64 is another
-	// value, and the largest int64 one past it. Shared schemas and those of other files alike. The largest was found
-	// by TestPropLoad_AValueIsTheSameWhereverItsReferencesLead.
+	// value, and the largest int64 one past it. Shared schemas, those of other files and keywords beside a $ref alike.
+	// The largest was found by TestPropLoad_AValueIsTheSameWhereverItsReferencesLead.
 	doc := load(t, map[string]string{
 		"spec.yaml": `
 openapi: 3.1.0
@@ -362,9 +444,17 @@ paths:
                   b: {$ref: "#/components/schemas/B"}
                   c: {$ref: "c.yaml"}
                   d: {const: 9223372036854775807}
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/E", const: 9007199254740993}
 components:
   schemas:
     B: {enum: [9007199254740995], default: 9007199254740997}
+    E: {type: integer}
+    F: {$ref: "#/components/schemas/E", const: 9007199254740993}
+    G: {$ref: "#/components/schemas/E", default: 9007199254740993}
 `,
 		"c.yaml": "{type: array, items: {const: {n: 9007199254740999}}}\n",
 	})
@@ -373,6 +463,10 @@ components:
 	props := schema["properties"].(map[string]any)
 	require.Equal(t, map[string]any{"const": int64(9007199254740993)}, props["a"])
 	require.Equal(t, map[string]any{"const": int64(math.MaxInt64)}, props["d"])
+	// A shared schema's $ref is resolved, with the keywords beside it.
+	require.Equal(t, map[string]any{"$ref": "#/$defs/E", "const": int64(9007199254740993)}, doc.Operations[0].Responses[1].Content[0].Schema)
+	require.Equal(t, map[string]any{"type": "integer", "allOf": []any{map[string]any{"const": int64(9007199254740993)}}}, doc.Defs["F"])
+	require.Equal(t, map[string]any{"type": "integer", "default": int64(9007199254740993)}, doc.Defs["G"])
 	require.Equal(t, map[string]any{"enum": []any{int64(9007199254740995)}, "default": int64(9007199254740997)}, doc.Defs["B"])
 
 	c := strings.TrimPrefix(props["c"].(map[string]any)["$ref"].(string), "#/$defs/")
@@ -397,12 +491,45 @@ paths:
                 type: object
                 properties:
                   a: {const: null, default: null, example: null}
+components:
+  schemas:
+    Any: {}
+    NullConst: {$ref: "#/components/schemas/Any", const: null}
 `})
 
 	require.Equal(t, map[string]any{
 		"type":       "object",
 		"properties": map[string]any{"a": map[string]any{"const": nil, "default": nil, "example": nil}},
 	}, doc.Operations[0].Responses[0].Content[0].Schema)
+
+	// kin-openapi resolves the $ref of a shared schema, with the keywords beside it, which assert, in an allOf entry:
+	// one it leaves out when they are null. Found by TestPropLoad_AValueIsTheSameWhereverItsReferencesLead.
+	require.Equal(t, map[string]any{"allOf": []any{map[string]any{"const": nil}}}, doc.Defs["NullConst"])
+}
+
+func TestLoad_KeepsANullBesideARefToItsOwnSchema(t *testing.T) {
+	// A null beside a $ref is the schema's own, not that of the schema an allOf of the referenced one names:
+	// kin-openapi adds no allOf entry for keywords beside a $ref that are all null.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Nulls, version: "1"}
+paths:
+  /p:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/T", const: null}
+components:
+  schemas:
+    Base: {type: object}
+    T: {allOf: [{$ref: "#/components/schemas/Base"}]}
+`})
+
+	require.Equal(t, map[string]any{"type": "object"}, doc.Defs["Base"])
+	require.Equal(t, map[string]any{"$ref": "#/$defs/T", "const": nil}, doc.Operations[0].Responses[0].Content[0].Schema)
 }
 
 func TestLoad_WarnsWhenServersHaveDifferentPaths(t *testing.T) {
@@ -439,6 +566,66 @@ paths:
 		{Name: "id", Style: "matrix"},
 		{Name: "tags", Style: "label", Explode: true},
 	}, doc.Operations[0].PathParams)
+}
+
+func TestLoad_ReadsTheExamplesOfAPathParameterWithContent(t *testing.T) {
+	// A parameter with content is written in its media type: its own examples, then its media type's, then its
+	// schema's, are its values, as the spec writes them. The values beside a $ref to a schema are its own.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets/{id}/{tag}:
+    get:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          example: 9007199254740991
+          content:
+            application/json:
+              schema: {type: integer, examples: [9007199254740995]}
+              example: 9007199254740993
+        - name: tag
+          in: path
+          required: true
+          content:
+            text/plain:
+              schema: {$ref: "#/components/schemas/Tag", example: own}
+              examples:
+                a: {value: a}
+      responses: {"200": {description: OK}}
+components:
+  schemas:
+    Tag: {type: string, example: shared}
+`})
+
+	require.Equal(t, []openapi.Parameter{
+		{Name: "id", Style: "simple", MediaType: "application/json", Examples: []openapi.Example{
+			{Value: int64(9007199254740991)}, {Value: int64(9007199254740993)}, {Value: int64(9007199254740995)},
+		}},
+		{Name: "tag", Style: "simple", MediaType: "text/plain", Examples: []openapi.Example{{Name: "a", Value: "a"}, {Value: "own"}}},
+	}, doc.Operations[0].PathParams)
+}
+
+func TestLoad_IgnoresTheKeywordsBesideARefInOpenAPI30(t *testing.T) {
+	// In OpenAPI 3.0 a $ref replaces its object: what is beside it is no part of the schema.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.0.3
+info: {title: Pets, version: "1"}
+paths:
+  /pets/{tag}:
+    get:
+      parameters:
+        - {name: tag, in: path, required: true, schema: {$ref: "#/components/schemas/Tag", example: own, default: null, maxLength: 3}}
+      responses: {"200": {description: OK}}
+components:
+  schemas:
+    Tag: {type: string, example: shared}
+`})
+
+	require.Equal(t, []openapi.Example{{Value: "shared"}}, doc.Operations[0].PathParams[0].Examples)
+	require.Equal(t, map[string]any{"type": "string", "example": "shared"}, doc.Defs["Tag"])
 }
 
 func TestLoad_PutsAnOperationUnderItsServersElseItsPathsElseTheDocuments(t *testing.T) {
@@ -672,10 +859,11 @@ func TestPropLoad_AValueIsTheSameWhereverItsReferencesLead(t *testing.T) {
 	// R1: a parameter, a response, a named example and a schema mean the same inline or behind any chain of $refs,
 	// to the spec's components, another file, a file in a sub folder, a whole file, or a parameter of another path,
 	// each relative to the file that holds it: every value they hold, integers past 2^53 and nulls included, is the
-	// spec's own.
+	// spec's own, and so is a keyword beside a $ref.
 	rapid.Check(t, func(rt *rapid.T) {
 		s := newDrawnSpec()
 		v1, v2, v3, v4 := genJSON(2).Draw(rt, "example"), genJSON(2).Draw(rt, "header"), genJSON(2).Draw(rt, "parameter"), genJSON(2).Draw(rt, "const")
+		v5, v6 := genJSON(2).Draw(rt, "const beside a $ref"), genJSON(2).Draw(rt, "const beside the $ref of a shared schema")
 
 		paramAt := s.draw(rt, "parameters")
 		param := s.put(paramAt, "spec.yaml", map[string]any{
@@ -690,8 +878,11 @@ func TestPropLoad_AValueIsTheSameWhereverItsReferencesLead(t *testing.T) {
 			"content": map[string]any{
 				"application/json":   map[string]any{"examples": map[string]any{"e": s.put(s.draw(rt, "examples"), holder, map[string]any{"value": v1})}},
 				"application/x+json": map[string]any{"schema": s.put(s.draw(rt, "schemas"), holder, map[string]any{"const": v4})},
+				"application/y+json": map[string]any{"schema": s.beside(rt, holder, v5)},
 			},
 		})
+		s.components("schemas")["Beside"] = s.beside(rt, "spec.yaml", v6)
+		s.components("schemas")["Empty"] = make(map[string]any)
 
 		s.paths()["/x/{id}"] = map[string]any{"get": map[string]any{"parameters": []any{param}, "responses": map[string]any{"200": response}}}
 
@@ -703,10 +894,13 @@ func TestPropLoad_AValueIsTheSameWhereverItsReferencesLead(t *testing.T) {
 
 		res := op.Responses[0]
 		require.Equal(rt, []openapi.Header{{Name: "X-V", Schema: make(map[string]any), Examples: []openapi.Example{{Value: normal(rt, v2)}}}}, res.Headers)
-		require.Len(rt, res.Content, 2)
+		require.Len(rt, res.Content, 3)
 		require.Equal(rt, openapi.Content{MediaType: "application/json", Examples: []openapi.Example{{Name: "e", Value: normal(rt, v1)}}}, res.Content[0])
 		require.Equal(rt, "application/x+json", res.Content[1].MediaType)
 		require.Equal(rt, map[string]any{"const": normal(rt, v4)}, followDefs(rt, doc, res.Content[1].Schema))
+		require.Equal(rt, normal(rt, v5), besideConst(rt, res.Content[2].Schema))
+		require.Equal(rt, normal(rt, v6), besideConst(rt, doc.Defs["Beside"]))
+		require.Equal(rt, make(map[string]any), doc.Defs["Empty"])
 	})
 }
 
@@ -799,6 +993,27 @@ func load(t *testing.T, files map[string]string) *openapi.Document {
 func loadWithWarnings(t *testing.T, files map[string]string) (*openapi.Document, []map[string]any) {
 	t.Helper()
 
+	var logs bytes.Buffer
+
+	log := zerolog.New(&logs)
+	doc, err := loadFiles(t, files, &log)
+	require.NoError(t, err)
+
+	var entries []map[string]any
+
+	for line := range bytes.Lines(logs.Bytes()) {
+		var e map[string]any
+		require.NoError(t, json.Unmarshal(line, &e))
+		entries = append(entries, e)
+	}
+
+	return doc, entries
+}
+
+// loadFiles writes files to a folder and loads its spec.yaml, which logs on log.
+func loadFiles(t *testing.T, files map[string]string, log *zerolog.Logger) (*openapi.Document, error) {
+	t.Helper()
+
 	dir := t.TempDir()
 	for name, content := range files {
 		path := filepath.Join(dir, filepath.FromSlash(name))
@@ -814,21 +1029,7 @@ func loadWithWarnings(t *testing.T, files map[string]string) (*openapi.Document,
 	data, err := r(loc)
 	require.NoError(t, err)
 
-	var logs bytes.Buffer
-
-	log := zerolog.New(&logs)
-	doc, err := openapiv3.Load(t.Context(), data, loc, r, &log)
-	require.NoError(t, err)
-
-	var entries []map[string]any
-
-	for line := range bytes.Lines(logs.Bytes()) {
-		var e map[string]any
-		require.NoError(t, json.Unmarshal(line, &e))
-		entries = append(entries, e)
-	}
-
-	return doc, entries
+	return openapiv3.Load(t.Context(), data, loc, r, log)
 }
 
 func read(t *testing.T) func(u *url.URL) ([]byte, error) {
@@ -1002,6 +1203,44 @@ func (s *drawnSpec) put(places []place, from string, obj map[string]any) any {
 	}
 
 	return v
+}
+
+// beside places a schema, empty or an allOf of the shared schema Empty, and returns what refers to it from the file
+// from, with const c: beside its $ref, when it has one.
+func (s *drawnSpec) beside(t *rapid.T, from string, c any) map[string]any {
+	at := s.draw(t, "schemas")
+
+	target := make(map[string]any)
+	if rapid.Bool().Draw(t, "allOf") {
+		empty := place{file: "spec.yaml", pointer: "/components/schemas/Empty"}
+		target["allOf"] = []any{map[string]any{"$ref": relRef(s.holder(at, from), empty)}}
+	}
+
+	m := s.put(at, from, target).(map[string]any)
+	m["const"] = c
+
+	return m
+}
+
+// besideConst returns the const of schema, which beside wrote: beside its $ref, or, where kin-openapi resolved the
+// $ref, its last allOf entry, after the target's own.
+func besideConst(t require.TestingT, schema any) any {
+	m, _ := schema.(map[string]any)
+	if c, ok := m["const"]; ok {
+		return c
+	}
+
+	all, _ := m["allOf"].([]any)
+	require.NotEmpty(t, all, "%v", schema)
+
+	for _, own := range all[:len(all)-1] {
+		require.Equal(t, map[string]any{"$ref": "#/$defs/Empty"}, own, "%v", schema)
+	}
+
+	c, ok := all[len(all)-1].(map[string]any)["const"]
+	require.True(t, ok, "%v", schema)
+
+	return c
 }
 
 // relRef returns the $ref the file from writes for p.

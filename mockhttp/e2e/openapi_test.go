@@ -249,7 +249,8 @@ paths:
 }
 
 func TestOpenAPI_AReferencedWriteOnlyPropertyIsLeftOutOfAResponse(t *testing.T) {
-	// A writeOnly property is never in a response, whether its schema is inline or shared.
+	// A writeOnly property is never in a response, whether its schema is inline, shared, or a schema allOf
+	// applies to it.
 	spec := `
 openapi: 3.1.0
 info: {title: Write only reference, version: "1"}
@@ -263,9 +264,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [password, name]
+                required: [password, token, name]
                 properties:
                   password: {$ref: '#/components/schemas/Password'}
+                  token:
+                    allOf: [{$ref: '#/components/schemas/Secret'}]
                   name: {type: string, const: rex}
 components:
   schemas:
@@ -436,7 +439,8 @@ paths:
 
 func TestOpenAPI_AnEncodedLiteralOfAPathMatchesTheRequestThatSendsIt(t *testing.T) {
 	// The server compares the path decoded: /hello%20world in a spec is the path a client sends as /hello%20world,
-	// in a static path, a template and a path example alike. A % that starts no escape is a percent sign.
+	// in a static path, a template and a path example alike. A % that starts no escape is a percent sign, even beside
+	// one that does.
 	spec := `
 openapi: 3.1.0
 info: {title: Encoded literals, version: "1"}
@@ -473,6 +477,22 @@ paths:
           description: OK
           content:
             text/plain: {example: half}
+  /rate/50%/{id}:
+    get:
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain: {example: half-of-one}
+  /off%2010%:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain: {example: ten-off}
 `
 	m := serveSpec(t, spec)
 
@@ -486,6 +506,8 @@ paths:
 		{path: "/a%20b/2", mock: "a-20b-_id-get-200-text", body: "example"},
 		{path: "/c%20d/2.json", mock: "c-20d-_id-json-get-200-text", body: "inside"},
 		{path: "/rate/50%25", mock: "rate-50-get-200-text", body: "half"},
+		{path: "/rate/50%25/example", mock: "rate-50-_id-get-200-text", body: "half-of-one"},
+		{path: "/off%2010%25", mock: "off-2010-get-200-text", body: "ten-off"},
 	}
 
 	for _, tt := range tests {
@@ -499,6 +521,69 @@ paths:
 
 	status, _, _ := call(t, m, http.MethodGet, "/hello%2520world", "text/plain")
 	require.Equal(t, http.StatusTeapot, status)
+}
+
+func TestOpenAPI_TheRootPathIsUnderTheServersPathWithItsSlash(t *testing.T) {
+	// A path of the spec is appended to its server's: / under https://example.com/v1 is /v1/, and /v1 is no path the
+	// spec declares.
+	spec := `
+openapi: 3.1.0
+info: {title: Root, version: "1"}
+servers: [{url: "https://example.com/v1"}]
+paths:
+  /:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain: {example: home}
+`
+	m := serveSpec(t, spec)
+
+	status, _, body := call(t, m, http.MethodGet, "/v1/", "text/plain")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "home", body)
+
+	status, _, _ = call(t, m, http.MethodGet, "/v1", "text/plain")
+	require.Equal(t, http.StatusTeapot, status)
+}
+
+func TestOpenAPI_APathExampleOfAParameterWithContentIsWrittenInItsMediaType(t *testing.T) {
+	// A parameter with content is written in its media type: the JSON string "rex" is the value the example answers,
+	// and any other the 404.
+	spec := `
+openapi: 3.1.0
+info: {title: Content path example, version: "1"}
+paths:
+  /pets/{id}:
+    get:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          content:
+            application/json:
+              schema: {type: string}
+              example: rex
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain: {example: pet}
+        "404":
+          description: Missing
+`
+	m := serveSpec(t, spec)
+
+	status, mock, body := call(t, m, http.MethodGet, "/pets/%22rex%22", "text/plain")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "pets-_id-get-200-text-example", mock)
+	require.Equal(t, "pet", body)
+
+	status, mock, body = call(t, m, http.MethodGet, "/pets/%22other%22", "text/plain")
+	require.Equal(t, http.StatusNotFound, status, body)
+	require.Equal(t, "pets-_id-get-404", mock)
 }
 
 func TestOpenAPI_ANullExampleIsTheJSONNull(t *testing.T) {
@@ -554,7 +639,8 @@ components:
 
 func TestOpenAPI_AnIntegerPast2To53IsServedExactly(t *testing.T) {
 	// A float64 holds every integer up to 2^53 only: 9007199254740993 read as one is 9007199254740992, another
-	// resource, in the path, a header and a body alike, through a reference, and as the const a fake value takes.
+	// resource, in the path, a header and a body alike, through a reference, and as the const a fake value takes,
+	// beside a $ref too.
 	spec := `{
   "openapi": "3.1.0",
   "info": {"title": "Big integers", "version": "1"},
@@ -562,6 +648,11 @@ func TestOpenAPI_AnIntegerPast2To53IsServedExactly(t *testing.T) {
     "/const": {
       "get": {
         "responses": {"200": {"description": "OK", "content": {"application/json": {"schema": {"const": 9007199254740993}}}}}
+      }
+    },
+    "/sibling": {
+      "get": {
+        "responses": {"200": {"description": "OK", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Integer", "const": 9007199254740993}}}}}
       }
     },
     "/ids/{id}": {
@@ -578,7 +669,10 @@ func TestOpenAPI_AnIntegerPast2To53IsServedExactly(t *testing.T) {
       }
     }
   },
-  "components": {"examples": {"ID": {"value": {"id": 9007199254740993}}}}
+  "components": {
+    "examples": {"ID": {"value": {"id": 9007199254740993}}},
+    "schemas": {"Integer": {"type": "integer"}}
+  }
 }`
 	m := serveSpec(t, spec)
 
@@ -590,9 +684,11 @@ func TestOpenAPI_AnIntegerPast2To53IsServedExactly(t *testing.T) {
 	res, body = respond(t, m, http.MethodGet, "/ids/9007199254740992", "application/json")
 	require.Equal(t, http.StatusNotFound, res.StatusCode, body)
 
-	res, body = respond(t, m, http.MethodGet, "/const", "application/json")
-	require.Equal(t, http.StatusOK, res.StatusCode, body)
-	require.Equal(t, "9007199254740993", body)
+	for _, path := range []string{"/const", "/sibling"} {
+		res, body = respond(t, m, http.MethodGet, path, "application/json")
+		require.Equal(t, http.StatusOK, res.StatusCode, body)
+		require.Equal(t, "9007199254740993", body, path)
+	}
 }
 
 func TestOpenAPI_AResponseHeaderIsWrittenAsItsSpecSays(t *testing.T) {

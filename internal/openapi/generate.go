@@ -185,7 +185,12 @@ func (g *generator) operation(op Operation) {
 
 	primary := primaryResponse(op.Responses)
 	notFound := findResponse(op.Responses, "404")
-	examples := pathExamples(op)
+
+	// Only the success answers the examples: without one, they make no mock to warn on.
+	var examples []pathExample
+	if primary != nil {
+		examples = g.pathExamples(op)
+	}
 	base := Mock{Route: route, Method: op.Method, Name: cmp.Or(op.Summary, op.Method+" "+route), Request: request}
 
 	for _, r := range op.Responses {
@@ -541,32 +546,41 @@ type pathExample struct {
 }
 
 // pathExamples returns the concrete paths of op that examples of its path parameters give: the nth path takes the
-// nth example of each parameter, or its first when it has fewer. An operation with a parameter without examples has
-// none.
-func pathExamples(op Operation) []pathExample {
+// nth example of each parameter, or its last when it has fewer. An operation with a parameter without examples a
+// client can write has none.
+func (g *generator) pathExamples(op Operation) []pathExample {
 	if len(op.PathParams) == 0 {
 		return nil
 	}
 
+	// The examples of each parameter as a client writes them in the path, and their names.
+	written := make([][]pathExample, len(op.PathParams))
+
 	n := 0
-	for _, p := range op.PathParams {
-		if len(p.Examples) == 0 {
+	for i, p := range op.PathParams {
+		for _, ex := range p.Examples {
+			if v, ok := g.paramValue(p, ex.Value); ok {
+				written[i] = append(written[i], pathExample{path: v, name: ex.Name})
+			}
+		}
+
+		if len(written[i]) == 0 {
 			return nil
 		}
 
-		n = max(n, len(p.Examples))
+		n = max(n, len(written[i]))
 	}
 
 	out := make([]pathExample, n)
 	for i := range n {
 		values := make(map[string]string, len(op.PathParams))
 
-		for _, p := range op.PathParams {
-			ex := p.Examples[min(i, len(p.Examples)-1)]
-			values["{"+p.Name+"}"] = pathValue(p, ex.Value)
+		for j, p := range op.PathParams {
+			ex := written[j][min(i, len(written[j])-1)]
+			values["{"+p.Name+"}"] = ex.path
 
 			if len(op.PathParams) == 1 {
-				out[i].name = ex.Name
+				out[i].name = ex.name
 			}
 		}
 
@@ -581,6 +595,16 @@ func pathExamples(op Operation) []pathExample {
 	}
 
 	return out
+}
+
+// paramValue returns v, a value of path parameter p, as a client writes it in the path: in its media type, as
+// [generator.mediaValue] writes it, or in its style.
+func (g *generator) paramValue(p Parameter, v any) (string, bool) {
+	if p.MediaType == "" {
+		return pathValue(p, v), true
+	}
+
+	return g.mediaValue("path parameter "+p.Name, p.MediaType, v)
 }
 
 // pathValue returns v, a value of parameter p, as a client writes it in a path, in the style of p, as RFC 6570, which
@@ -693,7 +717,7 @@ func routeRequest(method, base, path string) Request {
 	}
 
 	if whole {
-		r.PathTemplate = joinPath((&url.URL{Path: base}).EscapedPath(), path)
+		r.PathTemplate = joinPath((&url.URL{Path: base}).EscapedPath(), escapePercent(path))
 		return r
 	}
 
@@ -721,28 +745,38 @@ func fillPath(path string, literal, param func(s string) string) string {
 	return b.String()
 }
 
-// decoded returns s, text of a path of the spec, decoded, as the server compares a path, or as written when it holds
-// an invalid escape.
+// decoded returns s, text of a path of the spec, decoded, as the server compares a path.
 func decoded(s string) string {
-	if d, err := url.PathUnescape(s); err == nil {
-		return d
+	// Every % starts an escape once escapePercent is done.
+	d, _ := url.PathUnescape(escapePercent(s))
+
+	return d
+}
+
+// escapePercent returns s, text of a path of the spec, with each % that starts no escape, such as that of 50%, escaped
+// as %25: a percent sign.
+func escapePercent(s string) string {
+	var b strings.Builder
+
+	for i := range len(s) {
+		b.WriteByte(s[i])
+
+		if s[i] == '%' && (i+2 >= len(s) || !isHex(s[i+1]) || !isHex(s[i+2])) {
+			b.WriteString("25")
+		}
 	}
 
-	return s
+	return b.String()
+}
+
+// isHex reports whether c is a hexadecimal digit.
+func isHex(c byte) bool {
+	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
 }
 
 // joinPath joins a base path and a path of the spec.
 func joinPath(base, path string) string {
-	base = strings.TrimSuffix(base, "/")
-	if base == "" {
-		return path
-	}
-
-	if path == "/" {
-		return base
-	}
-
-	return base + path
+	return strings.TrimSuffix(base, "/") + path
 }
 
 // text returns v, a value of the spec or a fake one, which JSON holds, as text: a string as is, anything else as
@@ -757,20 +791,27 @@ func text(v any) string {
 	return string(b)
 }
 
-// headerValue returns v as the value of header hd: in its media type, as setBody writes a body, or in OpenAPI's
-// simple style. A list or an object in a media type that isn't JSON is left out, with a warning.
+// headerValue returns v as the value of header hd: in its media type, as [generator.mediaValue] writes it, or in
+// OpenAPI's simple style.
 func (g *generator) headerValue(hd Header, v any) (string, bool) {
-	switch {
-	case hd.MediaType == "":
+	if hd.MediaType == "" {
 		return pathValue(Parameter{Name: hd.Name, Style: "simple", Explode: hd.Explode}, v), true
-	case IsJSON(hd.MediaType):
+	}
+
+	return g.mediaValue("header "+hd.Name, hd.MediaType, v)
+}
+
+// mediaValue returns v, the value of what, such as header X-Rate, in mediaType, as setBody writes a body. A list or an
+// object in a media type that isn't JSON is left out, with a warning.
+func (g *generator) mediaValue(what, mediaType string, v any) (string, bool) {
+	if IsJSON(mediaType) {
 		b, _ := json.Marshal(v, json.Deterministic(true))
 		return string(b), true
 	}
 
 	switch v.(type) {
 	case map[string]any, []any:
-		g.warnf("header %s is data, not text: left out: give a string example", hd.Name)
+		g.warnf("%s is data, not text: left out: give a string example", what)
 		return "", false
 	}
 
@@ -839,11 +880,16 @@ func stripWriteOnly(v any, defs map[string]any) any {
 	}
 }
 
-// writeOnly reports whether schema v is writeOnly, or refers to a schema of defs that is. seen holds the names of
-// the schemas the references followed so far, which a cycle comes back to.
+// writeOnly reports whether schema v is writeOnly, or refers to a schema of defs that is, or allOf applies one to it.
+// seen holds the names of the schemas the references followed so far, which a cycle comes back to.
 func writeOnly(v any, defs map[string]any, seen []string) bool {
 	s, _ := v.(map[string]any)
 	if s["writeOnly"] == true {
+		return true
+	}
+
+	all, _ := s["allOf"].([]any)
+	if slices.ContainsFunc(all, func(b any) bool { return writeOnly(b, defs, seen) }) {
 		return true
 	}
 

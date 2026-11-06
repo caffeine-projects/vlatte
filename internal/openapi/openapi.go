@@ -84,6 +84,10 @@ type Parameter struct {
 	// Explode tells, for a list or an object, whether each item is written apart, as Style does it.
 	Explode bool
 
+	// MediaType is the media type its value is written in, such as application/json, in place of Style, or "" for
+	// none.
+	MediaType string
+
 	// Examples are values of the parameter, the parameter's own examples first, then its schema's.
 	Examples []Example
 }
