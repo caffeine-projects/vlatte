@@ -95,7 +95,6 @@ func Decode(v config.Value) (vlatte.Delay, error) {
 		}
 	}
 
-	// Schema declarations use snake_case. Adapt this one WireMock-compatible external parameter locally.
 	obj = maps.Clone(obj)
 	if _, present := obj["max_value"]; present {
 		problems = append(problems, config.Problem{

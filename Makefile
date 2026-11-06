@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+.SHELLFLAGS := -euo pipefail -c
 .ONESHELL:
 .DEFAULT_GOAL := help
 
@@ -6,19 +8,12 @@
 
 include examples/Makefile
 
-# keep in sync with the golangci-lint-action version in .github/workflows/ci.yml
-GOLANGCI_LINT_VERSION ?= v2.14.0
+GOLANGCI_LINT_VERSION ?= v2.14.0 # keep in sync with the golangci-lint-action version in .github/workflows/ci.yml
+GORELEASER_VERSION ?= v2.20.0 # keep in sync with the goreleaser-action version in .github/workflows/release.yml and ci.yml
+GOVULNCHECK_VERSION ?= v1.9.0 # keep in sync with the govulncheck commit in .github/workflows/security.yml
+FUZZTIME ?= 30s # time per target for make fuzz
 
-# keep in sync with the goreleaser-action version in .github/workflows/release.yml and ci.yml
-GORELEASER_VERSION ?= v2.20.0
-
-# keep in sync with the govulncheck commit in .github/workflows/security.yml
-GOVULNCHECK_VERSION ?= v1.9.0
-
-# time per target for make fuzz
-FUZZTIME ?= 30s
-
-export
+export GORELEASER_VERSION GOLANGCI_LINT_VERSION GOVULNCHECK_VERSION FUZZTIME
 
 .PHONY: test
 test: ## run tests

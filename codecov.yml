@@ -10,3 +10,4 @@ coverage:
 ignore:
   - "mockhttp/e2e/internal/testcert" # test-only certificate generator
   - "mockgrpc/internal/protobuf" # generated test-only protobuf
+  - "examples" # docs examples, with generated protobuf

@@ -41,59 +41,11 @@ const toolbox = [
 
 ::: code-group
 
-```go [Go test]
-func TestCharge(t *testing.T) {
-	m := mockhttp.MustNew()
-	m.MustStart()
-	t.Cleanup(m.Close)
+<<< @/../examples/02-http-payments/payments/client_test.go#example{go} [Go test]
 
-	paid := m.MustMock(mockhttp.Postf("/payments").
-		Header("Authorization", match.HasPrefix("Bearer ")).
-		Body(match.JSONPath("$.amount", match.GreaterThan(0))).
-		Reply(mockhttp.Created().
-			JSON(map[string]any{"id": "pay_1"})))
+<<< @/../examples/03-grpc-greeter/greeter_test.go#example{go} [gRPC]
 
-	client := payments.NewClient(m.URL(), "token")
-	_, err := client.Charge(t.Context(), 42)
-
-	require.NoError(t, err)
-	paid.AssertCalled(t)
-}
-```
-
-```go [gRPC]
-func TestGreeter(t *testing.T) {
-	m := mockgrpc.MustNew()
-	m.MustStart()
-	t.Cleanup(m.Close)
-
-	m.MustMock(mockgrpc.Method("greeter.Greeter/SayHello").
-		Field("name", match.HasPrefix("a")).
-		Reply(mockgrpc.Message(&pb.HelloReply{Message: "hi ann"})))
-
-	client := pb.NewGreeterClient(m.MustDial())
-	res, err := client.SayHello(t.Context(), &pb.HelloRequest{Name: "ann"})
-
-	require.NoError(t, err)
-	require.Equal(t, "hi ann", res.GetMessage())
-}
-```
-
-```yaml [Mock file]
-# testdata/vlatte/_mocks/payments_mock.yaml
-request:
-  method: POST
-  path: /payments
-  header:
-    authorization: [hasprefix, "Bearer "]
-  body: [jsonpath, $.amount, [gt, 0]]
-response:
-  status: 201
-  header:
-    content-type: application/json
-  body:
-    id: pay_1
-```
+<<< @/../examples/02-http-payments/testdata/vlatte/_mocks/payments_mock.yaml{yaml} [Mock file]
 
 ```sh [CLI]
 vlatte --https --addr=:8443
@@ -102,7 +54,7 @@ curl -k https://localhost:8443/payments \
   -H 'Authorization: Bearer token' \
   -H 'Content-Type: application/json' \
   -d '{"amount": 42}'
-# 201 {"id":"pay_1"}
+# {"id":"pay_1"}
 ```
 
 :::
@@ -136,7 +88,7 @@ services:
     image: ghcr.io/caffeine-projects/vlatte
     ports: ["8080:8080"]
     volumes:
-      - ./mocks:/vlatte/testdata/vlatte/_mocks:ro
+      - ./testdata/vlatte/_mocks:/vlatte/testdata/vlatte/_mocks:ro
 ```
 
 :::
@@ -238,7 +190,13 @@ Give your agent the documentation index at [`/llms.txt`](/llms.txt), or the focu
 ::: code-group
 
 ```json [Agent settings]
-{"mcpServers": {"vlatte": {"command": "vlatte", "args": ["mcp", "--mock-files=mocks/*.yaml"]}}}
+{
+  "mcpServers": {
+    "vlatte": {
+        "command": "vlatte", "args": ["mcp", "--mock-files=mocks/*.yaml"]
+    }
+  }
+}
 ```
 
 ```go [Go]

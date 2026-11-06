@@ -1,0 +1,13 @@
+# testdata/vlatte/_mocks/payments_mock.yaml
+request:
+  method: POST
+  path: /payments
+  header:
+    authorization: [hasprefix, "Bearer "]
+  body: [jsonpath, $.amount, [gt, 0]]
+response:
+  status: 201
+  header:
+    content-type: application/json
+  body:
+    id: pay_1
