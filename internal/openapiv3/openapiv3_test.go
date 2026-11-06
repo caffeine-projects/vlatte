@@ -4,20 +4,25 @@ import (
 	"bytes"
 	"cmp"
 	json "encoding/json/v2"
+	"fmt"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte/internal/openapi"
 	"github.com/caffeine-projects/vlatte/internal/openapiv3"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 func TestLoad_ReadsOperationsResponsesAndExamples(t *testing.T) {
@@ -336,7 +341,8 @@ components:
 
 func TestLoad_ReadsTheNumbersOfASchemaAsTheSpecWritesThem(t *testing.T) {
 	// A fake value comes from its schema's const, enum or default: 9007199254740993 read as a float64 is another
-	// value. Shared schemas and those of other files alike.
+	// value, and the largest int64 one past it. Shared schemas and those of other files alike. The largest was found
+	// by TestPropLoad_AValueIsTheSameWhereverItsReferencesLead.
 	doc := load(t, map[string]string{
 		"spec.yaml": `
 openapi: 3.1.0
@@ -355,6 +361,7 @@ paths:
                   a: {const: 9007199254740993}
                   b: {$ref: "#/components/schemas/B"}
                   c: {$ref: "c.yaml"}
+                  d: {const: 9223372036854775807}
 components:
   schemas:
     B: {enum: [9007199254740995], default: 9007199254740997}
@@ -365,10 +372,37 @@ components:
 	schema := doc.Operations[0].Responses[0].Content[0].Schema.(map[string]any)
 	props := schema["properties"].(map[string]any)
 	require.Equal(t, map[string]any{"const": int64(9007199254740993)}, props["a"])
+	require.Equal(t, map[string]any{"const": int64(math.MaxInt64)}, props["d"])
 	require.Equal(t, map[string]any{"enum": []any{int64(9007199254740995)}, "default": int64(9007199254740997)}, doc.Defs["B"])
 
 	c := strings.TrimPrefix(props["c"].(map[string]any)["$ref"].(string), "#/$defs/")
 	require.Equal(t, map[string]any{"type": "array", "items": map[string]any{"const": map[string]any{"n": int64(9007199254740999)}}}, doc.Defs[c])
+}
+
+func TestLoad_KeepsTheNullsOfASchema(t *testing.T) {
+	// A schema whose const is null allows null only, not anything: kin-openapi reads a null as no value. Found by
+	// TestPropLoad_AValueIsTheSameWhereverItsReferencesLead.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Nulls, version: "1"}
+paths:
+  /null:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  a: {const: null, default: null, example: null}
+`})
+
+	require.Equal(t, map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"a": map[string]any{"const": nil, "default": nil, "example": nil}},
+	}, doc.Operations[0].Responses[0].Content[0].Schema)
 }
 
 func TestLoad_WarnsWhenServersHaveDifferentPaths(t *testing.T) {
@@ -634,6 +668,118 @@ func TestLoad_FailsOnAnInvalidSpec(t *testing.T) {
 	require.ErrorIs(t, err, openapi.ErrInvalid)
 }
 
+func TestPropLoad_AValueIsTheSameWhereverItsReferencesLead(t *testing.T) {
+	// R1: a parameter, a response, a named example and a schema mean the same inline or behind any chain of $refs,
+	// to the spec's components, another file, a file in a sub folder, a whole file, or a parameter of another path,
+	// each relative to the file that holds it: every value they hold, integers past 2^53 and nulls included, is the
+	// spec's own.
+	rapid.Check(t, func(rt *rapid.T) {
+		s := newDrawnSpec()
+		v1, v2, v3, v4 := genJSON(2).Draw(rt, "example"), genJSON(2).Draw(rt, "header"), genJSON(2).Draw(rt, "parameter"), genJSON(2).Draw(rt, "const")
+
+		paramAt := s.draw(rt, "parameters")
+		param := s.put(paramAt, "spec.yaml", map[string]any{
+			"name": "id", "in": "path", "required": true, "schema": make(map[string]any), "example": v3,
+		})
+
+		responseAt := s.draw(rt, "responses")
+		holder := s.holder(responseAt, "spec.yaml")
+		response := s.put(responseAt, "spec.yaml", map[string]any{
+			"description": "OK",
+			"headers":     map[string]any{"X-V": map[string]any{"schema": make(map[string]any), "example": v2}},
+			"content": map[string]any{
+				"application/json":   map[string]any{"examples": map[string]any{"e": s.put(s.draw(rt, "examples"), holder, map[string]any{"value": v1})}},
+				"application/x+json": map[string]any{"schema": s.put(s.draw(rt, "schemas"), holder, map[string]any{"const": v4})},
+			},
+		})
+
+		s.paths()["/x/{id}"] = map[string]any{"get": map[string]any{"parameters": []any{param}, "responses": map[string]any{"200": response}}}
+
+		doc := s.load(t, rt)
+		op := operation(rt, doc, "/x/{id}")
+
+		require.Equal(rt, []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{{Value: normal(rt, v3)}}}}, op.PathParams)
+		require.Len(rt, op.Responses, 1)
+
+		res := op.Responses[0]
+		require.Equal(rt, []openapi.Header{{Name: "X-V", Schema: make(map[string]any), Examples: []openapi.Example{{Value: normal(rt, v2)}}}}, res.Headers)
+		require.Len(rt, res.Content, 2)
+		require.Equal(rt, openapi.Content{MediaType: "application/json", Examples: []openapi.Example{{Name: "e", Value: normal(rt, v1)}}}, res.Content[0])
+		require.Equal(rt, "application/x+json", res.Content[1].MediaType)
+		require.Equal(rt, map[string]any{"const": normal(rt, v4)}, followDefs(rt, doc, res.Content[1].Schema))
+	})
+}
+
+func TestPropLoad_EachSchemaAReferenceNamesIsItsOwn(t *testing.T) {
+	// R2: schemas of other files become shared ones, named after their file and place: whatever names the spec's
+	// own shared schemas take, two references to one schema name one, and to two schemas two, each the schema
+	// written there.
+	rapid.Check(t, func(rt *rapid.T) {
+		s := newDrawnSpec()
+		names := []string{"pet", "pet_2", "a_pet", "a_pet_2", "lib_pet"}
+
+		for _, name := range rapid.SliceOfNDistinct(rapid.SampledFrom(names), 0, len(names), rapid.ID).Draw(rt, "shared") {
+			s.components("schemas")[name] = map[string]any{"const": "#/components/schemas/" + name}
+		}
+
+		targets := []string{"pet.yaml", "pet_2.yaml", "a/pet.yaml", "a_pet.yaml", "a/pet_2.yaml", "lib.yaml#/components/schemas/pet", "lib.yaml#/pet"}
+		for _, target := range targets {
+			file, ptr, _ := strings.Cut(target, "#")
+			if s.files[file] == nil {
+				s.files[file] = make(map[string]any)
+			}
+
+			if ptr == "" {
+				s.files[file]["const"] = target
+				continue
+			}
+
+			setPointer(s.files[file], ptr, map[string]any{"const": target})
+		}
+
+		refs := rapid.SliceOfN(rapid.SampledFrom(slices.Concat(targets, slices.Collect(maps.Keys(s.components("schemas"))))), 1, 12).Draw(rt, "refs")
+
+		props := make(map[string]any, len(refs))
+		for i, ref := range refs {
+			if !strings.Contains(ref, ".") {
+				ref = "#/components/schemas/" + ref
+			}
+
+			props[strconv.Itoa(i)] = map[string]any{"$ref": ref}
+			refs[i] = ref
+		}
+
+		s.paths()["/x"] = map[string]any{"get": map[string]any{"responses": map[string]any{"200": map[string]any{
+			"description": "OK",
+			"content":     map[string]any{"application/json": map[string]any{"schema": map[string]any{"type": "object", "properties": props}}},
+		}}}}
+
+		doc := s.load(t, rt)
+		got := operation(rt, doc, "/x").Responses[0].Content[0].Schema.(map[string]any)["properties"].(map[string]any)
+
+		byRef := make(map[string]any)
+		for i, ref := range refs {
+			// Each schema's const is the $ref that names it.
+			name := got[strconv.Itoa(i)]
+			require.Equal(rt, map[string]any{"const": ref}, followDefs(rt, doc, name), ref)
+
+			if prev, ok := byRef[ref]; ok {
+				require.Equal(rt, prev, name, ref)
+			}
+
+			byRef[ref] = name
+		}
+
+		seen := make(map[any]string)
+		for ref, name := range byRef {
+			key := name.(map[string]any)["$ref"]
+			prev, ok := seen[key]
+			require.False(rt, ok, "%s and %s both name %s", prev, ref, key)
+			seen[key] = ref
+		}
+	})
+}
+
 // sortedOperations returns the operations of doc in path order: Load leaves them in any order.
 func sortedOperations(doc *openapi.Document) []openapi.Operation {
 	return slices.SortedFunc(slices.Values(doc.Operations), func(a, b openapi.Operation) int { return strings.Compare(a.Path, b.Path) })
@@ -687,4 +833,234 @@ func loadWithWarnings(t *testing.T, files map[string]string) (*openapi.Document,
 
 func read(t *testing.T) func(u *url.URL) ([]byte, error) {
 	return func(u *url.URL) ([]byte, error) { return openapi.Read(t.Context(), http.DefaultClient, u) }
+}
+
+// operation returns the operation of doc at path.
+func operation(t require.TestingT, doc *openapi.Document, path string) openapi.Operation {
+	i := slices.IndexFunc(doc.Operations, func(o openapi.Operation) bool { return o.Path == path })
+	require.NotEqual(t, -1, i, path)
+
+	return doc.Operations[i]
+}
+
+// followDefs returns schema, or the shared schema of doc its $ref names, as many times as one names another.
+func followDefs(t require.TestingT, doc *openapi.Document, schema any) any {
+	for range len(doc.Defs) + 1 {
+		ref, ok := schema.(map[string]any)["$ref"].(string)
+		if !ok {
+			return schema
+		}
+
+		name, ok := strings.CutPrefix(ref, "#/$defs/")
+		require.True(t, ok, ref)
+
+		schema = doc.Defs[name]
+	}
+
+	require.Fail(t, "a cycle of $defs")
+
+	return nil
+}
+
+// normal returns v as a spec holds it: written as JSON and read back.
+func normal(t require.TestingT, v any) any {
+	data, err := json.Marshal(v, json.Deterministic(true))
+	require.NoError(t, err)
+
+	n, err := value.DecodeJSON(data)
+	require.NoError(t, err)
+
+	return n
+}
+
+// setPointer sets the value of doc at ptr, a JSON pointer of objects, making the objects on the way.
+func setPointer(doc map[string]any, ptr string, v any) {
+	tokens := strings.Split(strings.TrimPrefix(ptr, "/"), "/")
+	for _, token := range tokens[:len(tokens)-1] {
+		next, ok := doc[token].(map[string]any)
+		if !ok {
+			next = make(map[string]any)
+			doc[token] = next
+		}
+
+		doc = next
+	}
+
+	doc[tokens[len(tokens)-1]] = v
+}
+
+// drawnSpec is a spec a property draws: its files, by path from its folder, spec.yaml its root, each written as
+// JSON, which is YAML too.
+type drawnSpec struct {
+	files map[string]map[string]any
+	n     int // the objects placed so far, which number their places
+}
+
+// place is where an object of a spec sits.
+type place struct {
+	file    string
+	pointer string // "" for the whole file
+}
+
+func newDrawnSpec() *drawnSpec {
+	return &drawnSpec{files: map[string]map[string]any{"spec.yaml": {
+		"openapi": "3.1.0", "info": map[string]any{"title": "Refs", "version": "1"}, "paths": make(map[string]any),
+	}}}
+}
+
+func (s *drawnSpec) paths() map[string]any {
+	return s.files["spec.yaml"]["paths"].(map[string]any)
+}
+
+func (s *drawnSpec) components(collection string) map[string]any {
+	root := s.files["spec.yaml"]
+	if root["components"] == nil {
+		root["components"] = make(map[string]any)
+	}
+
+	c := root["components"].(map[string]any)
+	if c[collection] == nil {
+		c[collection] = make(map[string]any)
+	}
+
+	return c[collection].(map[string]any)
+}
+
+// draw draws the places an object of collection sits, the first holding it, each next one a $ref to the one before:
+// none for an object written inline. Only the first is ever a whole file: kin-openapi rejects a file that is only a
+// $ref.
+func (s *drawnSpec) draw(t *rapid.T, collection string) []place {
+	wheres := []string{"component", "file", "sub folder"}
+	if collection == "parameters" {
+		wheres = append(wheres, "another path")
+	}
+
+	hops := rapid.IntRange(0, 3).Draw(t, collection+" hops")
+	places := make([]place, hops)
+
+	for i := range places {
+		s.n++
+
+		where := wheres
+		if i == 0 {
+			where = append(slices.Clone(wheres), "whole file")
+		}
+
+		switch rapid.SampledFrom(where).Draw(t, collection+" where") {
+		case "component":
+			places[i] = place{file: "spec.yaml", pointer: fmt.Sprintf("/components/%s/C%d", collection, s.n)}
+		case "file":
+			places[i] = place{file: fmt.Sprintf("f%d.yaml", s.n), pointer: "/O"}
+		case "sub folder":
+			places[i] = place{file: fmt.Sprintf("sub/f%d.yaml", s.n), pointer: "/O"}
+		case "whole file":
+			places[i] = place{file: fmt.Sprintf("w%d.yaml", s.n)}
+		case "another path":
+			places[i] = place{file: "spec.yaml", pointer: fmt.Sprintf("/paths/~1p%d~1{id}/get/parameters/0", s.n)}
+		}
+	}
+
+	return places
+}
+
+// holder returns the file that holds an object at places, written in from when inline.
+func (s *drawnSpec) holder(places []place, from string) string {
+	if len(places) == 0 {
+		return from
+	}
+
+	return places[0].file
+}
+
+// put writes obj at places, each next one a $ref to the one before, and returns what refers to it from the file
+// from: obj, when inline.
+func (s *drawnSpec) put(places []place, from string, obj map[string]any) any {
+	var v any = obj
+
+	for i, p := range places {
+		if i > 0 {
+			v = map[string]any{"$ref": relRef(p.file, places[i-1])}
+		}
+
+		switch {
+		case p.pointer == "":
+			s.files[p.file] = v.(map[string]any)
+		case strings.HasPrefix(p.pointer, "/paths/"):
+			path := strings.ReplaceAll(strings.TrimSuffix(strings.TrimPrefix(p.pointer, "/paths/"), "/get/parameters/0"), "~1", "/")
+			s.paths()[path] = map[string]any{"get": map[string]any{"parameters": []any{v}, "responses": map[string]any{"204": map[string]any{"description": "OK"}}}}
+		default:
+			if s.files[p.file] == nil {
+				s.files[p.file] = make(map[string]any)
+			}
+
+			setPointer(s.files[p.file], p.pointer, v)
+		}
+	}
+
+	if len(places) > 0 {
+		v = map[string]any{"$ref": relRef(from, places[len(places)-1])}
+	}
+
+	return v
+}
+
+// relRef returns the $ref the file from writes for p.
+func relRef(from string, p place) string {
+	ref := "#" + p.pointer
+	if p.file != from {
+		rel, _ := filepath.Rel(filepath.Dir(filepath.FromSlash(from)), filepath.FromSlash(p.file))
+		ref = filepath.ToSlash(rel) + strings.TrimSuffix(ref, "#")
+	}
+
+	return ref
+}
+
+// load writes the files of s to a folder of t's and loads its spec.yaml.
+func (s *drawnSpec) load(t *testing.T, rt *rapid.T) *openapi.Document {
+	dir := t.TempDir()
+
+	for name, content := range s.files {
+		data, err := json.Marshal(content, json.Deterministic(true))
+		require.NoError(rt, err)
+
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		require.NoError(rt, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(rt, os.WriteFile(path, data, 0o600))
+	}
+
+	loc, err := openapi.Location(filepath.Join(dir, "spec.yaml"))
+	require.NoError(rt, err)
+
+	data, err := read(t)(loc)
+	require.NoError(rt, err)
+
+	log := zerolog.Nop()
+	doc, err := openapiv3.Load(t.Context(), data, loc, read(t), &log)
+	require.NoError(rt, err)
+
+	return doc
+}
+
+// Generators
+
+// genJSON draws a JSON value, often an integer past 2^53, which a float64 rounds, or a null.
+func genJSON(depth int) *rapid.Generator[any] {
+	scalars := rapid.OneOf(
+		rapid.Just[any](nil),
+		rapid.Map(rapid.Bool(), func(b bool) any { return b }),
+		rapid.Map(rapid.String(), func(s string) any { return s }),
+		rapid.Map(rapid.Int64(), func(n int64) any { return n }),
+		rapid.Map(rapid.OneOf(rapid.Int64Range(1<<53, math.MaxInt64), rapid.Int64Range(math.MinInt64, -(1<<53))), func(n int64) any { return n }),
+		rapid.Map(rapid.Float64Range(-1e300, 1e300), func(f float64) any { return f }),
+	)
+
+	if depth == 0 {
+		return scalars
+	}
+
+	return rapid.OneOf(
+		scalars,
+		rapid.Map(rapid.SliceOfN(genJSON(depth-1), 0, 3), func(l []any) any { return l }),
+		rapid.Map(rapid.MapOfN(rapid.StringMatching(`[a-c]`), genJSON(depth-1), 0, 3), func(m map[string]any) any { return m }),
+	)
 }

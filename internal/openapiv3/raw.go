@@ -8,6 +8,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/openapi"
 )
 
 // raw holds the example fields of the spec's objects as the spec writes them, which kin-openapi changes as it reads
@@ -346,13 +347,20 @@ func (r *rawReader) schema(ref *openapi3.SchemaRef, n node) {
 }
 
 // exact returns kin, a value of the spec as kin-openapi read it, with each integer as raw, the same value as the spec
-// writes it, has it, where kin-openapi rounded it.
+// writes it, has it, where kin-openapi rounded it, and each null of a keyword holding a value, such as const, which
+// kin-openapi left out.
 func exact(kin, raw any) any {
 	switch k := kin.(type) {
 	case map[string]any:
 		r, _ := raw.(map[string]any)
 		for key, v := range k {
 			k[key] = exact(v, r[key])
+		}
+
+		for _, key := range openapi.ValueKeywords {
+			if v, ok := r[key]; ok && v == nil {
+				k[key] = nil
+			}
 		}
 	case []any:
 		r, _ := raw.([]any)
@@ -361,6 +369,11 @@ func exact(kin, raw any) any {
 		}
 	case int64:
 		if r, ok := raw.(int64); ok && float64(r) == float64(k) {
+			return r
+		}
+	case float64:
+		// Rounded past the largest int64, an integer is a float64.
+		if r, ok := raw.(int64); ok && float64(r) == k {
 			return r
 		}
 	}
