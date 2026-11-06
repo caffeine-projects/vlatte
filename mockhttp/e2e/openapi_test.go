@@ -436,7 +436,7 @@ paths:
 
 func TestOpenAPI_AnEncodedLiteralOfAPathMatchesTheRequestThatSendsIt(t *testing.T) {
 	// The server compares the path decoded: /hello%20world in a spec is the path a client sends as /hello%20world,
-	// in a static path, a template and a path example alike.
+	// in a static path, a template and a path example alike. A % that starts no escape is a percent sign.
 	spec := `
 openapi: 3.1.0
 info: {title: Encoded literals, version: "1"}
@@ -466,6 +466,13 @@ paths:
           description: OK
           content:
             text/plain: {example: inside}
+  /rate/50%:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain: {example: half}
 `
 	m := serveSpec(t, spec)
 
@@ -478,6 +485,7 @@ paths:
 		{path: "/a%20b/1", mock: "a-20b-_id-get-200-text-example", body: "example"},
 		{path: "/a%20b/2", mock: "a-20b-_id-get-200-text", body: "example"},
 		{path: "/c%20d/2.json", mock: "c-20d-_id-json-get-200-text", body: "inside"},
+		{path: "/rate/50%25", mock: "rate-50-get-200-text", body: "half"},
 	}
 
 	for _, tt := range tests {
