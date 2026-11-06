@@ -502,12 +502,13 @@ paths:
 }
 
 func TestOpenAPI_ANullExampleIsTheJSONNull(t *testing.T) {
-	// null is a value an example gives, not a missing one: the client gets the JSON null.
+	// null is a value an example gives, not a missing one: the client gets the JSON null, whether the example is
+	// named or not, and when a schema allows it.
 	spec := `
 openapi: 3.1.0
 info: {title: Null example, version: "1"}
 paths:
-  /null:
+  /named:
     get:
       responses:
         "200":
@@ -516,13 +517,73 @@ paths:
             application/json:
               examples:
                 null-response: {value: null}
+  /schema:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: ["null"]}
+              examples:
+                null-response: {$ref: "#/components/examples/Nothing"}
+  /singular:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: [object, "null"]}
+              example: null
+components:
+  examples:
+    Nothing: {value: null}
 `
 	m := serveSpec(t, spec)
 
-	res, body := respond(t, m, http.MethodGet, "/null", "application/json")
+	for _, path := range []string{"/named", "/schema", "/singular"} {
+		t.Run(path, func(t *testing.T) {
+			res, body := respond(t, m, http.MethodGet, path, "application/json")
+			require.Equal(t, http.StatusOK, res.StatusCode, body)
+			require.Equal(t, "application/json", res.Header.Get("Content-Type"))
+			require.Equal(t, "null", body)
+		})
+	}
+}
+
+func TestOpenAPI_AnIntegerExamplePast2To53IsServedExactly(t *testing.T) {
+	// A float64 holds every integer up to 2^53 only: 9007199254740993 read as one is 9007199254740992, another
+	// resource, in the path, a header and a body alike, and through a reference.
+	spec := `{
+  "openapi": "3.1.0",
+  "info": {"title": "Big integers", "version": "1"},
+  "paths": {
+    "/ids/{id}": {
+      "get": {
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}, "example": 9007199254740993}],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {"X-ID": {"schema": {"type": "integer"}, "example": 9007199254740993}},
+            "content": {"application/json": {"examples": {"id": {"$ref": "#/components/examples/ID"}}}}
+          },
+          "404": {"description": "missing"}
+        }
+      }
+    }
+  },
+  "components": {"examples": {"ID": {"value": {"id": 9007199254740993}}}}
+}`
+	m := serveSpec(t, spec)
+
+	res, body := respond(t, m, http.MethodGet, "/ids/9007199254740993", "application/json")
 	require.Equal(t, http.StatusOK, res.StatusCode, body)
-	require.Equal(t, "application/json", res.Header.Get("Content-Type"))
-	require.Equal(t, "null", body)
+	require.Equal(t, "9007199254740993", res.Header.Get("X-ID"))
+	require.JSONEq(t, `{"id":9007199254740993}`, body)
+
+	res, body = respond(t, m, http.MethodGet, "/ids/9007199254740992", "application/json")
+	require.Equal(t, http.StatusNotFound, res.StatusCode, body)
 }
 
 func TestOpenAPI_AResponseHeaderIsWrittenAsItsSpecSays(t *testing.T) {

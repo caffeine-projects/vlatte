@@ -2,7 +2,9 @@ package openapiv3_test
 
 import (
 	"bytes"
+	"cmp"
 	json "encoding/json/v2"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -80,7 +82,7 @@ components:
 			PathParams: []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{{Name: "rex", Value: "1"}, {Value: "9"}}}},
 			Responses: []openapi.Response{
 				{
-					Status: "200", Headers: []openapi.Header{{Name: "X-Rate", Schema: map[string]any{"type": "integer"}, Examples: []openapi.Example{{Value: float64(5)}}}},
+					Status: "200", Headers: []openapi.Header{{Name: "X-Rate", Schema: map[string]any{"type": "integer"}, Examples: []openapi.Example{{Value: int64(5)}}}},
 					Content: []openapi.Content{
 						{MediaType: "application/json", Schema: pet, Examples: []openapi.Example{
 							{Name: "cat", Value: map[string]any{"name": "Tom"}}, {Name: "rex", Value: map[string]any{"name": "Rex"}},
@@ -146,6 +148,122 @@ paths:
 	ref, ok := schema["$ref"].(string)
 	require.True(t, ok)
 	require.Equal(t, map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}}}, doc.Defs[ref[len("#/$defs/"):]])
+}
+
+func TestLoad_ReadsExamplesAsTheSpecWritesThem(t *testing.T) {
+	// kin-openapi reads every number as a float64 and a null as no value: an integer past 2^53 would name another
+	// resource, and a null example would be no example. Each file's references are relative to it.
+	doc := load(t, map[string]string{
+		"spec.yaml": `
+openapi: 3.1.0
+info: {title: Big, version: "1"}
+paths:
+  /ids/{id}:
+    get:
+      parameters: [{$ref: "param.yaml"}]
+      responses:
+        "200": {$ref: "responses.yaml#/OK"}
+`,
+		"param.yaml": `
+name: id
+in: path
+required: true
+example: 9007199254740993
+schema: {type: integer, example: 9007199254740995, examples: [9007199254740997]}
+`,
+		"responses.yaml": `
+OK:
+  description: OK
+  headers:
+    X-ID: {schema: {type: integer}, example: 9007199254740993}
+  content:
+    application/json:
+      examples:
+        big: {$ref: "#/Big"}
+        none: {value: null}
+        out: {externalValue: "https://example.com/pet.json"}
+    text/plain:
+      example: null
+Big: {value: {id: 9007199254740999}}
+`,
+	})
+
+	require.Equal(t, []openapi.Operation{{
+		Method: "GET", Path: "/ids/{id}",
+		PathParams: []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{
+			{Value: int64(9007199254740993)}, {Value: int64(9007199254740995)}, {Value: int64(9007199254740997)},
+		}}},
+		Responses: []openapi.Response{{
+			Status:  "200",
+			Headers: []openapi.Header{{Name: "X-ID", Schema: map[string]any{"type": "integer"}, Examples: []openapi.Example{{Value: int64(9007199254740993)}}}},
+			Content: []openapi.Content{
+				{MediaType: "application/json", Examples: []openapi.Example{
+					{Name: "big", Value: map[string]any{"id": int64(9007199254740999)}}, {Name: "none", Value: nil},
+				}},
+				{MediaType: "text/plain", Examples: []openapi.Example{{Value: nil}}},
+			},
+		}},
+	}}, doc.Operations)
+}
+
+func TestLoad_TakesANullExampleWhereverTheSpecPutsIt(t *testing.T) {
+	// kin-openapi reads value: null as no value, which it rejects: each place it checks an example is read as written.
+	const (
+		null    = `{schema: {type: ["null"]}, examples: {none: {value: null}}}`
+		content = `{application/json: ` + null + `}`
+		ok      = `{"204": {description: OK}}`
+	)
+
+	tests := []struct {
+		name    string
+		spec    string
+		version string
+		files   map[string]string // more files of the spec
+	}{
+		{name: "a shared parameter", spec: "paths: {}\ncomponents: {parameters: {P: {name: p, in: query, " + null[1:] + "}}"},
+		{name: "a shared request body", spec: "paths: {}\ncomponents: {requestBodies: {B: {content: " + content + "}}}"},
+		{name: "a shared response", spec: "paths: {}\ncomponents: {responses: {R: {description: R, content: " + content + "}}}"},
+		{name: "a shared callback", spec: "paths: {}\ncomponents: {callbacks: {C: {\"{$url}\": {post: {requestBody: {content: " + content + "}, responses: " + ok + "}}}}}"},
+		{name: "a webhook", spec: "paths: {}\nwebhooks: {w: {post: {requestBody: {content: " + content + "}, responses: " + ok + "}}}"},
+		{
+			name:  "a parameter a pointer names",
+			spec:  "paths: {/a: {get: {parameters: [{$ref: \"params.yaml#/by~1name/0\"}], responses: " + ok + "}}}",
+			files: map[string]string{"params.yaml": "by/name: [{name: p, in: query, " + null[1:] + "]\n"},
+		},
+		{name: "an additional operation", spec: "paths: {/a: {additionalOperations: {COPY: {requestBody: {content: " + content + "}, responses: " + ok + "}}}}", version: "3.2.0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := map[string]string{"spec.yaml": "openapi: " + cmp.Or(tt.version, "3.1.0") + "\ninfo: {title: X, version: \"1\"}\n" + tt.spec + "\n"}
+			maps.Copy(files, tt.files)
+			load(t, files)
+		})
+	}
+}
+
+func TestLoad_FailsOnANullExampleItsSchemaRejects(t *testing.T) {
+	// null is a value, which its schema checks as any other.
+	data := []byte(`
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: object}
+              examples:
+                none: {value: null}
+`)
+
+	log := zerolog.Nop()
+	_, err := openapiv3.Load(t.Context(), data, &url.URL{Path: filepath.ToSlash(filepath.Join(t.TempDir(), "spec.yaml"))}, read(t), &log)
+	require.ErrorIs(t, err, openapi.ErrInvalid)
+	require.ErrorContains(t, err, `example none: validation failed due to: at '': got null, want object`)
 }
 
 func TestLoad_WarnsWhenServersHaveDifferentPaths(t *testing.T) {

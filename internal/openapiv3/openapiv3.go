@@ -18,6 +18,9 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
+// _nullValue is the externalValue a null example holds while kin-openapi validates it.
+const _nullValue = "vlatte:null"
+
 // _componentsPrefix starts a reference to a shared schema, which the model writes under $defs.
 const _componentsPrefix = "#/components/schemas/"
 
@@ -29,21 +32,32 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 	loader := openapi3.NewLoader()
 	loader.Context = ctx
 	loader.IsExternalRefsAllowed = true
-	loader.ReadFromURIFunc = func(_ *openapi3.Loader, u *url.URL) ([]byte, error) { return read(u) }
+	// The files kin-openapi reads, kept for their examples as written.
+	files := map[string][]byte{fileKey(location): data}
+	loader.ReadFromURIFunc = func(_ *openapi3.Loader, u *url.URL) ([]byte, error) {
+		b, err := read(u)
+		if err == nil {
+			files[fileKey(u)] = b
+		}
+
+		return b, err
+	}
 
 	t, err := loader.LoadFromDataWithPath(data, location)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", openapi.ErrInvalid, err)
 	}
 
-	if err := validate(ctx, t); err != nil {
+	r := readRaw(t, location, files)
+
+	if err := validate(ctx, t, r); err != nil {
 		return nil, fmt.Errorf("%w: %w", openapi.ErrInvalid, err)
 	}
 
 	// The model refers to shared schemas by name: a reference to another file becomes one.
 	t.InternalizeRefs(ctx, nil)
 
-	c := converter{v30: t.IsOpenAPI30()}
+	c := converter{v30: t.IsOpenAPI30(), raw: r}
 	doc := &openapi.Document{Defs: make(map[string]any)}
 
 	if t.Info != nil {
@@ -93,8 +107,9 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 }
 
 // validate validates t as kin-openapi does, but for the examples of media types that aren't JSON: OpenAPI writes
-// those as the body itself, such as XML text, which their schema, describing the data, rejects.
-func validate(ctx context.Context, t *openapi3.T) error {
+// those as the body itself, such as XML text, which their schema, describing the data, rejects. An example whose
+// value r says is null, which kin-openapi reads as no value, is checked as null.
+func validate(ctx context.Context, t *openapi3.T, r raw) error {
 	type stashed struct {
 		media    *openapi3.MediaType
 		example  any
@@ -239,9 +254,24 @@ func validate(ctx context.Context, t *openapi3.T) error {
 		return invalid
 	}
 
+	// kin-openapi rejects an example with neither a value nor an externalValue, but checks the value of one with an
+	// externalValue, nil here, against its schema: a null example stands in as one.
+	var nulls []*openapi3.Example
+
+	for f, v := range r {
+		if ex, ok := f.object.(*openapi3.Example); ok && v == nil && ex.Value == nil && ex.ExternalValue == "" {
+			ex.ExternalValue = _nullValue
+			nulls = append(nulls, ex)
+		}
+	}
+
 	defer func() {
 		for _, st := range stash {
 			st.media.Example, st.media.Examples = st.example, st.examples
+		}
+
+		for _, ex := range nulls {
+			ex.ExternalValue = ""
 		}
 	}()
 
@@ -290,6 +320,7 @@ func basePath(servers openapi3.Servers, log *zerolog.Logger) string {
 // converter translates the parts of a document into the model.
 type converter struct {
 	v30 bool // the document is OpenAPI 3.0, whose schemas are not JSON Schema 2020-12
+	raw raw  // the examples as the spec writes them
 }
 
 // operation translates op, of the path item with the parameters common.
@@ -307,10 +338,19 @@ func (c converter) operation(path, method string, common openapi3.Parameters, op
 	for _, name := range slices.Sorted(maps.Keys(params)) {
 		p := params[name]
 
-		examples := examplesOf(p.Example, p.Examples)
-		if p.Schema != nil && p.Schema.Value != nil {
-			examples = append(examples, examplesOf(p.Schema.Value.Example, nil)...)
-			for _, v := range p.Schema.Value.Examples {
+		examples := c.examplesOf(p, p.Example, p.Examples)
+		if s := p.Schema; s != nil && s.Value != nil {
+			examples = append(examples, c.examplesOf(s.Value, s.Value.Example, nil)...)
+
+			var kin any
+			if s.Value.Examples != nil {
+				kin = s.Value.Examples
+			}
+
+			v, _ := c.raw.value(s.Value, "examples", kin)
+			list, _ := v.([]any)
+
+			for _, v := range list {
 				examples = append(examples, openapi.Example{Value: v})
 			}
 		}
@@ -346,14 +386,14 @@ func (c converter) response(status string, res *openapi3.Response) openapi.Respo
 			Name:     name,
 			Explode:  ref.Value.Explode != nil && *ref.Value.Explode,
 			Schema:   c.schema(ref.Value.Schema),
-			Examples: examplesOf(ref.Value.Example, ref.Value.Examples),
+			Examples: c.examplesOf(ref.Value, ref.Value.Example, ref.Value.Examples),
 		}
 
 		// A header has a schema or content, of one media type.
 		if len(ref.Value.Content) > 0 {
 			mt := slices.Min(slices.Collect(maps.Keys(ref.Value.Content)))
 			media := ref.Value.Content[mt]
-			h.MediaType, h.Schema, h.Examples = mt, c.schema(media.Schema), examplesOf(media.Example, media.Examples)
+			h.MediaType, h.Schema, h.Examples = mt, c.schema(media.Schema), c.examplesOf(media, media.Example, media.Examples)
 		}
 
 		r.Headers = append(r.Headers, h)
@@ -361,27 +401,27 @@ func (c converter) response(status string, res *openapi3.Response) openapi.Respo
 
 	for _, mt := range slices.Sorted(maps.Keys(res.Content)) {
 		media := res.Content[mt]
-		r.Content = append(r.Content, openapi.Content{MediaType: mt, Schema: c.schema(media.Schema), Examples: examplesOf(media.Example, media.Examples)})
+		r.Content = append(r.Content, openapi.Content{MediaType: mt, Schema: c.schema(media.Schema), Examples: c.examplesOf(media, media.Example, media.Examples)})
 	}
 
 	return r
 }
 
-// examplesOf returns the example value, if any, then the named examples, in name order. A named example that
-// isn't inline, but at an externalValue, is left out. One without a value is null, as kin-openapi reads value: null.
-func examplesOf(example any, named openapi3.Examples) []openapi.Example {
+// examplesOf returns the example of owner, the object whose example field is example, if it has one, then the named
+// examples, in name order, with their values as the spec writes them. A named example at an externalValue, not
+// inline, is left out.
+func (c converter) examplesOf(owner, example any, named openapi3.Examples) []openapi.Example {
 	var out []openapi.Example
-	if example != nil {
-		out = append(out, openapi.Example{Value: example})
+	if v, ok := c.raw.value(owner, "example", example); ok {
+		out = append(out, openapi.Example{Value: v})
 	}
 
 	for _, name := range slices.Sorted(maps.Keys(named)) {
-		ref := named[name]
-		if ref == nil || ref.Value == nil || ref.Value.ExternalValue != "" {
-			continue
+		// kin-openapi resolves every reference it loads, or fails: a reference holds its value.
+		ex := named[name].Value
+		if v, ok := c.raw.value(ex, "value", ex.Value); ok {
+			out = append(out, openapi.Example{Name: name, Value: v})
 		}
-
-		out = append(out, openapi.Example{Name: name, Value: ref.Value.Value})
 	}
 
 	return out
