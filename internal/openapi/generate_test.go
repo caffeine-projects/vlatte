@@ -27,24 +27,24 @@ func TestGenerate_GivesEachMediaTypeAMockAndA406(t *testing.T) {
 
 	offers := []any{"application/json", "application/xml"}
 
-	require.Equal(t, []string{"pets.get.200.json", "pets.get.200.xml", "pets.get.406"}, ids(mocks))
+	require.Equal(t, []string{"pets-get-200-json", "pets-get-200-xml", "pets-get-406"}, ids(mocks))
 	require.Equal(t, openapi.Mock{
-		ID: "pets.get.200.json", Route: "/pets", Method: "GET", Status: "200", MediaType: "application/json",
+		ID: "pets-get-200-json", Route: "/pets", Method: "GET", Status: "200", MediaType: "application/json",
 		Name: "GET /pets", Priority: 300, Enabled: true,
 		Request: openapi.Request{Method: "GET", Path: []any{"equal", "/pets"}, Accept: []any{"accept", "application/json", offers}},
 		Reply:   openapi.Reply{Status: 200, Header: map[string]string{"Content-Type": "application/json"}, Body: []any{"rex"}},
-	}, mocks["pets.get.200.json"])
-	require.Equal(t, []any{"accept", "application/xml", offers}, mocks["pets.get.200.xml"].Request.Accept)
-	require.Equal(t, "<pets/>", mocks["pets.get.200.xml"].Reply.Body)
+	}, mocks["pets-get-200-json"])
+	require.Equal(t, []any{"accept", "application/xml", offers}, mocks["pets-get-200-xml"].Request.Accept)
+	require.Equal(t, "<pets/>", mocks["pets-get-200-xml"].Reply.Body)
 	require.Equal(t, openapi.Mock{
-		ID: "pets.get.406", Route: "/pets", Method: "GET", Status: "406",
+		ID: "pets-get-406", Route: "/pets", Method: "GET", Status: "406",
 		Name: "GET /pets", Priority: 400, Enabled: true,
 		Request: openapi.Request{Method: "GET", Path: []any{"equal", "/pets"}, Accept: []any{"notacceptable", offers}},
 		Reply: openapi.Reply{
 			Status: 406, Header: map[string]string{"Content-Type": "text/plain; charset=utf-8"},
 			Body: "expected one of: application/json, application/xml",
 		},
-	}, mocks["pets.get.406"])
+	}, mocks["pets-get-406"])
 }
 
 func TestGenerate_AMediaRangeGivesWayToMediaTypes(t *testing.T) {
@@ -58,10 +58,10 @@ func TestGenerate_AMediaRangeGivesWayToMediaTypes(t *testing.T) {
 		}}},
 	}}})
 
-	require.Equal(t, []string{"pets.get.200.json", "pets.get.406"}, ids(mocks))
-	require.Equal(t, []any{"accept", "application/json", []any{"application/json"}}, mocks["pets.get.200.json"].Request.Accept)
+	require.Equal(t, []string{"pets-get-200-json", "pets-get-406"}, ids(mocks))
+	require.Equal(t, []any{"accept", "application/json", []any{"application/json"}}, mocks["pets-get-200-json"].Request.Accept)
 	require.Equal(t, []map[string]any{{
-		"level": "warn", "mock": "pets.get.200.json", "method": "GET", "route": "/pets", "status": "200", "media_type": "application/json",
+		"level": "warn", "mock": "pets-get-200-json", "method": "GET", "route": "/pets", "status": "200", "media_type": "application/json",
 		"message": "media range */*: left out: the mocks answer application/json",
 	}}, warnings)
 }
@@ -75,15 +75,15 @@ func TestGenerate_AResponseOfMediaRangesOnlyTakesAnyAccept(t *testing.T) {
 		}}},
 	}}})
 
-	require.Equal(t, []string{"files.get.200.text-any"}, ids(mocks))
+	require.Equal(t, []string{"files-get-200-text-any"}, ids(mocks))
 	require.Equal(t, openapi.Mock{
-		ID: "files.get.200.text-any", Route: "/files", Method: "GET", Status: "200", MediaType: "text/*",
+		ID: "files-get-200-text-any", Route: "/files", Method: "GET", Status: "200", MediaType: "text/*",
 		Name: "GET /files", Priority: 300, Enabled: true,
 		Request: openapi.Request{Method: "GET", Path: []any{"equal", "/files"}},
 		Reply:   openapi.Reply{Status: 200, Body: "a file"},
-	}, mocks["files.get.200.text-any"])
+	}, mocks["files-get-200-text-any"])
 	require.Equal(t, []map[string]any{{
-		"level": "warn", "mock": "files.get.200.text-any", "method": "GET", "route": "/files", "status": "200", "media_type": "text/*",
+		"level": "warn", "mock": "files-get-200-text-any", "method": "GET", "route": "/files", "status": "200", "media_type": "text/*",
 		"message": "media range */*: left out: the mocks answer text/*",
 	}}, warnings)
 }
@@ -97,7 +97,7 @@ func TestGenerate_AnswersA406WithTheOperationsOwn(t *testing.T) {
 		},
 	}}})
 
-	m := mocks["pets.get.406.problem-json"]
+	m := mocks["pets-get-406-problem-json"]
 	require.Equal(t, []any{"notacceptable", []any{"application/json"}}, m.Request.Accept)
 	require.Equal(t, openapi.Reply{
 		Status: 406, Header: map[string]string{"Content-Type": "application/problem+json"}, Body: map[string]any{"title": "no"},
@@ -112,9 +112,9 @@ func TestGenerate_AResponseWithoutContentMatchesAnyAccept(t *testing.T) {
 		Responses:  []openapi.Response{{Status: "204"}},
 	}}})
 
-	require.Equal(t, []string{"pets._id.delete.204"}, ids(mocks))
-	require.Equal(t, openapi.Request{Method: "DELETE", PathTemplate: "/pets/{id}"}, mocks["pets._id.delete.204"].Request)
-	require.Equal(t, openapi.Reply{Status: 204}, mocks["pets._id.delete.204"].Reply)
+	require.Equal(t, []string{"pets-_id-delete-204"}, ids(mocks))
+	require.Equal(t, openapi.Request{Method: "DELETE", PathTemplate: "/pets/{id}"}, mocks["pets-_id-delete-204"].Request)
+	require.Equal(t, openapi.Reply{Status: 204}, mocks["pets-_id-delete-204"].Reply)
 }
 
 func TestGenerate_PathExamplesAndA404(t *testing.T) {
@@ -133,19 +133,19 @@ func TestGenerate_PathExamplesAndA404(t *testing.T) {
 	}{
 		{
 			name: "an example and a 404", params: example, res: []openapi.Response{ok, notFound},
-			enabled: []string{"pets._id.get.200.json.example", "pets._id.get.404", "pets._id.get.406"},
+			enabled: []string{"pets-_id-get-200-json-example", "pets-_id-get-404", "pets-_id-get-406"},
 		},
 		{
 			name: "an example and no 404", params: example, res: []openapi.Response{ok},
-			enabled: []string{"pets._id.get.200.json", "pets._id.get.200.json.example", "pets._id.get.406"},
+			enabled: []string{"pets-_id-get-200-json", "pets-_id-get-200-json-example", "pets-_id-get-406"},
 		},
 		{
 			name: "a 404 and no example", params: []openapi.Parameter{{Name: "id"}}, res: []openapi.Response{ok, notFound},
-			enabled: []string{"pets._id.get.200.json", "pets._id.get.406"}, disabled: []string{"pets._id.get.404"},
+			enabled: []string{"pets-_id-get-200-json", "pets-_id-get-406"}, disabled: []string{"pets-_id-get-404"},
 		},
 		{
 			name: "neither", params: []openapi.Parameter{{Name: "id"}}, res: []openapi.Response{ok},
-			enabled: []string{"pets._id.get.200.json", "pets._id.get.406"},
+			enabled: []string{"pets-_id-get-200-json", "pets-_id-get-406"},
 		},
 	}
 
@@ -166,10 +166,10 @@ func TestGenerate_PathExamplesAndA404(t *testing.T) {
 
 	require.Equal(t, openapi.Request{
 		Method: "GET", Path: []any{"equal", "/pets/a b"}, Accept: []any{"accept", "application/json", []any{"application/json"}},
-	}, mocks["pets._id.get.200.json.example"].Request)
-	require.Equal(t, 1200, mocks["pets._id.get.200.json.example"].Priority)
-	require.Equal(t, openapi.Request{Method: "GET", PathTemplate: "/pets/{id}"}, mocks["pets._id.get.404"].Request)
-	require.Equal(t, 1500, mocks["pets._id.get.404"].Priority)
+	}, mocks["pets-_id-get-200-json-example"].Request)
+	require.Equal(t, 1200, mocks["pets-_id-get-200-json-example"].Priority)
+	require.Equal(t, openapi.Request{Method: "GET", PathTemplate: "/pets/{id}"}, mocks["pets-_id-get-404"].Request)
+	require.Equal(t, 1500, mocks["pets-_id-get-404"].Priority)
 }
 
 func TestGenerate_WritesAPathExampleInTheStyleOfItsParameter(t *testing.T) {
@@ -211,7 +211,7 @@ func TestGenerate_WritesAPathExampleInTheStyleOfItsParameter(t *testing.T) {
 				Responses:  []openapi.Response{{Status: "200"}},
 			}}})
 
-			require.Equal(t, []any{"equal", tt.path}, mocks["c._color.get.200.example"].Request.Path)
+			require.Equal(t, []any{"equal", tt.path}, mocks["c-_color-get-200-example"].Request.Path)
 		})
 	}
 }
@@ -238,19 +238,19 @@ func TestGenerate_A404AnswersInTheMediaTypeTheClientPrefers(t *testing.T) {
 	offers := []any{"application/json", "application/xml"}
 
 	require.Equal(t, []string{
-		"pets._id.get.200.json.example", "pets._id.get.200.xml.example", "pets._id.get.404.json", "pets._id.get.404.xml", "pets._id.get.406",
+		"pets-_id-get-200-json-example", "pets-_id-get-200-xml-example", "pets-_id-get-404-json", "pets-_id-get-404-xml", "pets-_id-get-406",
 	}, ids(mocks))
 	require.Equal(t, []map[string]any{{
-		"level": "warn", "mock": "pets._id.get.404.json", "method": "GET", "route": "/pets/{id}", "status": "404", "media_type": "application/json",
+		"level": "warn", "mock": "pets-_id-get-404-json", "method": "GET", "route": "/pets/{id}", "status": "404", "media_type": "application/json",
 		"message": "media range */*: left out: the mocks answer application/json",
 	}}, warnings)
 
-	json := mocks["pets._id.get.404.json"]
+	json := mocks["pets-_id-get-404-json"]
 	require.Equal(t, []any{"any", []any{"accept", "application/json", offers}, []any{"notacceptable", offers}}, json.Request.Accept)
 	require.Equal(t, map[string]any{"error": "missing"}, json.Reply.Body)
 	require.Equal(t, 1500, json.Priority)
 
-	xml := mocks["pets._id.get.404.xml"]
+	xml := mocks["pets-_id-get-404-xml"]
 	require.Equal(t, []any{"accept", "application/xml", offers}, xml.Request.Accept)
 	require.Equal(t, "<missing/>", xml.Reply.Body)
 	require.Equal(t, "/pets/{id}", xml.Request.PathTemplate)
@@ -268,7 +268,7 @@ func TestGenerate_A404OfOneMediaTypeTakesAnyAccept(t *testing.T) {
 		},
 	}}})
 
-	require.Nil(t, mocks["pets._id.get.404.json"].Request.Accept)
+	require.Nil(t, mocks["pets-_id-get-404-json"].Request.Accept)
 }
 
 func TestGenerate_FillsEachPathParameterOnceFromTheTemplate(t *testing.T) {
@@ -287,8 +287,8 @@ func TestGenerate_FillsEachPathParameterOnceFromTheTemplate(t *testing.T) {
 		Responses:  []openapi.Response{{Status: "200"}},
 	}}})
 
-	require.Equal(t, []any{"equal", "/p/{b}/1"}, mocks["p._a._b.get.200.example"].Request.Path)
-	require.Equal(t, []any{"equal", "/q/1/{c}"}, mocks["q._a._c.get.200.example"].Request.Path)
+	require.Equal(t, []any{"equal", "/p/{b}/1"}, mocks["p-_a-_b-get-200-example"].Request.Path)
+	require.Equal(t, []any{"equal", "/q/1/{c}"}, mocks["q-_a-_c-get-200-example"].Request.Path)
 }
 
 func TestGenerate_NamedPathExamplesGetAMockEach(t *testing.T) {
@@ -298,8 +298,8 @@ func TestGenerate_NamedPathExamplesGetAMockEach(t *testing.T) {
 		Responses:  []openapi.Response{{Status: "200"}},
 	}}})
 
-	require.Equal(t, []any{"equal", "/pets/1"}, mocks["pets._id.get.200.dog"].Request.Path)
-	require.Equal(t, []any{"equal", "/pets/2"}, mocks["pets._id.get.200.cat"].Request.Path)
+	require.Equal(t, []any{"equal", "/pets/1"}, mocks["pets-_id-get-200-dog"].Request.Path)
+	require.Equal(t, []any{"equal", "/pets/2"}, mocks["pets-_id-get-200-cat"].Request.Path)
 }
 
 func TestGenerate_WritesWhatNothingPredictsDisabled(t *testing.T) {
@@ -321,11 +321,11 @@ func TestGenerate_WritesWhatNothingPredictsDisabled(t *testing.T) {
 		},
 	}}})
 
-	require.Equal(t, []string{"pets.post.201"}, enabledIDs(mocks, true))
-	require.Equal(t, []string{"pets.post.202", "pets.post.403", "pets.post.5xx", "pets.post.default"}, enabledIDs(mocks, false))
-	require.Equal(t, 500, mocks["pets.post.5xx"].Reply.Status)
-	require.Equal(t, 500, mocks["pets.post.default"].Reply.Status)
-	require.Equal(t, 100, mocks["pets.post.403"].Priority)
+	require.Equal(t, []string{"pets-post-201"}, enabledIDs(mocks, true))
+	require.Equal(t, []string{"pets-post-202", "pets-post-403", "pets-post-5xx", "pets-post-default"}, enabledIDs(mocks, false))
+	require.Equal(t, 500, mocks["pets-post-5xx"].Reply.Status)
+	require.Equal(t, 500, mocks["pets-post-default"].Reply.Status)
+	require.Equal(t, 100, mocks["pets-post-403"].Priority)
 }
 
 func TestGenerate_PicksTheSuccessResponse(t *testing.T) {
@@ -351,11 +351,11 @@ func TestGenerate_PicksTheSuccessResponse(t *testing.T) {
 
 			mocks := generate(t, &openapi.Document{Operations: []openapi.Operation{{Method: "GET", Path: "/x", Responses: res}}})
 
-			m := mocks["x.get."+tt.want]
+			m := mocks["x-get-"+tt.want]
 			require.True(t, m.Enabled)
 			require.Equal(t, 300, m.Priority)
 			require.Equal(t, tt.status, m.Reply.Status)
-			require.Equal(t, []string{"x.get." + tt.want}, enabledIDs(mocks, true))
+			require.Equal(t, []string{"x-get-" + tt.want}, enabledIDs(mocks, true))
 		})
 	}
 }
@@ -369,12 +369,12 @@ func TestGenerate_ExamplesPastTheFirstAreDisabled(t *testing.T) {
 		}}}},
 	}}})
 
-	require.Equal(t, "a", mocks["pets.get.200.text"].Reply.Body)
-	require.True(t, mocks["pets.get.200.text"].Enabled)
-	require.Equal(t, "b", mocks["pets.get.200.text.two"].Reply.Body)
-	require.False(t, mocks["pets.get.200.text.two"].Enabled)
-	require.Equal(t, 100, mocks["pets.get.200.text.two"].Priority)
-	require.Equal(t, "3", mocks["pets.get.200.text.example3"].Reply.Body)
+	require.Equal(t, "a", mocks["pets-get-200-text"].Reply.Body)
+	require.True(t, mocks["pets-get-200-text"].Enabled)
+	require.Equal(t, "b", mocks["pets-get-200-text-two"].Reply.Body)
+	require.False(t, mocks["pets-get-200-text-two"].Enabled)
+	require.Equal(t, 100, mocks["pets-get-200-text-two"].Priority)
+	require.Equal(t, "3", mocks["pets-get-200-text-example3"].Reply.Body)
 }
 
 func TestGenerate_WritesEachExamplePastTheFirstByItsOwnValue(t *testing.T) {
@@ -391,15 +391,15 @@ func TestGenerate_WritesEachExamplePastTheFirstByItsOwnValue(t *testing.T) {
 	}}})
 
 	csv := map[string]string{"Content-Type": "text/csv"}
-	require.Equal(t, openapi.Reply{Status: 200, Header: csv, Body: "a\n"}, mocks["report.get.200.text-csv"].Reply)
-	require.Equal(t, openapi.Reply{Status: 200}, mocks["report.get.200.text-csv.data"].Reply)
-	require.Equal(t, openapi.Reply{Status: 200}, mocks["report.get.200.text-csv.list"].Reply)
-	require.Equal(t, openapi.Reply{Status: 200, Header: csv, Body: "b\n"}, mocks["report.get.200.text-csv.csv"].Reply)
+	require.Equal(t, openapi.Reply{Status: 200, Header: csv, Body: "a\n"}, mocks["report-get-200-text-csv"].Reply)
+	require.Equal(t, openapi.Reply{Status: 200}, mocks["report-get-200-text-csv-data"].Reply)
+	require.Equal(t, openapi.Reply{Status: 200}, mocks["report-get-200-text-csv-list"].Reply)
+	require.Equal(t, openapi.Reply{Status: 200, Header: csv, Body: "b\n"}, mocks["report-get-200-text-csv-csv"].Reply)
 
 	message := "the body is data, not text: written disabled: give a string example"
 	require.Equal(t, []map[string]any{
-		{"level": "warn", "mock": "report.get.200.text-csv.data", "method": "GET", "route": "/report", "status": "200", "media_type": "text/csv", "variant": "data", "message": message},
-		{"level": "warn", "mock": "report.get.200.text-csv.list", "method": "GET", "route": "/report", "status": "200", "media_type": "text/csv", "variant": "list", "message": message},
+		{"level": "warn", "mock": "report-get-200-text-csv-data", "method": "GET", "route": "/report", "status": "200", "media_type": "text/csv", "variant": "data", "message": message},
+		{"level": "warn", "mock": "report-get-200-text-csv-list", "method": "GET", "route": "/report", "status": "200", "media_type": "text/csv", "variant": "list", "message": message},
 	}, warnings)
 }
 
@@ -416,7 +416,7 @@ func TestGenerate_DisablesEveryMockWhoseBodyIsDataOutsideJSON(t *testing.T) {
 		},
 	}}})
 
-	require.Equal(t, []string{"pets._id.get.200.text-csv.example", "pets._id.get.404.text-csv", "pets._id.get.406.xml"}, ids(mocks))
+	require.Equal(t, []string{"pets-_id-get-200-text-csv-example", "pets-_id-get-404-text-csv", "pets-_id-get-406-xml"}, ids(mocks))
 
 	for _, id := range ids(mocks) {
 		require.False(t, mocks[id].Enabled, id)
@@ -426,9 +426,9 @@ func TestGenerate_DisablesEveryMockWhoseBodyIsDataOutsideJSON(t *testing.T) {
 
 	message := "the body is data, not text: written disabled: give a string example"
 	require.Equal(t, []map[string]any{
-		{"level": "warn", "mock": "pets._id.get.200.text-csv.example", "method": "GET", "route": "/pets/{id}", "status": "200", "media_type": "text/csv", "variant": "example", "message": message},
-		{"level": "warn", "mock": "pets._id.get.406.xml", "method": "GET", "route": "/pets/{id}", "status": "406", "media_type": "application/xml", "message": message},
-		{"level": "warn", "mock": "pets._id.get.404.text-csv", "method": "GET", "route": "/pets/{id}", "status": "404", "media_type": "text/csv", "message": message},
+		{"level": "warn", "mock": "pets-_id-get-200-text-csv-example", "method": "GET", "route": "/pets/{id}", "status": "200", "media_type": "text/csv", "variant": "example", "message": message},
+		{"level": "warn", "mock": "pets-_id-get-406-xml", "method": "GET", "route": "/pets/{id}", "status": "406", "media_type": "application/xml", "message": message},
+		{"level": "warn", "mock": "pets-_id-get-404-text-csv", "method": "GET", "route": "/pets/{id}", "status": "404", "media_type": "text/csv", "message": message},
 	}, warnings)
 }
 
@@ -441,11 +441,11 @@ func TestGenerate_MoreTemplatedSegmentsMatchLater(t *testing.T) {
 		{Method: "GET", Path: "/pets/{id}/{photo}", Responses: []openapi.Response{{Status: "200"}}},
 	}})
 
-	require.Equal(t, 100, mocks["pets.mine.get.503"].Priority)
-	require.Equal(t, 300, mocks["pets.mine.get.200"].Priority)
-	require.Equal(t, 1100, mocks["pets._id.get.503"].Priority)
-	require.Equal(t, 1300, mocks["pets._id.get.200"].Priority)
-	require.Equal(t, 2300, mocks["pets._id._photo.get.200"].Priority)
+	require.Equal(t, 100, mocks["pets-mine-get-503"].Priority)
+	require.Equal(t, 300, mocks["pets-mine-get-200"].Priority)
+	require.Equal(t, 1100, mocks["pets-_id-get-503"].Priority)
+	require.Equal(t, 1300, mocks["pets-_id-get-200"].Priority)
+	require.Equal(t, 2300, mocks["pets-_id-_photo-get-200"].Priority)
 }
 
 func TestGenerate_MatchesAParameterInsideASegmentWithARegularExpression(t *testing.T) {
@@ -454,7 +454,7 @@ func TestGenerate_MatchesAParameterInsideASegmentWithARegularExpression(t *testi
 		Method: "GET", Path: "/files/{name}.{ext}", BasePath: "/v1", Responses: []openapi.Response{{Status: "200"}},
 	}}})
 
-	m := mocks["v1.files._name._ext.get.200"]
+	m := mocks["v1-files-_name-_ext-get-200"]
 	require.Equal(t, []any{"regex", `^/v1/files/[^/]+\.[^/]+$`}, m.Request.Path)
 	require.Equal(t, "/v1/files/{name}.{ext}", m.Route)
 	require.Equal(t, 1300, m.Priority)
@@ -466,8 +466,8 @@ func TestGenerate_PutsEveryPathUnderTheBasePath(t *testing.T) {
 		{Method: "GET", Path: "/pets", BasePath: "/v1/", Responses: []openapi.Response{{Status: "200"}}},
 	}})
 
-	require.Equal(t, []any{"equal", "/v1"}, mocks["v1.get.200"].Request.Path)
-	require.Equal(t, []any{"equal", "/v1/pets"}, mocks["v1.pets.get.200"].Request.Path)
+	require.Equal(t, []any{"equal", "/v1"}, mocks["v1-get-200"].Request.Path)
+	require.Equal(t, []any{"equal", "/v1/pets"}, mocks["v1-pets-get-200"].Request.Path)
 }
 
 func TestGenerate_ASchemaKeepsItsOwnDefs(t *testing.T) {
@@ -484,7 +484,7 @@ func TestGenerate_ASchemaKeepsItsOwnDefs(t *testing.T) {
 		}},
 	})
 
-	require.Equal(t, []any{"rex", "pet"}, mocks["a.get.200.json"].Reply.Body)
+	require.Equal(t, []any{"rex", "pet"}, mocks["a-get-200-json"].Reply.Body)
 }
 
 func TestGenerate_LeavesOutWriteOnlyPropertiesOfASharedSchemaOfAnyName(t *testing.T) {
@@ -500,7 +500,7 @@ func TestGenerate_LeavesOutWriteOnlyPropertiesOfASharedSchemaOfAnyName(t *testin
 		}},
 	})
 
-	require.Equal(t, make(map[string]any), mocks["a.get.200.json"].Reply.Body)
+	require.Equal(t, make(map[string]any), mocks["a-get-200-json"].Reply.Body)
 }
 
 func TestGenerate_LeavesOutAPropertyThatRefersToAWriteOnlySchema(t *testing.T) {
@@ -526,7 +526,7 @@ func TestGenerate_LeavesOutAPropertyThatRefersToAWriteOnlySchema(t *testing.T) {
 		}},
 	})
 
-	require.Equal(t, map[string]any{"name": "rex"}, mocks["a.get.200.json"].Reply.Body)
+	require.Equal(t, map[string]any{"name": "rex"}, mocks["a-get-200-json"].Reply.Body)
 }
 
 func TestGenerate_FakesWhatHasNoExample(t *testing.T) {
@@ -550,7 +550,7 @@ func TestGenerate_FakesWhatHasNoExample(t *testing.T) {
 		}},
 	}
 
-	m := generate(t, doc)["pet.get.200.json"]
+	m := generate(t, doc)["pet-get-200-json"]
 	require.Equal(t, openapi.Reply{
 		Status: 200,
 		Header: map[string]string{"Content-Type": "application/json", "X-Rate": "5", "X-Tags": "a,1"},
@@ -568,8 +568,8 @@ func TestGenerate_WritesTheSameMocksOnEveryRun(t *testing.T) {
 		Status: "200", Content: []openapi.Content{{MediaType: "application/json", Schema: map[string]any{"type": "string"}}},
 	}}}
 
-	first := generate(t, &openapi.Document{Operations: []openapi.Operation{op}})["pets.get.200.json"]
-	second := generate(t, &openapi.Document{Operations: []openapi.Operation{other, op}})["pets.get.200.json"]
+	first := generate(t, &openapi.Document{Operations: []openapi.Operation{op}})["pets-get-200-json"]
+	second := generate(t, &openapi.Document{Operations: []openapi.Operation{other, op}})["pets-get-200-json"]
 
 	require.Equal(t, first, second)
 	require.IsType(t, "", first.Reply.Body)
@@ -583,11 +583,11 @@ func TestGenerate_DisablesAMockNoBodyFits(t *testing.T) {
 		}},
 	}}})
 
-	m := mocks["n.get.200.json"]
+	m := mocks["n-get-200-json"]
 	require.False(t, m.Enabled)
 	require.Nil(t, m.Reply.Body)
 	require.Equal(t, []map[string]any{{
-		"level": "warn", "mock": "n.get.200.json", "method": "GET", "route": "/n", "status": "200", "media_type": "application/json",
+		"level": "warn", "mock": "n-get-200-json", "method": "GET", "route": "/n", "status": "200", "media_type": "application/json",
 		"message": "no body fits: fakefy: no value satisfies the schema: at the root: minimum 5 is above maximum 1: written disabled",
 	}}, warnings)
 }
@@ -599,8 +599,8 @@ func TestGenerate_NumbersUnnamedPathExamples(t *testing.T) {
 		Responses:  []openapi.Response{{Status: "200"}},
 	}}})
 
-	require.Equal(t, []any{"equal", "/pets/1"}, mocks["pets._id.get.200.example1"].Request.Path)
-	require.Equal(t, []any{"equal", "/pets/2"}, mocks["pets._id.get.200.example2"].Request.Path)
+	require.Equal(t, []any{"equal", "/pets/1"}, mocks["pets-_id-get-200-example1"].Request.Path)
+	require.Equal(t, []any{"equal", "/pets/2"}, mocks["pets-_id-get-200-example2"].Request.Path)
 }
 
 func TestGenerate_LeavesOutAHeaderNoValueFits(t *testing.T) {
@@ -614,9 +614,9 @@ func TestGenerate_LeavesOutAHeaderNoValueFits(t *testing.T) {
 		}}},
 	}}})
 
-	require.Equal(t, map[string]string{"X-Ok": "ok"}, mocks["a.get.204"].Reply.Header)
+	require.Equal(t, map[string]string{"X-Ok": "ok"}, mocks["a-get-204"].Reply.Header)
 	require.Equal(t, []map[string]any{{
-		"level": "warn", "mock": "a.get.204", "method": "GET", "route": "/a", "status": "204",
+		"level": "warn", "mock": "a-get-204", "method": "GET", "route": "/a", "status": "204",
 		"message": "no value of header X-None fits: fakefy: no value satisfies the schema: at the root: minimum 5 is above maximum 1: left out",
 	}}, warnings)
 }
@@ -627,11 +627,11 @@ func TestGenerate_ABooleanSchemaAllowsAnythingOrNothing(t *testing.T) {
 		{Method: "GET", Path: "/none", Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{MediaType: "text/plain", Schema: false}}}}},
 	}})
 
-	require.True(t, mocks["any.get.200.text"].Enabled)
-	require.NotNil(t, mocks["any.get.200.text"].Reply.Body)
-	require.False(t, mocks["none.get.200.text"].Enabled)
+	require.True(t, mocks["any-get-200-text"].Enabled)
+	require.NotNil(t, mocks["any-get-200-text"].Reply.Body)
+	require.False(t, mocks["none-get-200-text"].Enabled)
 	require.Len(t, warnings, 1)
-	require.Equal(t, "none.get.200.text", warnings[0]["mock"])
+	require.Equal(t, "none-get-200-text", warnings[0]["mock"])
 	require.Contains(t, warnings[0]["message"], "no body fits: ")
 }
 
@@ -641,9 +641,9 @@ func TestGenerate_ARedirectRangeIsTheSuccessWithoutA2xx(t *testing.T) {
 		Responses: []openapi.Response{{Status: "default"}, {Status: "3XX"}},
 	}}})
 
-	require.True(t, mocks["old.get.3xx"].Enabled)
-	require.Equal(t, 300, mocks["old.get.3xx"].Reply.Status)
-	require.False(t, mocks["old.get.default"].Enabled)
+	require.True(t, mocks["old-get-3xx"].Enabled)
+	require.Equal(t, 300, mocks["old-get-3xx"].Reply.Status)
+	require.False(t, mocks["old-get-default"].Enabled)
 }
 
 // generate returns the mocks Generate makes of doc, by ID, and fails on a warning.

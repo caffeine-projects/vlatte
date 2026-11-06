@@ -24,26 +24,20 @@ var _mediaNames = map[string]string{
 	"multipart/form-data":               "multipart",
 }
 
-// _devices are names Windows keeps for devices: a file named one, with any extension, can't be opened.
-var _devices = []string{
-	"con", "prn", "aux", "nul",
-	"com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
-	"lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
-}
-
-// Namer returns the ID of a mock, which its file is named after: letters, digits, '.', '_', '~' and '-'. [Generate]
+// Namer returns the ID of a mock, which its file is named after: letters, digits, '_', '~' and '-', so the only dots
+// of the file name are those of .mock.yaml, and never a name Windows keeps for a device, such as con. [Generate]
 // makes IDs unique, ignoring case, and short enough for a file name.
 type Namer func(m *Mock) string
 
 // RouteFirst names a mock route first, so a folder lists the mocks of a route together:
-// <route>.<method>.<status>[.<media>][.<variant>], such as pets._id.get.200.json. The segments of the route are
-// joined by '.', and a parameter {id} is written _id. The route / is root.
+// <route>-<method>-<status>[-<media>][-<variant>], such as pets-_id-get-200-json. The segments of the route are
+// joined by '-', a parameter {id} is written _id, and a dot inside a part is written '-'. The route / is root.
 func RouteFirst(m *Mock) string {
 	var parts []string
 
 	for seg := range strings.SplitSeq(m.Route, "/") {
 		seg = strings.NewReplacer("{", "_", "}", "").Replace(seg)
-		if s := slug.Make(seg, _idMax); s != "" {
+		if s := part(seg); s != "" {
 			parts = append(parts, s)
 		}
 	}
@@ -52,17 +46,22 @@ func RouteFirst(m *Mock) string {
 		parts = append(parts, "root")
 	}
 
-	parts = append(parts, slug.Make(strings.ToLower(m.Method), _idMax), strings.ToLower(m.Status))
+	parts = append(parts, part(strings.ToLower(m.Method)), strings.ToLower(m.Status))
 
 	if m.MediaType != "" {
-		parts = append(parts, mediaName(m.MediaType))
+		parts = append(parts, part(mediaName(m.MediaType)))
 	}
 
-	if v := slug.Make(m.Variant, _idMax); v != "" {
+	if v := part(m.Variant); v != "" {
 		parts = append(parts, v)
 	}
 
-	return strings.Join(parts, ".")
+	return strings.Join(parts, "-")
+}
+
+// part returns s as a part of an ID: its slug, with '-' for each dot.
+func part(s string) string {
+	return strings.Trim(strings.ReplaceAll(slug.Make(s, _idMax), ".", "-"), "-")
 }
 
 // mediaName returns the short name of a media type: json for application/json, and the slug of anything else,
@@ -83,19 +82,12 @@ func mediaName(mt string) string {
 	return slug.Make(strings.ReplaceAll(strings.TrimPrefix(mt, "application/"), "*", "any"), _idMax)
 }
 
-// name sets the ID of each of mocks with namer, then makes them safe and unique: an ID that is a Windows device name
-// before its first '.' starts with '_', one longer than _idMax is cut and ends with a hash of itself, and one that
-// another takes, ignoring case, as macOS and Windows do, ends with -2, -3 and so on, in ID order.
+// name sets the ID of each of mocks with namer, then makes them unique: an ID longer than _idMax is cut and ends with
+// a hash of itself, and one that another takes, ignoring case, as macOS and Windows do, ends with -2, -3 and so on,
+// in ID order.
 func name(mocks []Mock, namer Namer) {
 	for i := range mocks {
-		id := namer(&mocks[i])
-
-		first, _, _ := strings.Cut(id, ".")
-		if slices.Contains(_devices, strings.ToLower(first)) {
-			id = "_" + id
-		}
-
-		mocks[i].ID = shorten(id)
+		mocks[i].ID = shorten(namer(&mocks[i]))
 	}
 
 	order := make([]int, len(mocks))
