@@ -131,6 +131,10 @@ func mockDoc(m Mock) map[string]any {
 		res["body"] = m.Reply.Body
 	}
 
+	if m.Reply.BodyBase64 != "" {
+		res["body_base64"] = m.Reply.BodyBase64
+	}
+
 	return map[string]any{
 		"id":       m.ID,
 		"name":     m.Name,

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte/internal/openapi"
 	"github.com/caffeine-projects/vlatte/internal/value"
@@ -27,8 +28,10 @@ var _valueKeys = []string{"const", "default", "enum", "example", "examples"}
 var _schemaMapKeys = []string{"properties", "patternProperties", "$defs", "dependentSchemas"}
 
 // Load reads data, the OpenAPI 3 document at location, and the files its references name, which read returns. It
-// fails with [openapi.ErrInvalid] for a document kin-openapi finds invalid.
-func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.URL) ([]byte, error)) (*openapi.Document, error) {
+// logs on log, at warn level, what it reads but cannot honor, such as servers with different paths: [zerolog.Nop]
+// silences it. It fails with
+// [openapi.ErrInvalid] for a document kin-openapi finds invalid.
+func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.URL) ([]byte, error), log *zerolog.Logger) (*openapi.Document, error) {
 	loader := openapi3.NewLoader()
 	loader.Context = ctx
 	loader.IsExternalRefsAllowed = true
@@ -39,7 +42,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		return nil, fmt.Errorf("%w: %w", openapi.ErrInvalid, err)
 	}
 
-	if err := t.Validate(ctx); err != nil {
+	if err := validate(ctx, t); err != nil {
 		return nil, fmt.Errorf("%w: %w", openapi.ErrInvalid, err)
 	}
 
@@ -53,8 +56,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		doc.Title = t.Info.Title
 	}
 
-	root, warnings := basePath(t.Servers, "")
-	doc.Warnings = append(doc.Warnings, warnings...)
+	root := basePath(t.Servers, log)
 
 	if t.Components != nil {
 		for name, ref := range t.Components.Schemas {
@@ -66,7 +68,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		return doc, nil
 	}
 
-	// Sorted, so the warnings come in the same order on every run.
+	// Sorted, so the warnings are logged in the same order on every run.
 	paths := t.Paths.Map()
 	for _, path := range slices.Sorted(maps.Keys(paths)) {
 		item := paths[path]
@@ -74,8 +76,8 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		// A path's servers replace the document's, and an operation's replace its path's.
 		itemBase := root
 		if len(item.Servers) > 0 {
-			itemBase, warnings = basePath(item.Servers, path)
-			doc.Warnings = append(doc.Warnings, warnings...)
+			pathLog := log.With().Str("path", path).Logger()
+			itemBase = basePath(item.Servers, &pathLog)
 		}
 
 		ops := item.Operations()
@@ -85,8 +87,8 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 			o.BasePath = itemBase
 
 			if op.Servers != nil && len(*op.Servers) > 0 {
-				o.BasePath, warnings = basePath(*op.Servers, o.Method+" "+path)
-				doc.Warnings = append(doc.Warnings, warnings...)
+				opLog := log.With().Str("method", o.Method).Str("path", path).Logger()
+				o.BasePath = basePath(*op.Servers, &opLog)
 			}
 
 			doc.Operations = append(doc.Operations, o)
@@ -96,19 +98,180 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 	return doc, nil
 }
 
-// basePath returns the path of the first of servers, which the operations they serve are under, and a warning when
-// the servers' paths differ: the mocks answer the first one's only. where names what the servers serve in the
-// warnings, or is "" for the whole document.
-func basePath(servers openapi3.Servers, where string) (string, []string) {
+// validate validates t as kin-openapi does, but for the examples of media types that aren't JSON: OpenAPI writes
+// those as the body itself, such as XML text, which their schema, describing the data, rejects.
+func validate(ctx context.Context, t *openapi3.T) error {
+	type stashed struct {
+		media    *openapi3.MediaType
+		example  any
+		examples openapi3.Examples
+	}
+
+	// A media type of a shared component is reached from each of its users: it is stashed once. A callback may lead
+	// back to a path item already walked.
+	seen := make(map[*openapi3.MediaType]bool)
+	walked := make(map[*openapi3.PathItem]bool)
+
 	var (
-		paths    []string
-		warnings []string
+		stash   []stashed
+		content func(c openapi3.Content)
 	)
+
+	header := func(h *openapi3.HeaderRef) {
+		if h != nil && h.Value != nil {
+			content(h.Value.Content)
+		}
+	}
+
+	content = func(c openapi3.Content) {
+		for name, mt := range c {
+			if mt == nil || seen[mt] {
+				continue
+			}
+
+			seen[mt] = true
+
+			for _, e := range mt.Encoding {
+				if e != nil {
+					for _, h := range e.Headers {
+						header(h)
+					}
+				}
+			}
+
+			// kin-openapi rejects an example and examples together: they stay for it to.
+			if openapi.IsJSON(name) || mt.Example != nil && mt.Examples != nil {
+				continue
+			}
+
+			stash = append(stash, stashed{media: mt, example: mt.Example, examples: mt.Examples})
+			mt.Example, mt.Examples = nil, nil
+		}
+	}
+
+	parameter := func(p *openapi3.ParameterRef) {
+		if p != nil && p.Value != nil {
+			content(p.Value.Content)
+		}
+	}
+
+	response := func(r *openapi3.ResponseRef) {
+		if r == nil || r.Value == nil {
+			return
+		}
+
+		content(r.Value.Content)
+
+		for _, h := range r.Value.Headers {
+			header(h)
+		}
+	}
+
+	var item func(p *openapi3.PathItem)
+
+	callbacks := func(cs openapi3.Callbacks) {
+		for _, c := range cs {
+			if c != nil && c.Value != nil {
+				for _, p := range c.Value.Map() {
+					item(p)
+				}
+			}
+		}
+	}
+
+	item = func(p *openapi3.PathItem) {
+		if p == nil || walked[p] {
+			return
+		}
+
+		walked[p] = true
+
+		for _, param := range p.Parameters {
+			parameter(param)
+		}
+
+		for _, op := range p.Operations() {
+			for _, param := range op.Parameters {
+				parameter(param)
+			}
+
+			if op.RequestBody != nil && op.RequestBody.Value != nil {
+				content(op.RequestBody.Value.Content)
+			}
+
+			if op.Responses != nil {
+				for _, r := range op.Responses.Map() {
+					response(r)
+				}
+			}
+
+			callbacks(op.Callbacks)
+		}
+	}
+
+	if t.Paths != nil {
+		for _, p := range t.Paths.Map() {
+			item(p)
+		}
+	}
+
+	for _, p := range t.Webhooks {
+		item(p)
+	}
+
+	if c := t.Components; c != nil {
+		for _, p := range c.Parameters {
+			parameter(p)
+		}
+
+		for _, h := range c.Headers {
+			header(h)
+		}
+
+		for _, b := range c.RequestBodies {
+			if b != nil && b.Value != nil {
+				content(b.Value.Content)
+			}
+		}
+
+		for _, r := range c.Responses {
+			response(r)
+		}
+
+		callbacks(c.Callbacks)
+	}
+
+	defer func() {
+		for _, st := range stash {
+			st.media.Example, st.media.Examples = st.example, st.examples
+		}
+	}()
+
+	if err := t.Validate(ctx); err != nil {
+		return err
+	}
+
+	// What the examples left out must be, but for their schema.
+	for _, st := range stash {
+		for _, ex := range st.examples {
+			if err := ex.Validate(ctx); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// basePath returns the path of the first of servers, which the operations they serve are under. It logs on log a
+// server whose path it cannot read, and servers whose paths differ: the mocks answer the first one's only.
+func basePath(servers openapi3.Servers, log *zerolog.Logger) string {
+	var paths []string
 
 	for _, s := range servers {
 		p, err := s.BasePath()
 		if err != nil {
-			warnings = append(warnings, prefixed(where, fmt.Sprintf("server %s: %v: ignored", s.URL, err)))
+			log.Warn().Str("server", s.URL).Msgf("the server's path is not a URL: %v: ignored", err)
 			continue
 		}
 
@@ -116,23 +279,14 @@ func basePath(servers openapi3.Servers, where string) (string, []string) {
 	}
 
 	if len(paths) == 0 {
-		return "", warnings
+		return ""
 	}
 
 	if slices.ContainsFunc(paths, func(p string) bool { return p != paths[0] }) {
-		warnings = append(warnings, prefixed(where, fmt.Sprintf("the servers have different paths: the mocks answer under the first one's, %q", cmp.Or(paths[0], "/"))))
+		log.Warn().Msgf("the servers have different paths: the mocks answer under the first one's, %q", cmp.Or(paths[0], "/"))
 	}
 
-	return paths[0], warnings
-}
-
-// prefixed returns warning, after where when where is not "".
-func prefixed(where, warning string) string {
-	if where == "" {
-		return warning
-	}
-
-	return where + ": " + warning
+	return paths[0]
 }
 
 // converter translates the parts of a document into the model.

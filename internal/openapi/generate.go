@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rs/zerolog"
+
 	"github.com/caffeine-projects/vlatte/fakefy"
 )
 
@@ -96,21 +98,15 @@ type Reply struct {
 
 	// Body is the body, as a mock file's body key takes it: text as is, anything else as JSON. nil is no body.
 	Body any
-}
 
-// Output is what [Generate] makes of a document.
-type Output struct {
-	// Files are the mock files to write.
-	Files []File
-
-	// Warnings are what the generator could not honor, such as a schema no fake value fits.
-	Warnings []string
+	// BodyBase64 is the body as bytes, in standard base64, in place of Body. "" is none.
+	BodyBase64 string
 }
 
 // Generate makes the mock files of doc: mocks named by [RouteFirst], each in a file of its own, as [PerMock] lays
-// them out. A body no value fits, by its examples or its schema, leaves its mock without one and disabled, with a
-// warning.
-func Generate(doc *Document) *Output {
+// them out. It logs on log, at warn level, each thing it could not honor, naming its mock, and [zerolog.Nop] silences
+// it: a body no value fits, by its examples or its schema, leaves its mock without one and disabled.
+func Generate(doc *Document, log *zerolog.Logger) []File {
 	g := generator{doc: doc, defs: make(map[string]any, len(doc.Defs))}
 	for name, def := range doc.Defs {
 		g.defs[name] = stripWriteOnly(def, doc.Defs)
@@ -127,7 +123,22 @@ func Generate(doc *Document) *Output {
 
 	name(g.mocks, RouteFirst)
 
-	return &Output{Files: PerMock(g.mocks), Warnings: g.warnings}
+	for _, w := range g.warnings {
+		m := g.mocks[w.mock]
+		e := log.Warn().Str("mock", m.ID).Str("method", m.Method).Str("route", m.Route).Str("status", m.Status)
+
+		if m.MediaType != "" {
+			e = e.Str("media_type", m.MediaType)
+		}
+
+		if m.Variant != "" {
+			e = e.Str("variant", m.Variant)
+		}
+
+		e.Msg(w.message)
+	}
+
+	return PerMock(g.mocks)
 }
 
 // generator holds the mocks and warnings of a document as they are made.
@@ -135,7 +146,29 @@ type generator struct {
 	doc      *Document
 	defs     map[string]any
 	mocks    []Mock
-	warnings []string
+	pending  []string
+	warnings []warning
+}
+
+// warning is something the generator could not honor in a mock.
+type warning struct {
+	mock    int // the index of the mock in generator.mocks
+	message string
+}
+
+// add adds m, with the warnings recorded since the mock before it.
+func (g *generator) add(m Mock) {
+	for _, message := range g.pending {
+		g.warnings = append(g.warnings, warning{mock: len(g.mocks), message: message})
+	}
+
+	g.pending = g.pending[:0]
+	g.mocks = append(g.mocks, m)
+}
+
+// warnf records a warning about the next mock [generator.add] adds: a mock being made, or the first of a response's.
+func (g *generator) warnf(format string, args ...any) {
+	g.pending = append(g.pending, fmt.Sprintf(format, args...))
 }
 
 // operation makes the mocks of op.
@@ -231,7 +264,7 @@ func (g *generator) fallback(m Mock, r Response, status int) {
 func (g *generator) contents(m Mock, r Response, status int, extras bool) {
 	if len(r.Content) == 0 {
 		m.Reply = Reply{Status: status, Header: g.headers(m, r)}
-		g.mocks = append(g.mocks, m)
+		g.add(m)
 
 		return
 	}
@@ -257,31 +290,23 @@ func (g *generator) contents(m Mock, r Response, status int, extras bool) {
 // schema. With extras, each example past the first adds a disabled mock of its own. A body no value fits leaves m
 // disabled and without one, with a warning.
 func (g *generator) body(m Mock, r Response, c Content, status int, extras bool) {
-	m.Reply = Reply{Status: status, Header: g.headers(m, r)}
+	headers := g.headers(m, r)
+	m.Reply = Reply{Status: status, Header: headers}
 
 	switch {
 	case len(c.Examples) > 0:
-		m.Reply.Body = encodeBody(c.MediaType, c.Examples[0].Value, c.Schema)
+		g.setBody(&m, c, c.Examples[0].Value)
 	case c.Schema != nil:
 		v, err := fakefy.New(fakefy.WithSeed(seed(m))).Schema(g.root(c.Schema))
 		if err != nil {
-			g.warnf(m, "no body fits: %v: written disabled", err)
+			g.warnf("no body fits: %v: written disabled", err)
 			m.Enabled = false
 		} else {
-			m.Reply.Body = encodeBody(c.MediaType, v, c.Schema)
+			g.setBody(&m, c, v)
 		}
 	}
 
-	// A media range names no type a client can read the body as.
-	if m.Reply.Body != nil && !isRange(c.MediaType) {
-		if m.Reply.Header == nil {
-			m.Reply.Header = make(map[string]string, 1)
-		}
-
-		m.Reply.Header["Content-Type"] = c.MediaType
-	}
-
-	g.mocks = append(g.mocks, m)
+	g.add(withContentType(m, c.MediaType))
 
 	if !extras {
 		return
@@ -292,9 +317,25 @@ func (g *generator) body(m Mock, r Response, c Content, status int, extras bool)
 		em.Variant = cmp.Or(ex.Name, "example"+strconv.Itoa(i+2))
 		em.Enabled = false
 		em.Priority = priority(_bandDisabled, m.Route)
-		em.Reply.Body = encodeBody(c.MediaType, ex.Value, c.Schema)
-		g.mocks = append(g.mocks, em)
+		em.Reply = Reply{Status: status, Header: headers}
+		g.setBody(&em, c, ex.Value)
+		g.add(withContentType(em, c.MediaType))
 	}
+}
+
+// withContentType returns m with mediaType as its Content-Type, when it has a body. A media range names no type a
+// client can read the body as: m stays without one.
+func withContentType(m Mock, mediaType string) Mock {
+	if m.Reply.Body == nil && m.Reply.BodyBase64 == "" || isRange(mediaType) {
+		return m
+	}
+
+	h := make(map[string]string, len(m.Reply.Header)+1)
+	maps.Copy(h, m.Reply.Header)
+	h["Content-Type"] = mediaType
+	m.Reply.Header = h
+
+	return m
 }
 
 // withoutRanges returns r without its media ranges, such as */* or image/*, with a warning for each, when it has
@@ -312,7 +353,7 @@ func (g *generator) withoutRanges(m Mock, r Response) Response {
 
 	for _, c := range r.Content {
 		if !slices.ContainsFunc(types, func(t Content) bool { return t.MediaType == c.MediaType }) {
-			g.warnf(m, "media range %s: left out: the mocks answer %s", c.MediaType, types[0].MediaType)
+			g.warnf("media range %s: left out: the mocks answer %s", c.MediaType, types[0].MediaType)
 		}
 	}
 
@@ -354,7 +395,7 @@ func (g *generator) notAcceptable(base Mock, r Response, declared *Response) {
 		Body:   "expected one of: " + strings.Join(names, ", "),
 	}
 
-	g.mocks = append(g.mocks, m)
+	g.add(m)
 }
 
 // headers returns the headers of response r for mock m: each header's first example, or a fake value of its schema.
@@ -378,7 +419,7 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 
 		v, err := f.Field(hd.Name, g.root(hd.Schema))
 		if err != nil {
-			g.warnf(m, "no value of header %s fits: %v: left out", hd.Name, err)
+			g.warnf("no value of header %s fits: %v: left out", hd.Name, err)
 			continue
 		}
 
@@ -408,13 +449,6 @@ func (g *generator) root(schema any) map[string]any {
 	root["$defs"] = defs
 
 	return root
-}
-
-func (g *generator) warnf(m Mock, format string, args ...any) {
-	where := strings.Join(slices.DeleteFunc([]string{m.Method, m.Route, m.Status, m.MediaType, m.Variant}, func(s string) bool {
-		return s == ""
-	}), " ")
-	g.warnings = append(g.warnings, where+": "+fmt.Sprintf(format, args...))
 }
 
 // seed returns the seed of the fake values of m: the same for the same route, method, status, media type and

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/mockid"
@@ -47,8 +48,10 @@ func TestGenerate_GivesEveryMockAUniqueIDEveryFileSystemTakes(t *testing.T) {
 		ops[i] = openapi.Operation{Method: "GET", Path: route, Responses: []openapi.Response{{Status: "200"}}}
 	}
 
+	log := zerolog.Nop()
 	got := make([]string, 0, len(routes))
-	for _, f := range openapi.Generate(&openapi.Document{Operations: ops}).Files {
+
+	for _, f := range openapi.Generate(&openapi.Document{Operations: ops}, &log) {
 		require.NoError(t, mockid.Check(f.Mocks[0].ID))
 		got = append(got, f.Mocks[0].ID)
 	}

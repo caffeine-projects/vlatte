@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bytes"
 	json "encoding/json/v2"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
@@ -33,14 +35,15 @@ func TestOpenAPI_TheGeneratedMocksServeTheSpec(t *testing.T) {
 	data, err := read(loc)
 	require.NoError(t, err)
 
-	doc, err := openapiv3.Load(t.Context(), data, loc, read)
+	var logs bytes.Buffer
+
+	log := zerolog.New(&logs)
+	doc, err := openapiv3.Load(t.Context(), data, loc, read, &log)
 	require.NoError(t, err)
 
-	out := openapi.Generate(doc)
-	require.Empty(t, out.Warnings)
-
-	_, err = openapi.Write(dir, doc.Title, out.Files)
+	_, err = openapi.Write(dir, doc.Title, openapi.Generate(doc, &log))
 	require.NoError(t, err)
+	require.Empty(t, logs.String())
 
 	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(admin.MustNew()).MockFilePatterns(filepath.Join(dir, "*.mock.yaml")))
 	m.MustStart()
@@ -358,8 +361,55 @@ paths:
 	}
 }
 
-// serveSpec serves the mocks the generator writes of spec, an OpenAPI document.
+func TestOpenAPI_ABodyOutsideJSONIsTextOrBytes(t *testing.T) {
+	// Outside JSON, the generator writes no format: a CSV example given as data has no text to send, so its mock is
+	// written disabled and the client gets the 404, and an image given in base64 reaches the client as its bytes.
+	spec := `
+openapi: 3.1.0
+info: {title: Bodies, version: "1"}
+paths:
+  /pets/{id}:
+    get:
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}, example: "1"}
+      responses:
+        "200":
+          description: OK
+          content:
+            text/csv: {example: {id: "1"}}
+            image/png:
+              schema: {type: string, contentEncoding: base64}
+              example: iVBORw0KGgo=
+        "404":
+          description: Not found
+`
+	m, logs := serveSpecLogging(t, spec)
+	require.Equal(t, `{"level":"warn","mock":"pets._id.get.200.text-csv.example","method":"GET","route":"/pets/{id}","status":"200",`+
+		`"media_type":"text/csv","variant":"example","message":"the body is data, not text: written disabled: give a string example"}`+"\n", logs)
+
+	status, mock, body := call(t, m, http.MethodGet, "/pets/1", "text/csv")
+	require.Equal(t, http.StatusNotFound, status, body)
+	require.Equal(t, "pets._id.get.404", mock)
+
+	status, mock, body = call(t, m, http.MethodGet, "/pets/1", "image/png")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "pets._id.get.200.image-png.example", mock)
+	require.Equal(t, "\x89PNG\r\n\x1a\n", body)
+}
+
+// serveSpec serves the mocks the generator writes of spec, an OpenAPI document, and fails on a warning.
 func serveSpec(t *testing.T, spec string) *mockhttp.Server {
+	t.Helper()
+
+	m, logs := serveSpecLogging(t, spec)
+	require.Empty(t, logs)
+
+	return m
+}
+
+// serveSpecLogging serves the mocks the generator writes of spec, an OpenAPI document, and returns what it logs, as
+// JSON lines.
+func serveSpecLogging(t *testing.T, spec string) (*mockhttp.Server, string) {
 	t.Helper()
 
 	specDir, mocksDir := t.TempDir(), t.TempDir()
@@ -374,20 +424,20 @@ func serveSpec(t *testing.T, spec string) *mockhttp.Server {
 	data, err := read(loc)
 	require.NoError(t, err)
 
-	doc, err := openapiv3.Load(t.Context(), data, loc, read)
+	var logs bytes.Buffer
+
+	log := zerolog.New(&logs)
+	doc, err := openapiv3.Load(t.Context(), data, loc, read, &log)
 	require.NoError(t, err)
 
-	out := openapi.Generate(doc)
-	require.Empty(t, out.Warnings)
-
-	_, err = openapi.Write(mocksDir, doc.Title, out.Files)
+	_, err = openapi.Write(mocksDir, doc.Title, openapi.Generate(doc, &log))
 	require.NoError(t, err)
 
 	m := mockhttp.MustNew(mockhttp.Setup().Silent().MockFilePatterns(filepath.Join(mocksDir, "*.mock.yaml")))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	return m
+	return m, logs.String()
 }
 
 // call sends a request to m, with accept as its Accept when not empty, and returns the status, the ID of the mock

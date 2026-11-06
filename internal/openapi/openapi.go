@@ -17,6 +17,10 @@
 // as OpenAPI matches a literal path first. The statuses that a request's contract decides, 400, 401, 405, 415 and
 // 422, get no mock.
 //
+// A body is the media type's first example, or a fake value of its schema. In JSON, it is written as JSON. In any
+// other media type, it is written as text, or as bytes when its schema says the string is base64: an object or a list
+// there, which has no text, leaves its mock disabled and without a body.
+//
 // A rerun on the same document writes the same bytes: the operations are sorted, and fake values are seeded by the
 // mock they belong to.
 package openapi
@@ -45,9 +49,6 @@ type Document struct {
 
 	// Defs are the schemas the others share, by name.
 	Defs map[string]any
-
-	// Warnings are what the version package read but could not honor, such as servers with different paths.
-	Warnings []string
 }
 
 // Operation is an HTTP method on a path.

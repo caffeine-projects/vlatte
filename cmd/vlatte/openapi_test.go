@@ -164,7 +164,7 @@ paths:
 
 	var stdout, stderr bytes.Buffer
 	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr))
-	require.Equal(t, "warning: the servers have different paths: the mocks answer under the first one's, \"/v1\"\n", stderr.String())
+	require.Regexp(t, `^\S+ WRN the servers have different paths: the mocks answer under the first one's, "/v1"\n$`, stderr.String())
 
 	write("  /a: {get: {responses: {\"204\": {description: OK}}}}\n")
 	stdout.Reset()
@@ -176,6 +176,24 @@ paths:
 	stderr.Reset()
 	require.Equal(t, 1, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, io.Discard, &stderr))
 	require.Contains(t, stderr.String(), "\nopenapi: a file to write is not one generated from this spec: v1.a.get.204.mock.yaml: move them, or write to another folder\n")
+}
+
+func TestOpenAPI_LogsWhatItCannotHonorOnStandardError(t *testing.T) {
+	// The log names the mock to fix or enable, and keeps standard output for the result, which scripts read.
+	dir := t.TempDir()
+	spec := filepath.Join(dir, "spec.yaml")
+	out := filepath.Join(dir, "mocks")
+	require.NoError(t, os.WriteFile(spec, []byte(`openapi: 3.1.0
+info: {title: X, version: "1"}
+paths:
+  /report: {get: {responses: {"200": {description: OK, content: {text/csv: {example: [a, b]}}}}}}
+`), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr))
+	require.Regexp(t, `^\S+ WRN the body is data, not text: written disabled: give a string example `+
+		`media_type=text/csv method=GET mock=report.get.200.text-csv route=/report status=200\n$`, stderr.String())
+	require.Equal(t, "Wrote 2 mock files to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
 }
 
 func TestOpenAPI_TakesAnInAndAnOut(t *testing.T) {

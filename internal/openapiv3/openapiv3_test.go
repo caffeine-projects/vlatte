@@ -1,6 +1,8 @@
 package openapiv3_test
 
 import (
+	"bytes"
+	json "encoding/json/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/openapi"
@@ -146,7 +149,7 @@ paths:
 }
 
 func TestLoad_WarnsWhenServersHaveDifferentPaths(t *testing.T) {
-	doc := load(t, map[string]string{"spec.yaml": `
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
 openapi: 3.1.0
 info: {title: Pets, version: "1"}
 servers: [{url: "/v1/"}, {url: "https://x.example.com/v2"}]
@@ -156,7 +159,9 @@ paths:
 `})
 
 	require.Equal(t, "/v1", doc.Operations[0].BasePath)
-	require.Equal(t, []string{`the servers have different paths: the mocks answer under the first one's, "/v1"`}, doc.Warnings)
+	require.Equal(t, []map[string]any{
+		{"level": "warn", "message": `the servers have different paths: the mocks answer under the first one's, "/v1"`},
+	}, warnings)
 }
 
 func TestLoad_ReadsHowAPathParameterIsWritten(t *testing.T) {
@@ -181,7 +186,7 @@ paths:
 
 func TestLoad_PutsAnOperationUnderItsServersElseItsPathsElseTheDocuments(t *testing.T) {
 	// OpenAPI lets a path, and an operation, replace the servers above them: each operation answers under its own.
-	doc := load(t, map[string]string{"spec.yaml": `
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
 openapi: 3.1.0
 info: {title: Pets, version: "1"}
 servers: [{url: /v1}]
@@ -202,21 +207,24 @@ paths:
 	}
 
 	require.Equal(t, map[string]string{"GET /owners": "/v1", "GET /pets": "/v2", "POST /pets": "/v3"}, bases)
-	require.Equal(t, []string{
-		`/pets: the servers have different paths: the mocks answer under the first one's, "/v2"`,
-		`POST /pets: the servers have different paths: the mocks answer under the first one's, "/v3"`,
-	}, doc.Warnings)
+	require.Equal(t, []map[string]any{
+		{"level": "warn", "path": "/pets", "message": `the servers have different paths: the mocks answer under the first one's, "/v2"`},
+		{"level": "warn", "method": "POST", "path": "/pets", "message": `the servers have different paths: the mocks answer under the first one's, "/v3"`},
+	}, warnings)
 }
 
 func TestLoad_WarnsOfAServerWhosePathIsNotAURL(t *testing.T) {
-	doc := load(t, map[string]string{"spec.yaml": `
+	_, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
 openapi: 3.1.0
 info: {title: Pets, version: "1"}
 servers: [{url: "https://x.example.com/{v}", variables: {v: {default: "%zz"}}}]
 paths: {}
 `})
 
-	require.Equal(t, []string{`server https://x.example.com/{v}: parse "https://x.example.com/%zz": invalid URL escape "%zz": ignored`}, doc.Warnings)
+	require.Equal(t, []map[string]any{{
+		"level": "warn", "server": "https://x.example.com/{v}",
+		"message": `the server's path is not a URL: parse "https://x.example.com/%zz": invalid URL escape "%zz": ignored`,
+	}}, warnings)
 }
 
 func TestLoad_ReadsWhatASpecMayLeaveOut(t *testing.T) {
@@ -250,12 +258,119 @@ paths:
 	}, sortedOperations(doc))
 }
 
+func TestLoad_TakesAnExampleOutsideJSONAsWritten(t *testing.T) {
+	// OpenAPI writes the example of a media type that isn't JSON as the body itself, such as XML text, while its
+	// schema describes the data: the example is no object, yet the spec is valid, wherever the response is used.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /a:
+    get: {responses: {"200": {$ref: "#/components/responses/Pet"}}}
+  /b:
+    get: {responses: {"200": {$ref: "#/components/responses/Pet"}}}
+components:
+  responses:
+    Pet:
+      description: OK
+      content:
+        application/xml:
+          schema: {type: object, properties: {name: {type: string}}}
+          example: <Pet><name>Rex</name></Pet>
+`})
+
+	for _, op := range sortedOperations(doc) {
+		require.Equal(t, []openapi.Example{{Value: "<Pet><name>Rex</name></Pet>"}}, op.Responses[0].Content[0].Examples, op.Path)
+	}
+}
+
+func TestLoad_TakesAnExampleOutsideJSONOfAnEncodingHeaderAsWritten(t *testing.T) {
+	// A part of a multipart body has headers of its own, whose content is written as the other bodies are.
+	load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    post:
+      requestBody:
+        content:
+          multipart/form-data:
+            schema: {type: object, properties: {pet: {type: object}}}
+            encoding:
+              pet:
+                headers:
+                  X-Pet:
+                    content:
+                      application/xml:
+                        schema: {type: object}
+                        example: <Pet/>
+      responses: {"204": {description: OK}}
+`})
+}
+
+func TestLoad_FailsOnAnExampleOutsideJSONTheSpecForbids(t *testing.T) {
+	// Only the schema check is left out of an example outside JSON: the rest of what OpenAPI asks of it holds.
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "an example and examples", content: "{schema: {type: object}, example: <Pet/>, examples: {a: {value: <Pet/>}}}", want: "example and examples are mutually exclusive"},
+		{name: "a value and an external value", content: "{schema: {type: object}, examples: {a: {value: <Pet/>, externalValue: https://x.example.com/pet.xml}}}", want: "value and externalValue are mutually exclusive"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := []byte(`
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/xml: ` + tt.content + "\n")
+
+			log := zerolog.Nop()
+			_, err := openapiv3.Load(t.Context(), data, &url.URL{Path: filepath.ToSlash(filepath.Join(t.TempDir(), "spec.yaml"))}, read(t), &log)
+			require.ErrorIs(t, err, openapi.ErrInvalid)
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestLoad_FailsOnAJSONExampleItsSchemaRejects(t *testing.T) {
+	// A JSON example is the data its schema describes: one that breaks it would make a mock that breaks the contract.
+	data := []byte(`
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: object}
+              example: <Pet/>
+`)
+
+	log := zerolog.Nop()
+	_, err := openapiv3.Load(t.Context(), data, &url.URL{Path: filepath.ToSlash(filepath.Join(t.TempDir(), "spec.yaml"))}, read(t), &log)
+	require.ErrorIs(t, err, openapi.ErrInvalid)
+	require.ErrorContains(t, err, "invalid example")
+}
+
 func TestLoad_FailsOnAnInvalidSpec(t *testing.T) {
 	// A contract that contradicts itself makes mocks that mislead.
 	dir := t.TempDir()
 	data := []byte("openapi: 3.1.0\ninfo: {title: Pets, version: \"1\"}\npaths:\n  /pets:\n    get:\n      parameters: [{name: a, in: querya}]\n      responses: {\"200\": {description: OK}}\n")
 
-	_, err := openapiv3.Load(t.Context(), data, &url.URL{Path: filepath.ToSlash(filepath.Join(dir, "spec.yaml"))}, read(t))
+	log := zerolog.Nop()
+	_, err := openapiv3.Load(t.Context(), data, &url.URL{Path: filepath.ToSlash(filepath.Join(dir, "spec.yaml"))}, read(t), &log)
 	require.ErrorIs(t, err, openapi.ErrInvalid)
 }
 
@@ -264,8 +379,18 @@ func sortedOperations(doc *openapi.Document) []openapi.Operation {
 	return slices.SortedFunc(slices.Values(doc.Operations), func(a, b openapi.Operation) int { return strings.Compare(a.Path, b.Path) })
 }
 
-// load writes files to a folder and loads its spec.yaml.
+// load writes files to a folder and loads its spec.yaml, and fails on a warning.
 func load(t *testing.T, files map[string]string) *openapi.Document {
+	t.Helper()
+
+	doc, warnings := loadWithWarnings(t, files)
+	require.Empty(t, warnings)
+
+	return doc
+}
+
+// loadWithWarnings writes files to a folder, loads its spec.yaml, and returns the entries Load logs.
+func loadWithWarnings(t *testing.T, files map[string]string) (*openapi.Document, []map[string]any) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -283,10 +408,21 @@ func load(t *testing.T, files map[string]string) *openapi.Document {
 	data, err := r(loc)
 	require.NoError(t, err)
 
-	doc, err := openapiv3.Load(t.Context(), data, loc, r)
+	var logs bytes.Buffer
+
+	log := zerolog.New(&logs)
+	doc, err := openapiv3.Load(t.Context(), data, loc, r, &log)
 	require.NoError(t, err)
 
-	return doc
+	var entries []map[string]any
+
+	for line := range bytes.Lines(logs.Bytes()) {
+		var e map[string]any
+		require.NoError(t, json.Unmarshal(line, &e))
+		entries = append(entries, e)
+	}
+
+	return doc, entries
 }
 
 func read(t *testing.T) func(u *url.URL) ([]byte, error) {

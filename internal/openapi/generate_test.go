@@ -1,11 +1,14 @@
 package openapi_test
 
 import (
+	"bytes"
+	json "encoding/json/v2"
 	"fmt"
 	"maps"
 	"slices"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/openapi"
@@ -57,7 +60,10 @@ func TestGenerate_AMediaRangeGivesWayToMediaTypes(t *testing.T) {
 
 	require.Equal(t, []string{"pets.get.200.json", "pets.get.406"}, ids(mocks))
 	require.Equal(t, []any{"accept", "application/json", []any{"application/json"}}, mocks["pets.get.200.json"].Request.Accept)
-	require.Equal(t, []string{"GET /pets 200: media range */*: left out: the mocks answer application/json"}, warnings)
+	require.Equal(t, []map[string]any{{
+		"level": "warn", "mock": "pets.get.200.json", "method": "GET", "route": "/pets", "status": "200", "media_type": "application/json",
+		"message": "media range */*: left out: the mocks answer application/json",
+	}}, warnings)
 }
 
 func TestGenerate_AResponseOfMediaRangesOnlyTakesAnyAccept(t *testing.T) {
@@ -76,7 +82,10 @@ func TestGenerate_AResponseOfMediaRangesOnlyTakesAnyAccept(t *testing.T) {
 		Request: openapi.Request{Method: "GET", Path: []any{"equal", "/files"}},
 		Reply:   openapi.Reply{Status: 200, Body: "a file"},
 	}, mocks["files.get.200.text-any"])
-	require.Equal(t, []string{"GET /files 200: media range */*: left out: the mocks answer text/*"}, warnings)
+	require.Equal(t, []map[string]any{{
+		"level": "warn", "mock": "files.get.200.text-any", "method": "GET", "route": "/files", "status": "200", "media_type": "text/*",
+		"message": "media range */*: left out: the mocks answer text/*",
+	}}, warnings)
 }
 
 func TestGenerate_AnswersA406WithTheOperationsOwn(t *testing.T) {
@@ -231,7 +240,10 @@ func TestGenerate_A404AnswersInTheMediaTypeTheClientPrefers(t *testing.T) {
 	require.Equal(t, []string{
 		"pets._id.get.200.json.example", "pets._id.get.200.xml.example", "pets._id.get.404.json", "pets._id.get.404.xml", "pets._id.get.406",
 	}, ids(mocks))
-	require.Equal(t, []string{"GET /pets/{id} 404: media range */*: left out: the mocks answer application/json"}, warnings)
+	require.Equal(t, []map[string]any{{
+		"level": "warn", "mock": "pets._id.get.404.json", "method": "GET", "route": "/pets/{id}", "status": "404", "media_type": "application/json",
+		"message": "media range */*: left out: the mocks answer application/json",
+	}}, warnings)
 
 	json := mocks["pets._id.get.404.json"]
 	require.Equal(t, []any{"any", []any{"accept", "application/json", offers}, []any{"notacceptable", offers}}, json.Request.Accept)
@@ -363,6 +375,61 @@ func TestGenerate_ExamplesPastTheFirstAreDisabled(t *testing.T) {
 	require.False(t, mocks["pets.get.200.text.two"].Enabled)
 	require.Equal(t, 100, mocks["pets.get.200.text.two"].Priority)
 	require.Equal(t, "3", mocks["pets.get.200.text.example3"].Reply.Body)
+}
+
+func TestGenerate_WritesEachExamplePastTheFirstByItsOwnValue(t *testing.T) {
+	// Enabled, an example's mock answers with its own body: one the generator can't write must not reach the client,
+	// and one it can must name its media type, whatever the first example was.
+	mocks, warnings := generateWithWarnings(t, &openapi.Document{Operations: []openapi.Operation{{
+		Method: "GET", Path: "/report",
+		Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{
+			MediaType: "text/csv",
+			Examples: []openapi.Example{
+				{Value: "a\n"}, {Name: "data", Value: map[string]any{"a": 1}}, {Name: "list", Value: []any{"a"}}, {Name: "csv", Value: "b\n"},
+			},
+		}}}},
+	}}})
+
+	csv := map[string]string{"Content-Type": "text/csv"}
+	require.Equal(t, openapi.Reply{Status: 200, Header: csv, Body: "a\n"}, mocks["report.get.200.text-csv"].Reply)
+	require.Equal(t, openapi.Reply{Status: 200}, mocks["report.get.200.text-csv.data"].Reply)
+	require.Equal(t, openapi.Reply{Status: 200}, mocks["report.get.200.text-csv.list"].Reply)
+	require.Equal(t, openapi.Reply{Status: 200, Header: csv, Body: "b\n"}, mocks["report.get.200.text-csv.csv"].Reply)
+
+	message := "the body is data, not text: written disabled: give a string example"
+	require.Equal(t, []map[string]any{
+		{"level": "warn", "mock": "report.get.200.text-csv.data", "method": "GET", "route": "/report", "status": "200", "media_type": "text/csv", "variant": "data", "message": message},
+		{"level": "warn", "mock": "report.get.200.text-csv.list", "method": "GET", "route": "/report", "status": "200", "media_type": "text/csv", "variant": "list", "message": message},
+	}, warnings)
+}
+
+func TestGenerate_DisablesEveryMockWhoseBodyIsDataOutsideJSON(t *testing.T) {
+	// A fake value of an object schema is data too, and a 404 or a 406 is written as the success is: none of them
+	// may answer with JSON under a Content-Type that says otherwise.
+	mocks, warnings := generateWithWarnings(t, &openapi.Document{Operations: []openapi.Operation{{
+		Method: "GET", Path: "/pets/{id}",
+		PathParams: []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{{Value: "1"}}}},
+		Responses: []openapi.Response{
+			{Status: "200", Content: []openapi.Content{{MediaType: "text/csv", Schema: map[string]any{"type": "object"}}}},
+			{Status: "404", Content: []openapi.Content{{MediaType: "text/csv", Examples: []openapi.Example{{Value: map[string]any{"error": "missing"}}}}}},
+			{Status: "406", Content: []openapi.Content{{MediaType: "application/xml", Examples: []openapi.Example{{Value: []any{"text/csv"}}}}}},
+		},
+	}}})
+
+	require.Equal(t, []string{"pets._id.get.200.text-csv.example", "pets._id.get.404.text-csv", "pets._id.get.406.xml"}, ids(mocks))
+
+	for _, id := range ids(mocks) {
+		require.False(t, mocks[id].Enabled, id)
+		require.Nil(t, mocks[id].Reply.Body, id)
+		require.Empty(t, mocks[id].Reply.Header, id)
+	}
+
+	message := "the body is data, not text: written disabled: give a string example"
+	require.Equal(t, []map[string]any{
+		{"level": "warn", "mock": "pets._id.get.200.text-csv.example", "method": "GET", "route": "/pets/{id}", "status": "200", "media_type": "text/csv", "variant": "example", "message": message},
+		{"level": "warn", "mock": "pets._id.get.406.xml", "method": "GET", "route": "/pets/{id}", "status": "406", "media_type": "application/xml", "message": message},
+		{"level": "warn", "mock": "pets._id.get.404.text-csv", "method": "GET", "route": "/pets/{id}", "status": "404", "media_type": "text/csv", "message": message},
+	}, warnings)
 }
 
 func TestGenerate_MoreTemplatedSegmentsMatchLater(t *testing.T) {
@@ -519,9 +586,10 @@ func TestGenerate_DisablesAMockNoBodyFits(t *testing.T) {
 	m := mocks["n.get.200.json"]
 	require.False(t, m.Enabled)
 	require.Nil(t, m.Reply.Body)
-	require.Equal(t, []string{
-		"GET /n 200 application/json: no body fits: fakefy: no value satisfies the schema: at the root: minimum 5 is above maximum 1: written disabled",
-	}, warnings)
+	require.Equal(t, []map[string]any{{
+		"level": "warn", "mock": "n.get.200.json", "method": "GET", "route": "/n", "status": "200", "media_type": "application/json",
+		"message": "no body fits: fakefy: no value satisfies the schema: at the root: minimum 5 is above maximum 1: written disabled",
+	}}, warnings)
 }
 
 func TestGenerate_NumbersUnnamedPathExamples(t *testing.T) {
@@ -547,9 +615,10 @@ func TestGenerate_LeavesOutAHeaderNoValueFits(t *testing.T) {
 	}}})
 
 	require.Equal(t, map[string]string{"X-Ok": "ok"}, mocks["a.get.204"].Reply.Header)
-	require.Equal(t, []string{
-		"GET /a 204: no value of header X-None fits: fakefy: no value satisfies the schema: at the root: minimum 5 is above maximum 1: left out",
-	}, warnings)
+	require.Equal(t, []map[string]any{{
+		"level": "warn", "mock": "a.get.204", "method": "GET", "route": "/a", "status": "204",
+		"message": "no value of header X-None fits: fakefy: no value satisfies the schema: at the root: minimum 5 is above maximum 1: left out",
+	}}, warnings)
 }
 
 func TestGenerate_ABooleanSchemaAllowsAnythingOrNothing(t *testing.T) {
@@ -562,7 +631,8 @@ func TestGenerate_ABooleanSchemaAllowsAnythingOrNothing(t *testing.T) {
 	require.NotNil(t, mocks["any.get.200.text"].Reply.Body)
 	require.False(t, mocks["none.get.200.text"].Enabled)
 	require.Len(t, warnings, 1)
-	require.Contains(t, warnings[0], "GET /none 200 text/plain: no body fits: ")
+	require.Equal(t, "none.get.200.text", warnings[0]["mock"])
+	require.Contains(t, warnings[0]["message"], "no body fits: ")
 }
 
 func TestGenerate_ARedirectRangeIsTheSuccessWithoutA2xx(t *testing.T) {
@@ -586,19 +656,31 @@ func generate(t *testing.T, doc *openapi.Document) map[string]openapi.Mock {
 	return mocks
 }
 
-func generateWithWarnings(t *testing.T, doc *openapi.Document) (map[string]openapi.Mock, []string) {
+// generateWithWarnings returns the mocks Generate makes of doc, by ID, and the entries it logs.
+func generateWithWarnings(t *testing.T, doc *openapi.Document) (map[string]openapi.Mock, []map[string]any) {
 	t.Helper()
 
-	out := openapi.Generate(doc)
+	var logs bytes.Buffer
 
-	mocks := make(map[string]openapi.Mock, len(out.Files))
-	for _, f := range out.Files {
+	log := zerolog.New(&logs)
+	files := openapi.Generate(doc, &log)
+
+	mocks := make(map[string]openapi.Mock, len(files))
+	for _, f := range files {
 		require.Len(t, f.Mocks, 1)
 		require.Equal(t, f.Mocks[0].ID+".mock.yaml", f.Name)
 		mocks[f.Mocks[0].ID] = f.Mocks[0]
 	}
 
-	return mocks, out.Warnings
+	var entries []map[string]any
+
+	for line := range bytes.Lines(logs.Bytes()) {
+		var e map[string]any
+		require.NoError(t, json.Unmarshal(line, &e))
+		entries = append(entries, e)
+	}
+
+	return mocks, entries
 }
 
 func ids(mocks map[string]openapi.Mock) []string {

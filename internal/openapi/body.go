@@ -1,112 +1,80 @@
 package openapi
 
 import (
+	"encoding/base64"
 	json "encoding/json/v2"
-	"encoding/xml"
-	"maps"
 	"slices"
 	"strings"
 )
 
-// encodeBody returns v, a value of the spec or a fake one, as the body of a mock file in mediaType, as its body key
-// takes it: an object or a list in JSON as is, anything else as text. schema, the schema of the body, names the root
-// element of XML.
-func encodeBody(mediaType string, v any, schema any) any {
-	mt, _, _ := strings.Cut(strings.ToLower(mediaType), ";")
-	mt = strings.TrimSpace(mt)
-
-	switch {
-	case isJSON(mt):
+// setBody sets the body of m, of content c, to v, a value of the spec or a fake one, as a mock file takes it. In JSON,
+// an object or a list is the value, which VLatte sends as JSON, and anything else its JSON text. In any other media
+// type, the generator writes no format of its own: a string is the body as is, or its bytes when c's schema says it
+// is base64, and a number or a boolean its text. An object or a list there leaves m disabled and without a body, with
+// a warning.
+func (g *generator) setBody(m *Mock, c Content, v any) {
+	if IsJSON(c.MediaType) {
 		switch v.(type) {
 		case map[string]any, []any:
-			return v
-		}
-
-		b, _ := json.Marshal(v, json.Deterministic(true))
-
-		return string(b)
-	case isXML(mt):
-		if s, ok := v.(string); ok {
-			return s
-		}
-
-		var b strings.Builder
-
-		b.WriteString(xml.Header)
-
-		// A document has one root: a list is wrapped in it.
-		name := xmlName(schema, "root")
-		if list, ok := v.([]any); ok {
-			var items any
-			if s, ok := schema.(map[string]any); ok {
-				items = s["items"]
-			}
-
-			b.WriteString("<" + name + ">")
-			writeXML(&b, xmlName(items, "item"), list)
-			b.WriteString("</" + name + ">")
-		} else {
-			writeXML(&b, name, v)
-		}
-
-		return b.String()
-	default:
-		return text(v)
-	}
-}
-
-func isJSON(mt string) bool {
-	return mt == "application/json" || strings.HasSuffix(mt, "+json")
-}
-
-func isXML(mt string) bool {
-	return mt == "application/xml" || mt == "text/xml" || strings.HasSuffix(mt, "+xml")
-}
-
-// xmlName returns the element name of schema: its xml.name, the name of the schema its $ref points to, or fallback.
-func xmlName(schema any, fallback string) string {
-	s, ok := schema.(map[string]any)
-	if !ok {
-		return fallback
-	}
-
-	if x, ok := s["xml"].(map[string]any); ok {
-		if name, ok := x["name"].(string); ok && name != "" {
-			return name
-		}
-	}
-
-	if ref, ok := s["$ref"].(string); ok {
-		if _, name, ok := strings.Cut(ref, "#/$defs/"); ok && name != "" {
-			return name
-		}
-	}
-
-	return fallback
-}
-
-// writeXML writes v as an element named name: an object's properties as elements, in name order, a list's items as
-// elements named name each, as OpenAPI writes a list that isn't wrapped, and anything else as text.
-func writeXML(b *strings.Builder, name string, v any) {
-	if list, ok := v.([]any); ok {
-		for _, item := range list {
-			writeXML(b, name, item)
+			m.Reply.Body = v
+		default:
+			b, _ := json.Marshal(v, json.Deterministic(true))
+			m.Reply.Body = string(b)
 		}
 
 		return
 	}
 
-	b.WriteString("<" + name + ">")
-
 	switch x := v.(type) {
-	case map[string]any:
-		for _, k := range slices.Sorted(maps.Keys(x)) {
-			writeXML(b, k, x[k])
-		}
-	case nil:
-	default:
-		_ = xml.EscapeText(b, []byte(text(x)))
-	}
+	case map[string]any, []any:
+		g.warnf("the body is data, not text: written disabled: give a string example")
+		m.Enabled = false
+	case string:
+		if x != "" && g.isBase64(c.Schema) {
+			if _, err := base64.StdEncoding.DecodeString(x); err == nil {
+				m.Reply.BodyBase64 = x
+				return
+			}
 
-	b.WriteString("</" + name + ">")
+			g.warnf("the body isn't base64, as its schema says: written as text")
+		}
+
+		m.Reply.Body = x
+	default:
+		m.Reply.Body = text(v)
+	}
+}
+
+// IsJSON reports whether mediaType, with or without parameters, is JSON: application/json or a type ending in +json,
+// such as application/vnd.api+json.
+func IsJSON(mediaType string) bool {
+	mt, _, _ := strings.Cut(strings.ToLower(mediaType), ";")
+	mt = strings.TrimSpace(mt)
+
+	return mt == "application/json" || strings.HasSuffix(mt, "+json")
+}
+
+// isBase64 reports whether schema says its string is base64: its contentEncoding is base64, or, as OpenAPI 3.0 writes
+// it, its format byte, itself or the schema its $ref points to.
+func (g *generator) isBase64(schema any) bool {
+	root := g.root(schema)
+	defs, _ := root["$defs"].(map[string]any)
+
+	var seen []string
+
+	for s := root; ; {
+		if s["contentEncoding"] == "base64" || s["format"] == "byte" {
+			return true
+		}
+
+		ref, _ := s["$ref"].(string)
+
+		name, ok := strings.CutPrefix(ref, "#/$defs/")
+		if !ok || slices.Contains(seen, name) {
+			return false
+		}
+
+		seen = append(seen, name)
+		s, _ = defs[name].(map[string]any)
+	}
 }
