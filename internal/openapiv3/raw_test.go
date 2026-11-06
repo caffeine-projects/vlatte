@@ -34,3 +34,22 @@ func TestDeref_GivesNoValueForAReferenceItCannotFollow(t *testing.T) {
 		})
 	}
 }
+
+func TestResolved_KeepsOnlyTheKeywordsBesideAReferenceItCannotFollow(t *testing.T) {
+	// As deref, for a schema as kin-openapi resolves it in OpenAPI 3.1: a cycle resolves to no schema, and the
+	// keywords beside a reference that isn't a URL are all there is of it.
+	spec := &url.URL{Path: "/specs/spec.json"}
+	r := &rawReader{
+		v31: true,
+		data: map[string][]byte{
+			"/specs/spec.json": []byte(`{"a": {"$ref": "#/b"}, "b": {"$ref": "#/a"}, "c": {"$ref": "%zz", "description": "c"}}`),
+		},
+		files: make(map[string]any),
+		out:   make(raw),
+	}
+	doc := node{file: spec, v: r.file(spec)}
+
+	require.Nil(t, r.resolved(r.child(doc, "a"), _maxRefs))
+	require.Equal(t, node{}, r.annotated(r.child(doc, "a"), "example"))
+	require.Equal(t, map[string]any{"description": "c"}, r.resolved(r.child(doc, "c"), _maxRefs))
+}
