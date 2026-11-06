@@ -397,6 +397,165 @@ paths:
 	require.Equal(t, "\x89PNG\r\n\x1a\n", body)
 }
 
+func TestOpenAPI_ALiteralValueOfASchemaIsServedAsWritten(t *testing.T) {
+	// const and enum hold data, not schemas: a writeOnly key inside one is the value's own, and the body must be
+	// exactly that value, or it breaks the schema it was made from.
+	spec := `
+openapi: 3.1.0
+info: {title: Literal values, version: "1"}
+paths:
+  /const:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                const: {properties: {password: {writeOnly: true, description: literal data}}}
+  /enum:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                enum: [{properties: {password: {writeOnly: true}}}]
+`
+	m := serveSpec(t, spec)
+
+	status, _, body := call(t, m, http.MethodGet, "/const", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.JSONEq(t, `{"properties":{"password":{"writeOnly":true,"description":"literal data"}}}`, body)
+
+	status, _, body = call(t, m, http.MethodGet, "/enum", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.JSONEq(t, `{"properties":{"password":{"writeOnly":true}}}`, body)
+}
+
+func TestOpenAPI_AnEncodedLiteralOfAPathMatchesTheRequestThatSendsIt(t *testing.T) {
+	// The server compares the path decoded: /hello%20world in a spec is the path a client sends as /hello%20world,
+	// in a static path, a template and a path example alike.
+	spec := `
+openapi: 3.1.0
+info: {title: Encoded literals, version: "1"}
+paths:
+  /hello%20world:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain: {example: found}
+  /a%20b/{id}:
+    get:
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}, example: "1"}
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain: {example: example}
+  /c%20d/{id}.json:
+    get:
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain: {example: inside}
+`
+	m := serveSpec(t, spec)
+
+	tests := []struct {
+		path string
+		mock string
+		body string
+	}{
+		{path: "/hello%20world", mock: "hello-20world-get-200-text", body: "found"},
+		{path: "/a%20b/1", mock: "a-20b-_id-get-200-text-example", body: "example"},
+		{path: "/a%20b/2", mock: "a-20b-_id-get-200-text", body: "example"},
+		{path: "/c%20d/2.json", mock: "c-20d-_id-json-get-200-text", body: "inside"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			status, mock, body := call(t, m, http.MethodGet, tt.path, "text/plain")
+			require.Equal(t, http.StatusOK, status, body)
+			require.Equal(t, tt.mock, mock)
+			require.Equal(t, tt.body, body)
+		})
+	}
+
+	status, _, _ := call(t, m, http.MethodGet, "/hello%2520world", "text/plain")
+	require.Equal(t, http.StatusTeapot, status)
+}
+
+func TestOpenAPI_ANullExampleIsTheJSONNull(t *testing.T) {
+	// null is a value an example gives, not a missing one: the client gets the JSON null.
+	spec := `
+openapi: 3.1.0
+info: {title: Null example, version: "1"}
+paths:
+  /null:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              examples:
+                null-response: {value: null}
+`
+	m := serveSpec(t, spec)
+
+	res, body := respond(t, m, http.MethodGet, "/null", "application/json")
+	require.Equal(t, http.StatusOK, res.StatusCode, body)
+	require.Equal(t, "application/json", res.Header.Get("Content-Type"))
+	require.Equal(t, "null", body)
+}
+
+func TestOpenAPI_AResponseHeaderIsWrittenAsItsSpecSays(t *testing.T) {
+	// A header with a schema is in simple style, which explode changes for an object; a header with content is in
+	// its media type.
+	spec := `
+openapi: 3.1.0
+info: {title: Headers, version: "1"}
+paths:
+  /x:
+    get:
+      responses:
+        "204":
+          description: OK
+          headers:
+            X-Color:
+              schema: {type: object}
+              example: {R: 100, G: 200}
+            X-Exploded:
+              explode: true
+              schema: {type: object}
+              example: {R: 100, G: 200}
+            X-List:
+              schema: {type: array}
+              example: [a, b]
+            X-Content:
+              content:
+                application/json:
+                  schema: {type: object}
+                  example: {R: 100}
+`
+	m := serveSpec(t, spec)
+
+	res, body := respond(t, m, http.MethodGet, "/x", "")
+	require.Equal(t, http.StatusNoContent, res.StatusCode, body)
+	require.Equal(t, "G,200,R,100", res.Header.Get("X-Color"))
+	require.Equal(t, "G=200,R=100", res.Header.Get("X-Exploded"))
+	require.Equal(t, "a,b", res.Header.Get("X-List"))
+	require.Equal(t, `{"R":100}`, res.Header.Get("X-Content"))
+}
+
 // serveSpec serves the mocks the generator writes of spec, an OpenAPI document, and fails on a warning.
 func serveSpec(t *testing.T, spec string) *mockhttp.Server {
 	t.Helper()
@@ -445,6 +604,15 @@ func serveSpecLogging(t *testing.T, spec string) (*mockhttp.Server, string) {
 func call(t *testing.T, m *mockhttp.Server, method, path, accept string) (int, string, string) {
 	t.Helper()
 
+	res, body := respond(t, m, method, path, accept)
+
+	return res.StatusCode, res.Header.Get(vlatte.HeaderMatchedMockID), body
+}
+
+// respond sends a request to m, with accept as its Accept when not empty, and returns the response and its body.
+func respond(t *testing.T, m *mockhttp.Server, method, path, accept string) (*http.Response, string) {
+	t.Helper()
+
 	req, err := http.NewRequestWithContext(t.Context(), method, m.URL()+path, nil)
 	require.NoError(t, err)
 
@@ -459,5 +627,5 @@ func call(t *testing.T, m *mockhttp.Server, method, path, accept string) (int, s
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 
-	return res.StatusCode, res.Header.Get(vlatte.HeaderMatchedMockID), string(body)
+	return res, string(body)
 }

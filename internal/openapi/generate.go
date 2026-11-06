@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"maps"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -30,6 +31,12 @@ const (
 // _routeStep is how far apart [priority] puts the bands of routes whose number of templated segments differs by one:
 // past every band.
 const _routeStep = 1000
+
+// ValueKeywords are the keywords of a schema that hold values, not schemas: what they hold is data, whatever its keys.
+var ValueKeywords = []string{"const", "default", "enum", "example", "examples"}
+
+// SchemaMapKeywords are the keywords of a schema that hold schemas by name: their keys are names, not keywords.
+var SchemaMapKeywords = []string{"properties", "patternProperties", "$defs", "dependentSchemas"}
 
 // _contractStatuses are the statuses a request's contract decides, which no generated mock answers.
 var _contractStatuses = []string{"400", "401", "405", "415", "422"}
@@ -174,7 +181,7 @@ func (g *generator) warnf(format string, args ...any) {
 // operation makes the mocks of op.
 func (g *generator) operation(op Operation) {
 	route := joinPath(op.BasePath, op.Path)
-	request := routeRequest(op.Method, route)
+	request := routeRequest(op.Method, op.BasePath, op.Path)
 
 	primary := primaryResponse(op.Responses)
 	notFound := findResponse(op.Responses, "404")
@@ -408,22 +415,24 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 	h := make(map[string]string, len(r.Headers))
 
 	for _, hd := range r.Headers {
-		if len(hd.Examples) > 0 {
-			h[hd.Name] = headerValue(hd.Examples[0].Value)
+		var v any
+
+		switch {
+		case len(hd.Examples) > 0:
+			v = hd.Examples[0].Value
+		case hd.Schema == nil:
 			continue
+		default:
+			var err error
+			if v, err = f.Field(hd.Name, g.root(hd.Schema)); err != nil {
+				g.warnf("no value of header %s fits: %v: left out", hd.Name, err)
+				continue
+			}
 		}
 
-		if hd.Schema == nil {
-			continue
+		if s, ok := g.headerValue(hd, v); ok {
+			h[hd.Name] = s
 		}
-
-		v, err := f.Field(hd.Name, g.root(hd.Schema))
-		if err != nil {
-			g.warnf("no value of header %s fits: %v: left out", hd.Name, err)
-			continue
-		}
-
-		h[hd.Name] = headerValue(v)
 	}
 
 	return h
@@ -562,7 +571,7 @@ func pathExamples(op Operation) []pathExample {
 		}
 
 		// One pass over the template: a value that holds {name} is a value, not a parameter to fill.
-		out[i].path = _param.ReplaceAllStringFunc(op.Path, func(param string) string {
+		out[i].path = fillPath(op.Path, decoded, func(param string) string {
 			if v, ok := values[param]; ok {
 				return v
 			}
@@ -663,46 +672,63 @@ func templated(path string) int {
 // _wholeParam matches a segment that is a parameter, such as {id}.
 var _wholeParam = regexp.MustCompile(`^\{[^{}/]+\}$`)
 
-// routeRequest returns what a mock of route matches: its exact path, a path template whose parameters are whole
-// segments, or a regular expression of the path for a parameter inside a segment.
-func routeRequest(method, route string) Request {
+// routeRequest returns what a mock of path, a path of the spec under base, a base path decoded, matches: its exact
+// path, a path template whose parameters are whole segments, or a regular expression of the path for a parameter
+// inside a segment. The server compares a path decoded, as a path template decodes its literal segments: an escape
+// of the spec, such as %20, matches the request that sends it.
+func routeRequest(method, base, path string) Request {
 	r := Request{Method: method}
 
-	// The server compares the path decoded, and a glob would read a * or [ of the route as its own.
-	if !_param.MatchString(route) {
-		r.Path = []any{"equal", route}
+	// A glob would read a * or [ of the path as its own.
+	if !_param.MatchString(path) {
+		r.Path = []any{"equal", joinPath(base, decoded(path))}
 		return r
 	}
 
 	whole := true
-	for seg := range strings.SplitSeq(route, "/") {
+	for seg := range strings.SplitSeq(path, "/") {
 		if strings.ContainsAny(seg, "{}") && !_wholeParam.MatchString(seg) {
 			whole = false
 		}
 	}
 
 	if whole {
-		r.PathTemplate = route
+		r.PathTemplate = joinPath((&url.URL{Path: base}).EscapedPath(), path)
 		return r
 	}
 
+	quoted := func(s string) string { return regexp.QuoteMeta(decoded(s)) }
+	r.Path = []any{"regex", "^" + regexp.QuoteMeta(strings.TrimSuffix(base, "/")) + fillPath(path, quoted, func(string) string { return `[^/]+` }) + "$"}
+
+	return r
+}
+
+// fillPath returns path, a path of the spec, with literal applied to each text between its parameters and each
+// parameter, such as {id}, replaced by param of it.
+func fillPath(path string, literal, param func(s string) string) string {
 	var b strings.Builder
 
-	b.WriteByte('^')
-
 	last := 0
-	for _, loc := range _param.FindAllStringIndex(route, -1) {
-		b.WriteString(regexp.QuoteMeta(route[last:loc[0]]))
-		b.WriteString(`[^/]+`)
+	for _, loc := range _param.FindAllStringIndex(path, -1) {
+		b.WriteString(literal(path[last:loc[0]]))
+		b.WriteString(param(path[loc[0]:loc[1]]))
 
 		last = loc[1]
 	}
 
-	b.WriteString(regexp.QuoteMeta(route[last:]))
-	b.WriteByte('$')
-	r.Path = []any{"regex", b.String()}
+	b.WriteString(literal(path[last:]))
 
-	return r
+	return b.String()
+}
+
+// decoded returns s, text of a path of the spec, decoded, as the server compares a path, or as written when it holds
+// an invalid escape.
+func decoded(s string) string {
+	if d, err := url.PathUnescape(s); err == nil {
+		return d
+	}
+
+	return s
 }
 
 // joinPath joins a base path and a path of the spec.
@@ -731,18 +757,24 @@ func text(v any) string {
 	return string(b)
 }
 
-// headerValue returns v as a header value: a list as its items joined by commas, as OpenAPI's simple style writes it.
-func headerValue(v any) string {
-	if list, ok := v.([]any); ok {
-		items := make([]string, len(list))
-		for i, item := range list {
-			items[i] = text(item)
-		}
-
-		return strings.Join(items, ",")
+// headerValue returns v as the value of header hd: in its media type, as setBody writes a body, or in OpenAPI's
+// simple style. A list or an object in a media type that isn't JSON is left out, with a warning.
+func (g *generator) headerValue(hd Header, v any) (string, bool) {
+	switch {
+	case hd.MediaType == "":
+		return pathValue(Parameter{Name: hd.Name, Style: "simple", Explode: hd.Explode}, v), true
+	case IsJSON(hd.MediaType):
+		b, _ := json.Marshal(v, json.Deterministic(true))
+		return string(b), true
 	}
 
-	return text(v)
+	switch v.(type) {
+	case map[string]any, []any:
+		g.warnf("header %s is data, not text: left out: give a string example", hd.Name)
+		return "", false
+	}
+
+	return text(v), true
 }
 
 // stripWriteOnly returns a copy of the schema v without its writeOnly properties, which a response never holds, at
@@ -755,27 +787,36 @@ func stripWriteOnly(v any, defs map[string]any) any {
 		var dropped []string
 
 		for k, val := range x {
-			if k == "properties" {
-				props, ok := val.(map[string]any)
-				if ok {
-					kept := make(map[string]any, len(props))
+			named, isMap := val.(map[string]any)
 
-					for name, p := range props {
-						if writeOnly(p, defs, nil) {
-							dropped = append(dropped, name)
-							continue
-						}
+			switch {
+			case slices.Contains(ValueKeywords, k):
+				// Data, whatever keys it holds.
+				out[k] = val
+			case k == "properties" && isMap:
+				kept := make(map[string]any, len(named))
 
-						kept[name] = stripWriteOnly(p, defs)
+				for name, p := range named {
+					if writeOnly(p, defs, nil) {
+						dropped = append(dropped, name)
+						continue
 					}
 
-					out[k] = kept
-
-					continue
+					kept[name] = stripWriteOnly(p, defs)
 				}
-			}
 
-			out[k] = stripWriteOnly(val, defs)
+				out[k] = kept
+			case slices.Contains(SchemaMapKeywords, k) && isMap:
+				// Names, not keywords: a schema named const is a schema.
+				each := make(map[string]any, len(named))
+				for name, p := range named {
+					each[name] = stripWriteOnly(p, defs)
+				}
+
+				out[k] = each
+			default:
+				out[k] = stripWriteOnly(val, defs)
+			}
 		}
 
 		if req, ok := out["required"].([]any); ok && len(dropped) > 0 {

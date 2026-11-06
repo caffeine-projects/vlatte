@@ -117,6 +117,14 @@ type Header struct {
 	// Name is the name of the header.
 	Name string
 
+	// MediaType is the media type its value is written in, such as application/json, or "" for OpenAPI's simple
+	// style, in which a list is its items joined by commas.
+	MediaType string
+
+	// Explode tells, for an object in simple style, whether each of its keys is written with its value as key=value,
+	// rather than both as items.
+	Explode bool
+
 	// Schema is the schema of its value, or nil for none.
 	Schema any
 

@@ -21,16 +21,10 @@ import (
 // _componentsPrefix starts a reference to a shared schema, which the model writes under $defs.
 const _componentsPrefix = "#/components/schemas/"
 
-// _valueKeys are the keywords of a schema that hold values, not schemas: their content is never translated.
-var _valueKeys = []string{"const", "default", "enum", "example", "examples"}
-
-// _schemaMapKeys are the keywords of a schema that hold schemas by name.
-var _schemaMapKeys = []string{"properties", "patternProperties", "$defs", "dependentSchemas"}
-
 // Load reads data, the OpenAPI 3 document at location, and the files its references name, which read returns. It
 // logs on log, at warn level, what it reads but cannot honor, such as servers with different paths: [zerolog.Nop]
 // silences it. It fails with
-// [openapi.ErrInvalid] for a document kin-openapi finds invalid.
+// [openapi.ErrInvalid] for a document kin-openapi finds invalid, or with a null where an object belongs.
 func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.URL) ([]byte, error), log *zerolog.Logger) (*openapi.Document, error) {
 	loader := openapi3.NewLoader()
 	loader.Context = ctx
@@ -115,20 +109,37 @@ func validate(ctx context.Context, t *openapi3.T) error {
 	var (
 		stash   []stashed
 		content func(c openapi3.Content)
+		invalid error
 	)
+
+	// kin-openapi loads and validates a null where some objects belong: null records the first, what, when isNull,
+	// and returns isNull, for the walk to skip it.
+	null := func(isNull bool, what string) bool {
+		if isNull && invalid == nil {
+			invalid = fmt.Errorf("%s: expected an object, not null", what)
+		}
+
+		return isNull
+	}
 
 	// kin-openapi resolves every reference it loads, or fails: a reference holds its value.
 	header := func(h *openapi3.HeaderRef) { content(h.Value.Content) }
 
 	content = func(c openapi3.Content) {
-		for name, mt := range c {
-			if seen[mt] {
+		for _, name := range slices.Sorted(maps.Keys(c)) {
+			mt := c[name]
+			if null(mt == nil, "media type "+name) || seen[mt] {
 				continue
 			}
 
 			seen[mt] = true
 
-			for _, e := range mt.Encoding {
+			for _, field := range slices.Sorted(maps.Keys(mt.Encoding)) {
+				e := mt.Encoding[field]
+				if null(e == nil, "encoding "+field) {
+					continue
+				}
+
 				for _, h := range e.Headers {
 					header(h)
 				}
@@ -154,18 +165,18 @@ func validate(ctx context.Context, t *openapi3.T) error {
 		}
 	}
 
-	var item func(p *openapi3.PathItem)
+	var item func(name string, p *openapi3.PathItem)
 
 	callbacks := func(cs openapi3.Callbacks) {
 		for _, c := range cs {
-			for _, p := range c.Value.Map() {
-				item(p)
+			for _, name := range slices.Sorted(maps.Keys(c.Value.Map())) {
+				item("callback "+name, c.Value.Value(name))
 			}
 		}
 	}
 
-	item = func(p *openapi3.PathItem) {
-		if walked[p] {
+	item = func(name string, p *openapi3.PathItem) {
+		if null(p == nil, name) || walked[p] {
 			return
 		}
 
@@ -195,13 +206,13 @@ func validate(ctx context.Context, t *openapi3.T) error {
 	}
 
 	if t.Paths != nil {
-		for _, p := range t.Paths.Map() {
-			item(p)
+		for _, name := range slices.Sorted(maps.Keys(t.Paths.Map())) {
+			item("path "+name, t.Paths.Value(name))
 		}
 	}
 
-	for _, p := range t.Webhooks {
-		item(p)
+	for _, name := range slices.Sorted(maps.Keys(t.Webhooks)) {
+		item("webhook "+name, t.Webhooks[name])
 	}
 
 	if c := t.Components; c != nil {
@@ -222,6 +233,10 @@ func validate(ctx context.Context, t *openapi3.T) error {
 		}
 
 		callbacks(c.Callbacks)
+	}
+
+	if invalid != nil {
+		return invalid
 	}
 
 	defer func() {
@@ -327,9 +342,21 @@ func (c converter) response(status string, res *openapi3.Response) openapi.Respo
 			continue
 		}
 
-		r.Headers = append(r.Headers, openapi.Header{
-			Name: name, Schema: c.schema(ref.Value.Schema), Examples: examplesOf(ref.Value.Example, ref.Value.Examples),
-		})
+		h := openapi.Header{
+			Name:     name,
+			Explode:  ref.Value.Explode != nil && *ref.Value.Explode,
+			Schema:   c.schema(ref.Value.Schema),
+			Examples: examplesOf(ref.Value.Example, ref.Value.Examples),
+		}
+
+		// A header has a schema or content, of one media type.
+		if len(ref.Value.Content) > 0 {
+			mt := slices.Min(slices.Collect(maps.Keys(ref.Value.Content)))
+			media := ref.Value.Content[mt]
+			h.MediaType, h.Schema, h.Examples = mt, c.schema(media.Schema), examplesOf(media.Example, media.Examples)
+		}
+
+		r.Headers = append(r.Headers, h)
 	}
 
 	for _, mt := range slices.Sorted(maps.Keys(res.Content)) {
@@ -341,7 +368,7 @@ func (c converter) response(status string, res *openapi3.Response) openapi.Respo
 }
 
 // examplesOf returns the example value, if any, then the named examples, in name order. A named example that
-// isn't inline, but at an externalValue, is left out.
+// isn't inline, but at an externalValue, is left out. One without a value is null, as kin-openapi reads value: null.
 func examplesOf(example any, named openapi3.Examples) []openapi.Example {
 	var out []openapi.Example
 	if example != nil {
@@ -350,7 +377,7 @@ func examplesOf(example any, named openapi3.Examples) []openapi.Example {
 
 	for _, name := range slices.Sorted(maps.Keys(named)) {
 		ref := named[name]
-		if ref == nil || ref.Value == nil || ref.Value.Value == nil {
+		if ref == nil || ref.Value == nil || ref.Value.ExternalValue != "" {
 			continue
 		}
 
@@ -382,9 +409,9 @@ func (c converter) translate(v any) any {
 		out := make(map[string]any, len(x))
 		for k, val := range x {
 			switch {
-			case slices.Contains(_valueKeys, k):
+			case slices.Contains(openapi.ValueKeywords, k):
 				out[k] = val
-			case slices.Contains(_schemaMapKeys, k):
+			case slices.Contains(openapi.SchemaMapKeywords, k):
 				out[k] = c.translateEach(val)
 			case k == "$ref":
 				out[k] = localRef(val)

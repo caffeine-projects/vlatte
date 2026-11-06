@@ -621,6 +621,26 @@ func TestGenerate_LeavesOutAHeaderNoValueFits(t *testing.T) {
 	}}, warnings)
 }
 
+func TestGenerate_WritesAHeaderWithContentInItsMediaType(t *testing.T) {
+	// A header with content is its value in that media type: JSON text in JSON, the text itself in any other, where
+	// data has no format the generator could pick.
+	mocks, warnings := generateWithWarnings(t, &openapi.Document{Operations: []openapi.Operation{{
+		Method: "GET", Path: "/a",
+		Responses: []openapi.Response{{Status: "204", Headers: []openapi.Header{
+			{Name: "X-Json", MediaType: "application/json", Examples: []openapi.Example{{Value: "ok"}}},
+			{Name: "X-Fake", MediaType: "application/json", Schema: map[string]any{"const": []any{1}}},
+			{Name: "X-Text", MediaType: "text/plain", Examples: []openapi.Example{{Value: 5}}},
+			{Name: "X-Data", MediaType: "text/plain", Examples: []openapi.Example{{Value: map[string]any{"a": 1}}}},
+		}}},
+	}}})
+
+	require.Equal(t, map[string]string{"X-Json": `"ok"`, "X-Fake": "[1]", "X-Text": "5"}, mocks["a-get-204"].Reply.Header)
+	require.Equal(t, []map[string]any{{
+		"level": "warn", "mock": "a-get-204", "method": "GET", "route": "/a", "status": "204",
+		"message": "header X-Data is data, not text: left out: give a string example",
+	}}, warnings)
+}
+
 func TestGenerate_ABooleanSchemaAllowsAnythingOrNothing(t *testing.T) {
 	mocks, warnings := generateWithWarnings(t, &openapi.Document{Operations: []openapi.Operation{
 		{Method: "GET", Path: "/any", Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{MediaType: "text/plain", Schema: true}}}}},

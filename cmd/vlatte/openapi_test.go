@@ -84,6 +84,21 @@ func TestOpenAPI_FailsOnASpecItCannotUse(t *testing.T) {
 			want: "openapi: invalid spec: invalid paths: invalid path /a: invalid operation GET: parameter can't have 'in' value \"querya\"\n",
 		},
 		{
+			name: "a null media type",
+			spec: write("null-media.yaml", "openapi: 3.1.0\ninfo: {title: X, version: \"1\"}\npaths:\n  /x:\n    get:\n      responses:\n        \"200\":\n          description: OK\n          content:\n            text/plain: null\n"),
+			want: "openapi: invalid spec: media type text/plain: expected an object, not null\n",
+		},
+		{
+			name: "a null webhook",
+			spec: write("null-webhook.yaml", "openapi: 3.1.0\ninfo: {title: X, version: \"1\"}\npaths: {}\nwebhooks:\n  /w: null\n"),
+			want: "openapi: invalid spec: webhook /w: expected an object, not null\n",
+		},
+		{
+			name: "a null encoding",
+			spec: write("null-encoding.yaml", "openapi: 3.1.0\ninfo: {title: X, version: \"1\"}\npaths:\n  /x:\n    post:\n      requestBody:\n        content:\n          multipart/form-data:\n            encoding:\n              f: null\n      responses:\n        \"204\": {description: OK}\n"),
+			want: "openapi: invalid spec: encoding f: expected an object, not null\n",
+		},
+		{
 			name: "Swagger",
 			spec: write("swagger.yaml", "swagger: \"2.0\"\ninfo: {title: X, version: \"1\"}\npaths: {}\n"),
 			want: "openapi: version 2.0 is not supported: expected OpenAPI 3.0, 3.1 or 3.2\n",
