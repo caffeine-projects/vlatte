@@ -10,7 +10,7 @@ include examples/Makefile
 GOLANGCI_LINT_VERSION ?= v2.14.0
 
 # keep in sync with the goreleaser-action version in .github/workflows/release.yml and ci.yml
-GORELEASER_VERSION ?= v2.18.3
+GORELEASER_VERSION ?= v2.20.0
 
 # keep in sync with the govulncheck commit in .github/workflows/security.yml
 GOVULNCHECK_VERSION ?= v1.9.0
