@@ -114,9 +114,10 @@ type Reply struct {
 // them out. It logs on log, at warn level, each thing it could not honor, naming its mock, and [zerolog.Nop] silences
 // it: a body no value fits, by its examples or its schema, leaves its mock without one and disabled.
 func Generate(doc *Document, log *zerolog.Logger) []File {
-	g := generator{doc: doc, defs: make(map[string]any, len(doc.Defs))}
-	for name, def := range doc.Defs {
-		g.defs[name] = stripWriteOnly(def, doc.Defs)
+	g := generator{doc: doc, defs: make(map[string]any, len(doc.Defs)), copies: make(map[string]string)}
+	// Sorted, so the copies of shared schemas get the same names on every run.
+	for _, name := range slices.Sorted(maps.Keys(doc.Defs)) {
+		g.defs[name] = g.stripWriteOnly(doc.Defs[name], nil)
 	}
 
 	ops := slices.Clone(doc.Operations)
@@ -151,7 +152,8 @@ func Generate(doc *Document, log *zerolog.Logger) []File {
 // generator holds the mocks and warnings of a document as they are made.
 type generator struct {
 	doc      *Document
-	defs     map[string]any
+	defs     map[string]any    // the document's shared schemas without writeOnly properties, and copyWithout's copies
+	copies   map[string]string // the names in defs of copyWithout's copies, by shared schema and properties left out
 	mocks    []Mock
 	pending  []string
 	warnings []warning
@@ -448,7 +450,7 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 func (g *generator) root(schema any) map[string]any {
 	root := make(map[string]any, 2)
 
-	switch s := stripWriteOnly(schema, g.doc.Defs).(type) {
+	switch s := g.stripWriteOnly(schema, nil).(type) {
 	case map[string]any:
 		root = s
 	case bool:
@@ -819,13 +821,15 @@ func (g *generator) mediaValue(what, mediaType string, v any) (string, bool) {
 }
 
 // stripWriteOnly returns a copy of the schema v without its writeOnly properties, which a response never holds, at
-// any depth: those whose schema says so, or a schema of defs, the document's shared schemas, it refers to.
-func stripWriteOnly(v any, defs map[string]any) any {
+// any depth, nor their names in required. The schemas sameObject has for a schema describe one object: a property any
+// of them makes writeOnly is left out of each, as are dropped, those the schemas v applies with make writeOnly. A
+// shared schema is applied as copyWithout has it. The branches of anyOf and oneOf, which may not apply, and the
+// object a property holds keep their own.
+func (g *generator) stripWriteOnly(v any, dropped []string) any {
 	switch x := v.(type) {
 	case map[string]any:
+		dropped = slices.Concat(dropped, writeOnlyProperties(x, g.doc.Defs))
 		out := make(map[string]any, len(x))
-
-		var dropped []string
 
 		for k, val := range x {
 			named, isMap := val.(map[string]any)
@@ -838,12 +842,9 @@ func stripWriteOnly(v any, defs map[string]any) any {
 				kept := make(map[string]any, len(named))
 
 				for name, p := range named {
-					if writeOnly(p, defs, nil) {
-						dropped = append(dropped, name)
-						continue
+					if !slices.Contains(dropped, name) {
+						kept[name] = g.stripWriteOnly(p, nil)
 					}
-
-					kept[name] = stripWriteOnly(p, defs)
 				}
 
 				out[k] = kept
@@ -851,12 +852,14 @@ func stripWriteOnly(v any, defs map[string]any) any {
 				// Names, not keywords: a schema named const is a schema.
 				each := make(map[string]any, len(named))
 				for name, p := range named {
-					each[name] = stripWriteOnly(p, defs)
+					each[name] = g.stripWriteOnly(p, nil)
 				}
 
 				out[k] = each
+			case k == "allOf":
+				out[k] = g.stripWriteOnly(val, dropped)
 			default:
-				out[k] = stripWriteOnly(val, defs)
+				out[k] = g.stripWriteOnly(val, nil)
 			}
 		}
 
@@ -867,17 +870,124 @@ func stripWriteOnly(v any, defs map[string]any) any {
 			})
 		}
 
+		ref, _ := x["$ref"].(string)
+		if name, ok := strings.CutPrefix(ref, "#/$defs/"); ok {
+			out["$ref"] = "#/$defs/" + g.copyWithout(name, dropped)
+		}
+
 		return out
 	case []any:
 		out := make([]any, len(x))
 		for i, item := range x {
-			out[i] = stripWriteOnly(item, defs)
+			out[i] = g.stripWriteOnly(item, dropped)
 		}
 
 		return out
 	default:
 		return v
 	}
+}
+
+// copyWithout returns the name, in the generator's shared schemas, of the document's shared schema name without the
+// properties of dropped it declares or requires, or name when it has none of them. Each copy is made once, so one
+// that holds itself refers to itself.
+func (g *generator) copyWithout(name string, dropped []string) string {
+	def, _ := g.doc.Defs[name].(map[string]any)
+
+	var without []string
+
+	for _, s := range sameObject(def, g.doc.Defs) {
+		for _, d := range dropped {
+			if declares(s, d) && !slices.Contains(without, d) {
+				without = append(without, d)
+			}
+		}
+	}
+
+	if len(without) == 0 {
+		return name
+	}
+
+	slices.Sort(without)
+
+	key := name + "\x00" + strings.Join(without, "\x00")
+	if copied, ok := g.copies[key]; ok {
+		return copied
+	}
+
+	copied := name
+	for i := 2; ; i++ {
+		copied = name + "_" + strconv.Itoa(i)
+
+		_, shared := g.doc.Defs[copied]
+		if _, made := g.defs[copied]; !shared && !made {
+			break
+		}
+	}
+
+	// Taken before the copy is made, for the copy to refer to itself.
+	g.copies[key] = copied
+	g.defs[copied] = nil
+	g.defs[copied] = g.stripWriteOnly(def, without)
+
+	return copied
+}
+
+// sameObject returns schema s and the schemas that describe the same object with it, each once: those of its allOf,
+// and the schema of defs its $ref names, in turn.
+func sameObject(s, defs map[string]any) []map[string]any {
+	var out []map[string]any
+
+	followed := make(map[string]bool)
+
+	var walk func(s map[string]any)
+	walk = func(s map[string]any) {
+		out = append(out, s)
+
+		all, _ := s["allOf"].([]any)
+		for _, b := range all {
+			branch, _ := b.(map[string]any)
+			walk(branch)
+		}
+
+		ref, _ := s["$ref"].(string)
+		if name, ok := strings.CutPrefix(ref, "#/$defs/"); ok && !followed[name] {
+			followed[name] = true
+
+			def, _ := defs[name].(map[string]any)
+			walk(def)
+		}
+	}
+
+	walk(s)
+
+	return out
+}
+
+// writeOnlyProperties returns the names of the properties that schema s, or a schema sameObject has for it, makes
+// writeOnly, as writeOnly decides.
+func writeOnlyProperties(s, defs map[string]any) []string {
+	var names []string
+
+	for _, o := range sameObject(s, defs) {
+		props, _ := o["properties"].(map[string]any)
+		for name, p := range props {
+			if writeOnly(p, defs, nil) {
+				names = append(names, name)
+			}
+		}
+	}
+
+	return names
+}
+
+// declares reports whether schema s declares or requires the property name.
+func declares(s map[string]any, name string) bool {
+	props, _ := s["properties"].(map[string]any)
+	required, _ := s["required"].([]any)
+	_, ok := props[name]
+
+	return ok || slices.Contains(required, any(name))
 }
 
 // writeOnly reports whether schema v is writeOnly, or refers to a schema of defs that is, or allOf applies one to it.

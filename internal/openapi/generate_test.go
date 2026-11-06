@@ -597,6 +597,114 @@ func TestGenerate_LeavesOutAPropertyThatRefersToAWriteOnlySchema(t *testing.T) {
 	require.Equal(t, map[string]any{"name": "rex", "nick": "r"}, mocks["a-get-200-json"].Reply.Body)
 }
 
+func TestGenerate_LeavesOutAWriteOnlyPropertyThatAnotherSchemaOfTheObjectRequires(t *testing.T) {
+	// allOf and $ref apply their schemas to one object: a property one of them makes writeOnly is never in a response,
+	// whichever of them, shared or not, declares or requires it. A shared schema keeps its requirements where nothing
+	// makes them writeOnly, and an object a property holds is another object, which keeps its own.
+	mocks := generate(t, &openapi.Document{
+		Defs: map[string]any{
+			"Credentials": map[string]any{"properties": map[string]any{"password": map[string]any{"type": "string", "writeOnly": true}}},
+			"Base": map[string]any{
+				"type": "object", "required": []any{"token"},
+				"properties": map[string]any{"token": map[string]any{"const": "t"}},
+			},
+		},
+		Operations: []openapi.Operation{
+			{
+				Method: "GET", Path: "/a",
+				Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{MediaType: "application/json", Schema: map[string]any{
+					"allOf": []any{
+						map[string]any{"$ref": "#/$defs/Credentials"},
+						map[string]any{"$ref": "#/$defs/Base"},
+						map[string]any{
+							"type": "object", "required": []any{"password", "token", "name", "profile"},
+							"properties": map[string]any{
+								"token": map[string]any{"writeOnly": true},
+								"name":  map[string]any{"const": "rex"},
+								"profile": map[string]any{
+									"type": "object", "required": []any{"password"},
+									"properties": map[string]any{"password": map[string]any{"const": "nested"}},
+								},
+							},
+						},
+					},
+				}}}}},
+			},
+			{
+				Method: "GET", Path: "/b",
+				Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{MediaType: "application/json", Schema: map[string]any{"$ref": "#/$defs/Base"}}}}},
+			},
+		},
+	})
+
+	require.Equal(t, map[string]any{"name": "rex", "profile": map[string]any{"password": "nested"}}, mocks["a-get-200-json"].Reply.Body)
+	require.Equal(t, map[string]any{"token": "t"}, mocks["b-get-200-json"].Reply.Body)
+}
+
+func TestGenerate_FinishesOnASharedSchemaThatAppliesToItself(t *testing.T) {
+	// A shared schema copied without a writeOnly property may hold itself, in a property or in an allOf: the
+	// generator copies it once, and the copy holds the copy, at any depth. No value fits an allOf that applies itself,
+	// which leaves its mock disabled, without a body.
+	tests := []struct {
+		name   string
+		defs   map[string]any
+		schema map[string]any
+		want   any
+	}{
+		{
+			name: "in a property",
+			defs: map[string]any{"Node": map[string]any{
+				"type": "object", "required": []any{"name", "pw"},
+				"properties": map[string]any{
+					"name":  map[string]any{"const": "n"},
+					"pw":    map[string]any{"const": "p"},
+					"child": map[string]any{"$ref": "#/$defs/Node", "properties": map[string]any{"pw": map[string]any{"writeOnly": true}}},
+				},
+			}},
+			// The child holds a child of its own, which holds nothing but its name.
+			schema: map[string]any{"allOf": []any{
+				map[string]any{"$ref": "#/$defs/Node"},
+				map[string]any{"required": []any{"child"}, "properties": map[string]any{"child": map[string]any{
+					"required": []any{"child"}, "properties": map[string]any{"child": map[string]any{"maxProperties": 1}},
+				}}},
+			}},
+			want: map[string]any{"name": "n", "pw": "p", "child": map[string]any{"name": "n", "child": map[string]any{"name": "n"}}},
+		},
+		{
+			name: "in an allOf",
+			defs: map[string]any{
+				"A": map[string]any{"allOf": []any{map[string]any{"$ref": "#/$defs/B"}}},
+				"B": map[string]any{
+					"allOf": []any{map[string]any{"$ref": "#/$defs/A"}},
+					"type":  "object", "required": []any{"pw", "name"},
+					"properties": map[string]any{"name": map[string]any{"const": "r"}},
+				},
+			},
+			schema: map[string]any{"allOf": []any{
+				map[string]any{"$ref": "#/$defs/A"},
+				map[string]any{"properties": map[string]any{"pw": map[string]any{"type": "string", "writeOnly": true}}},
+			}},
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mocks, _ := generateWithWarnings(t, &openapi.Document{
+				Defs: tt.defs,
+				Operations: []openapi.Operation{{
+					Method: "GET", Path: "/a",
+					Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{MediaType: "application/json", Schema: tt.schema}}}},
+				}},
+			})
+
+			m := mocks["a-get-200-json"]
+			require.Equal(t, tt.want, m.Reply.Body)
+			require.Equal(t, tt.want != nil, m.Enabled)
+		})
+	}
+}
+
 func TestGenerate_FakesWhatHasNoExample(t *testing.T) {
 	// Fake values fit the schema, refer to the shared ones, and leave out what a response never shows.
 	doc := &openapi.Document{

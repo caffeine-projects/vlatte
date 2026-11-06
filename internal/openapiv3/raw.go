@@ -50,16 +50,19 @@ type rawReader struct {
 	data     map[string][]byte // the files, by fileKey
 	files    map[string]any    // the files decoded, by fileKey
 	out      raw
-	nulls    map[field]string // the fields of out the spec writes as null, and where their objects are in it
+	nulls    map[field]string              // the fields of out the spec writes as null, and where their objects are in it
+	servers  map[*openapi3.Server]*url.URL // the file each server of a path or an operation is written in
 }
 
 // readRaw returns the example fields of the objects of t, which kin-openapi read from files, by fileKey: the spec at
 // location and the files its references name. A field it cannot find, as kin-openapi did, is left out, for what
 // kin-openapi read to stand. It returns as well the fields that are null, which kin-openapi reads as no value, with
-// where their objects are in the spec, such as spec.yaml#/paths/~1pets.
-func readRaw(t *openapi3.T, location *url.URL, files map[string][]byte) (raw, map[field]string) {
+// where their objects are in the spec, such as spec.yaml#/paths/~1pets, and the file each server of a path or an
+// operation is written in, which a relative URL of it is relative to.
+func readRaw(t *openapi3.T, location *url.URL, files map[string][]byte) (raw, map[field]string, map[*openapi3.Server]*url.URL) {
 	r := &rawReader{
 		location: location, v31: t.IsOpenAPI31OrLater(), data: files, files: make(map[string]any), out: make(raw), nulls: make(map[field]string),
+		servers: make(map[*openapi3.Server]*url.URL),
 	}
 	doc := node{file: location, v: r.file(location)}
 
@@ -98,13 +101,18 @@ func readRaw(t *openapi3.T, location *url.URL, files map[string][]byte) (raw, ma
 		}
 	}
 
-	return r.out, r.nulls
+	return r.out, r.nulls, r.servers
 }
 
-// fileKey returns what names the file of u: u without its fragment.
+// fileKey returns what names the file of u: u without its fragment, and a file's path with a leading slash, which a
+// reference resolved against a Windows path, such as C:/api/spec.yaml, gains.
 func fileKey(u *url.URL) string {
 	f := *u
 	f.Fragment, f.RawFragment = "", ""
+
+	if f.Host == "" && !strings.HasPrefix(f.Path, "/") {
+		f.Path = "/" + f.Path
+	}
 
 	return f.String()
 }
@@ -129,22 +137,40 @@ func (r *rawReader) file(u *url.URL) any {
 }
 
 // deref returns n, or the value its $ref names, as many times as one names another. A reference it cannot follow
-// gives no value.
+// gives no value, as does one that leads back to a value it named before.
 func (r *rawReader) deref(n node) node {
-	for range _maxRefs {
-		next, ok := r.next(n)
-		if !ok {
-			return n
-		}
+	nodes := r.chain(n)
 
-		n = next
-	}
-
-	return node{}
+	return nodes[len(nodes)-1]
 }
 
-// _maxRefs is the most references deref follows from one value: past it, they go round a cycle.
-const _maxRefs = 32
+// chain returns n and the values its $refs lead to, each naming the next, up to the first without a $ref. A
+// reference it cannot follow ends it with no value, as does one that leads back to a value of the chain: a chain of
+// any length ends.
+func (r *rawReader) chain(n node) []node {
+	nodes := []node{n}
+	seen := make(map[string]bool)
+
+	for {
+		next, ok := r.next(n)
+		if !ok {
+			return nodes
+		}
+
+		seen[n.place()] = true
+		if next.file == nil || seen[next.place()] {
+			return append(nodes, node{})
+		}
+
+		nodes = append(nodes, next)
+		n = next
+	}
+}
+
+// place names where n is in the spec: its file and its JSON pointer.
+func (n node) place() string {
+	return fileKey(n.file) + "#" + n.ptr
+}
 
 // next returns the value the $ref of n names, and whether n has a $ref. A reference that isn't a URL gives no value.
 func (r *rawReader) next(n node) (node, bool) {
@@ -194,10 +220,33 @@ func pointer(doc any, ptr string) any {
 
 // child returns the field name of the object n is, or refers to.
 func (r *rawReader) child(n node, name string) node {
-	n = r.deref(n)
+	return member(r.deref(n), name)
+}
+
+// member returns the field name of object n.
+func member(n node, name string) node {
 	m, _ := n.v.(map[string]any)
 
 	return node{file: n.file, ptr: n.ptr + "/" + strings.ReplaceAll(strings.ReplaceAll(name, "~", "~0"), "/", "~1"), v: m[name]}
+}
+
+// itemField returns the field name of path item n, as kin-openapi reads it: it puts each field written beside the
+// $ref of a path item, but a null or an empty list, over the item's. So it is the field of the first item of the chain
+// n starts that writes it.
+func (r *rawReader) itemField(n node, name string) node {
+	nodes := r.chain(n)
+
+	i := slices.IndexFunc(nodes, func(item node) bool {
+		m, _ := item.v.(map[string]any)
+		list, isList := m[name].([]any)
+
+		return m[name] != nil && (!isList || len(list) > 0)
+	})
+	if i < 0 {
+		i = len(nodes) - 1
+	}
+
+	return member(nodes[i], name)
 }
 
 // record keeps field name of the object n is, or refers to, as the field of object, what kin-openapi read it into,
@@ -254,64 +303,54 @@ func (r *rawReader) siblings(n node) (annotations, assertions map[string]any) {
 	return annotations, assertions
 }
 
-// resolved returns schema n as kin-openapi reads it, following up to left $refs: the schema a $ref refers to,
-// resolved, with the keywords beside the $ref applied, as siblings has them.
-func (r *rawReader) resolved(n node, left int) any {
-	next, ok := r.next(n)
-	if !ok {
-		return n.v
+// resolved returns schema n as kin-openapi reads it: the schema its $refs lead to, as chain has it, with the keywords
+// beside each $ref applied, as siblings has them, the last $ref's first.
+func (r *rawReader) resolved(n node) any {
+	nodes := r.chain(n)
+	v := nodes[len(nodes)-1].v
+
+	for _, ref := range slices.Backward(nodes[:len(nodes)-1]) {
+		annotations, assertions := r.siblings(ref)
+		if len(annotations) == 0 && len(assertions) == 0 {
+			continue
+		}
+
+		target, _ := v.(map[string]any)
+
+		out := maps.Clone(target)
+		if out == nil {
+			out = make(map[string]any)
+		}
+
+		maps.Copy(out, annotations)
+
+		if len(assertions) > 0 {
+			all, _ := target["allOf"].([]any)
+			out["allOf"] = append(slices.Clone(all), assertions)
+		}
+
+		v = out
 	}
 
-	if left == 0 {
-		return nil
-	}
-
-	target := r.resolved(next, left-1)
-
-	annotations, assertions := r.siblings(n)
-	if len(annotations) == 0 && len(assertions) == 0 {
-		return target
-	}
-
-	t, _ := target.(map[string]any)
-
-	out := maps.Clone(t)
-	if out == nil {
-		out = make(map[string]any)
-	}
-
-	maps.Copy(out, annotations)
-
-	if len(assertions) > 0 {
-		all, _ := t["allOf"].([]any)
-		out["allOf"] = append(slices.Clone(all), assertions)
-	}
-
-	return out
+	return v
 }
 
 // annotated returns the schema of n, or of the $refs it leads to, whose annotation name kin-openapi read: in OpenAPI
 // 3.1, the first that writes it, as one beside a $ref replaces the referenced schema's; in 3.0, the last.
 func (r *rawReader) annotated(n node, name string) node {
+	nodes := r.chain(n)
 	if !r.v31 {
-		return r.deref(n)
+		return nodes[len(nodes)-1]
 	}
 
-	for range _maxRefs {
-		m, _ := n.v.(map[string]any)
+	for _, s := range nodes {
+		m, _ := s.v.(map[string]any)
 		if _, ok := m[name]; ok {
-			return n
+			return s
 		}
-
-		next, ok := r.next(n)
-		if !ok {
-			return n
-		}
-
-		n = next
 	}
 
-	return node{}
+	return nodes[len(nodes)-1]
 }
 
 // pathItem records the example fields of p, which kin-openapi read from n, and of the objects within it, as the
@@ -321,12 +360,13 @@ func (r *rawReader) pathItem(p *openapi3.PathItem, n node) {
 		return
 	}
 
-	r.parameterList(p.Parameters, r.child(n, "parameters"))
+	r.parameterList(p.Parameters, r.itemField(n, "parameters"))
+	r.server(p.Servers, r.itemField(n, "servers"))
 
 	for method, op := range p.Operations() {
-		on := r.child(n, strings.ToLower(method))
+		on := r.itemField(n, strings.ToLower(method))
 		if on.v == nil {
-			on = r.child(r.child(n, "additionalOperations"), method)
+			on = r.child(r.itemField(n, "additionalOperations"), method)
 		}
 
 		r.operation(op, on)
@@ -335,6 +375,10 @@ func (r *rawReader) pathItem(p *openapi3.PathItem, n node) {
 
 func (r *rawReader) operation(op *openapi3.Operation, n node) {
 	r.parameterList(op.Parameters, r.child(n, "parameters"))
+
+	if op.Servers != nil {
+		r.server(*op.Servers, r.child(n, "servers"))
+	}
 
 	if op.RequestBody != nil && op.RequestBody.Value != nil {
 		r.content(op.RequestBody.Value.Content, r.child(r.child(n, "requestBody"), "content"))
@@ -345,6 +389,13 @@ func (r *rawReader) operation(op *openapi3.Operation, n node) {
 		for status, ref := range op.Responses.Map() {
 			r.response(ref.Value, r.child(responses, status))
 		}
+	}
+}
+
+// server records the file each of servers, which kin-openapi read from the list n, is written in.
+func (r *rawReader) server(servers openapi3.Servers, n node) {
+	for _, s := range servers {
+		r.servers[s] = n.file
 	}
 }
 
@@ -450,11 +501,13 @@ func (r *rawReader) schema(ref *openapi3.SchemaRef, n node) {
 		r.keep(s, r.annotated(n, name), name)
 	}
 
-	resolved := r.resolved(n, _maxRefs)
+	resolved := r.resolved(n)
 	r.out[key] = resolved
 
 	// The keywords beside a $ref that assert are one more allOf entry, kin-openapi's last, unless they are all null.
-	all, _ := resolved.(map[string]any)["allOf"].([]any)
+	// A boolean schema has none.
+	m, _ := resolved.(map[string]any)
+	all, _ := m["allOf"].([]any)
 	if _, assertions := r.siblings(n); len(assertions) > 0 && len(s.AllOf) == len(all) {
 		r.schema(s.AllOf[len(s.AllOf)-1], node{file: n.file, ptr: n.ptr, v: assertions})
 	}

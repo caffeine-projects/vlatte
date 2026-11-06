@@ -8,6 +8,7 @@ import (
 	"maps"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -532,6 +533,84 @@ components:
 	require.Equal(t, map[string]any{"$ref": "#/$defs/T", "const": nil}, doc.Operations[0].Responses[0].Content[0].Schema)
 }
 
+func TestLoad_ReadsABooleanSchema(t *testing.T) {
+	// OpenAPI 3.1 takes a boolean wherever a schema goes: true allows any value, false none.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Booleans, version: "1"}
+paths:
+  /any:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json: {schema: true}
+  /none:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json: {schema: {$ref: "#/components/schemas/Never"}}
+  /object:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json: {schema: {type: object, properties: {a: true, b: false}}}
+components:
+  schemas:
+    Never: false
+`})
+
+	schemas := make(map[string]any, len(doc.Operations))
+	for _, op := range doc.Operations {
+		schemas[op.Path] = followDefs(t, doc, op.Responses[0].Content[0].Schema)
+	}
+
+	require.Equal(t, map[string]any{
+		"/any":    true,
+		"/none":   false,
+		"/object": map[string]any{"type": "object", "properties": map[string]any{"a": true, "b": false}},
+	}, schemas)
+}
+
+func TestLoad_ReadsTheNumbersAtTheEndOfAChainOfReferencesOfAnyLength(t *testing.T) {
+	// A chain of references, however long, ends at a schema, which keeps 9007199254740993 as written.
+	const length = 40
+
+	var spec strings.Builder
+
+	spec.WriteString(`
+openapi: 3.1.0
+info: {title: Chain, version: "1"}
+paths:
+  /big:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json: {schema: {$ref: "#/components/schemas/S0"}}
+components:
+  schemas:
+`)
+
+	for i := range length {
+		fmt.Fprintf(&spec, "    S%d: {$ref: \"#/components/schemas/S%d\"}\n", i, i+1)
+	}
+
+	fmt.Fprintf(&spec, "    S%d: {type: integer, const: 9007199254740993}\n", length)
+
+	doc := load(t, map[string]string{"spec.yaml": spec.String()})
+
+	require.Equal(t,
+		map[string]any{"type": "integer", "const": int64(9007199254740993)},
+		followDefs(t, doc, doc.Operations[0].Responses[0].Content[0].Schema))
+}
+
 func TestLoad_WarnsWhenServersHaveDifferentPaths(t *testing.T) {
 	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
 openapi: 3.1.0
@@ -655,6 +734,174 @@ paths:
 		{"level": "warn", "path": "/pets", "message": `the servers have different paths: the mocks answer under the first one's, "/v2"`},
 		{"level": "warn", "method": "POST", "path": "/pets", "message": `the servers have different paths: the mocks answer under the first one's, "/v3"`},
 	}, warnings)
+}
+
+func TestLoad_ResolvesAServerURLAgainstWhereItsFileIsServed(t *testing.T) {
+	// OpenAPI resolves a server's URL as a link of the file that holds it: v1 is beside the file, and
+	// //api.example.test/v3 names a host, whose path is /v3. What is written beside a path's $ref is the referring
+	// file's, but for an empty list, which kin-openapi passes over. A spec read from disk is served from the root, its
+	// folder as /, which a file outside it is under too.
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"docs/spec.yaml": `
+openapi: 3.1.0
+info: {title: Servers, version: "1"}
+servers: [{url: v1}]
+paths:
+  /a:
+    get: {responses: {"200": {description: OK}}}
+  /b: {$ref: "paths/b.yaml"}
+  /c:
+    get:
+      servers: [{url: "//api.example.test/v3"}]
+      responses: {"200": {description: OK}}
+  /d:
+    $ref: "paths/b.yaml"
+    servers: [{url: v4}]
+    post:
+      servers: [{url: v5}]
+      responses: {"200": {description: OK}}
+  /e: {$ref: "../shared/e.yaml"}
+  /f: {$ref: "paths/b.yaml", servers: []}
+`,
+		"docs/paths/b.yaml": `
+servers: [{url: v2}]
+get: {responses: {"200": {description: OK}}}
+`,
+		"shared/e.yaml": `
+servers: [{url: v6}]
+get: {responses: {"200": {description: OK}}}
+`,
+	} {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	}
+
+	// bases loads the spec at loc and returns the base path of each of its operations.
+	bases := func(t *testing.T, loc *url.URL) map[string]string {
+		data, err := read(t)(loc)
+		require.NoError(t, err)
+
+		var logs bytes.Buffer
+
+		log := zerolog.New(&logs)
+		doc, err := openapiv3.Load(t.Context(), data, loc, read(t), &log)
+		require.NoError(t, err)
+		require.Empty(t, logs.String())
+
+		out := make(map[string]string, len(doc.Operations))
+		for _, op := range doc.Operations {
+			out[op.Method+" "+op.Path] = op.BasePath
+		}
+
+		return out
+	}
+
+	t.Run("from disk", func(t *testing.T) {
+		loc, err := openapi.Location(filepath.Join(dir, "docs", "spec.yaml"))
+		require.NoError(t, err)
+
+		require.Equal(t, map[string]string{
+			"GET /a": "/v1", "GET /b": "/paths/v2", "GET /c": "/v3", "GET /d": "/v4", "POST /d": "/v5", "GET /e": "/shared/v6",
+			"GET /f": "/paths/v2",
+		}, bases(t, loc))
+	})
+
+	t.Run("over http", func(t *testing.T) {
+		srv := httptest.NewServer(http.FileServer(http.Dir(dir)))
+		t.Cleanup(srv.Close)
+
+		loc, err := url.Parse(srv.URL + "/docs/spec.yaml")
+		require.NoError(t, err)
+
+		require.Equal(t, map[string]string{
+			"GET /a": "/docs/v1", "GET /b": "/docs/paths/v2", "GET /c": "/v3", "GET /d": "/docs/v4", "POST /d": "/docs/v5",
+			"GET /e": "/shared/v6", "GET /f": "/docs/paths/v2",
+		}, bases(t, loc))
+	})
+}
+
+func TestLoad_ReadsASpecAtAWindowsPath(t *testing.T) {
+	// A Windows path has a drive and no leading slash, C:/api/spec.yaml: the files it refers to are read as written,
+	// and its folder is / all the same.
+	files := map[string]string{
+		"C:/api/spec.yaml": `
+openapi: 3.1.0
+info: {title: Servers, version: "1"}
+servers: [{url: v1}]
+paths:
+  /a:
+    get: {responses: {"200": {description: OK}}}
+  /b: {$ref: "paths/b.yaml"}
+`,
+		"C:/api/paths/b.yaml": `
+servers: [{url: v2}]
+get:
+  responses:
+    "200":
+      description: OK
+      content:
+        application/json: {example: 9007199254740993}
+`,
+	}
+	read := func(u *url.URL) ([]byte, error) {
+		content, ok := files[strings.TrimPrefix(strings.TrimPrefix(u.Path, "./"), "/")]
+		if !ok {
+			return nil, fmt.Errorf("no file %s", u)
+		}
+
+		return []byte(content), nil
+	}
+
+	loc := &url.URL{Path: "C:/api/spec.yaml"}
+	log := zerolog.Nop()
+	doc, err := openapiv3.Load(t.Context(), []byte(files[loc.Path]), loc, read, &log)
+	require.NoError(t, err)
+
+	bases := make(map[string]string, len(doc.Operations))
+	for _, op := range doc.Operations {
+		bases[op.Path] = op.BasePath
+	}
+
+	require.Equal(t, map[string]string{"/a": "/v1", "/b": "/paths/v2"}, bases)
+	require.Equal(t, []openapi.Example{{Value: int64(9007199254740993)}}, operation(t, doc, "/b").Responses[0].Content[0].Examples)
+}
+
+func TestLoad_ReadsWhatIsWrittenBesideAPathsRef(t *testing.T) {
+	// kin-openapi puts what is written beside a path's $ref over the path it refers to: its parameters and operations
+	// are read from the referring file, 9007199254740993 included.
+	doc := load(t, map[string]string{
+		"spec.yaml": `
+openapi: 3.1.0
+info: {title: Beside, version: "1"}
+paths:
+  /b/{id}:
+    $ref: "paths/b.yaml"
+    parameters: [{name: id, in: path, required: true, schema: {type: integer}, example: 9007199254740993}]
+    post:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json: {example: 9007199254740995}
+`,
+		"paths/b.yaml": `
+parameters: [{name: id, in: path, required: true, schema: {type: integer}, example: 1}]
+get: {responses: {"200": {description: OK}}}
+`,
+	})
+
+	params := make(map[string][]openapi.Example, len(doc.Operations))
+	for _, op := range doc.Operations {
+		params[op.Method] = op.PathParams[0].Examples
+	}
+
+	big := []openapi.Example{{Value: int64(9007199254740993)}}
+	require.Equal(t, map[string][]openapi.Example{"GET": big, "POST": big}, params)
+
+	post := doc.Operations[slices.IndexFunc(doc.Operations, func(o openapi.Operation) bool { return o.Method == "POST" })]
+	require.Equal(t, []openapi.Example{{Value: int64(9007199254740995)}}, post.Responses[0].Content[0].Examples)
 }
 
 func TestLoad_WarnsOfAServerWhosePathIsNotAURL(t *testing.T) {
@@ -1047,7 +1294,8 @@ func operation(t require.TestingT, doc *openapi.Document, path string) openapi.O
 // followDefs returns schema, or the shared schema of doc its $ref names, as many times as one names another.
 func followDefs(t require.TestingT, doc *openapi.Document, schema any) any {
 	for range len(doc.Defs) + 1 {
-		ref, ok := schema.(map[string]any)["$ref"].(string)
+		m, _ := schema.(map[string]any) // or a boolean schema
+		ref, ok := m["$ref"].(string)
 		if !ok {
 			return schema
 		}

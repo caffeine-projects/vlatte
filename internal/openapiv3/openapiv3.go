@@ -51,7 +51,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		return nil, fmt.Errorf("%w: %w", openapi.ErrInvalid, err)
 	}
 
-	r, nullAt := readRaw(t, location, files)
+	r, nullAt, serverFiles := readRaw(t, location, files)
 
 	if err := validate(ctx, t, r, nullAt); err != nil {
 		return nil, fmt.Errorf("%w: %w", openapi.ErrInvalid, err)
@@ -67,7 +67,8 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		doc.Title = t.Info.Title
 	}
 
-	root := basePath(t.Servers, log)
+	served := servedFrom(location, serverFiles)
+	root := basePath(t.Servers, served, log)
 
 	if t.Components != nil {
 		for name, ref := range t.Components.Schemas {
@@ -88,7 +89,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		itemBase := root
 		if len(item.Servers) > 0 {
 			pathLog := log.With().Str("path", path).Logger()
-			itemBase = basePath(item.Servers, &pathLog)
+			itemBase = basePath(item.Servers, served, &pathLog)
 		}
 
 		ops := item.Operations()
@@ -99,7 +100,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 
 			if op.Servers != nil && len(*op.Servers) > 0 {
 				opLog := log.With().Str("method", o.Method).Str("path", path).Logger()
-				o.BasePath = basePath(*op.Servers, &opLog)
+				o.BasePath = basePath(*op.Servers, served, &opLog)
 			}
 
 			doc.Operations = append(doc.Operations, o)
@@ -246,6 +247,13 @@ func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string
 		}
 	}
 
+	// kin-openapi checks the document's servers only: those of a path or an operation are checked the same way.
+	servers := func(ss openapi3.Servers, what string) {
+		if err := ss.Validate(ctx); err != nil && invalid == nil {
+			invalid = fmt.Errorf("invalid %s: invalid servers: %w", what, err)
+		}
+	}
+
 	var item func(name string, p *openapi3.PathItem)
 
 	callbacks := func(cs openapi3.Callbacks) {
@@ -263,11 +271,19 @@ func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string
 
 		walked[p] = true
 
+		servers(p.Servers, name)
+
 		for _, param := range p.Parameters {
 			parameter(param)
 		}
 
-		for _, op := range p.Operations() {
+		ops := p.Operations()
+		for _, method := range slices.Sorted(maps.Keys(ops)) {
+			op := ops[method]
+			if op.Servers != nil {
+				servers(*op.Servers, name+": invalid operation "+method)
+			}
+
 			for _, param := range op.Parameters {
 				parameter(param)
 			}
@@ -400,19 +416,52 @@ func validateNulls(t *openapi3.T, nullAt map[field]string, outside func(mt *open
 	return nil
 }
 
-// basePath returns the path of the first of servers, which the operations they serve are under. It logs on log a
-// server whose path it cannot read, and servers whose paths differ: the mocks answer the first one's only.
-func basePath(servers openapi3.Servers, log *zerolog.Logger) string {
+// servedFrom returns the URL each server of the spec at location is relative to: that of the file it is written in,
+// which files has for the servers of paths and operations, else location. A spec read from disk is served from the
+// root, its folder as /, which a file outside it is under too: ../shared/e.yaml is /shared/e.yaml.
+func servedFrom(location *url.URL, files map[*openapi3.Server]*url.URL) func(s *openapi3.Server) *url.URL {
+	// A reference resolves to a path with a leading slash, a Windows path too: /C:/api/paths/b.yaml.
+	folder := strings.Split(path.Dir(path.Join("/", location.Path)), "/")
+
+	return func(s *openapi3.Server) *url.URL {
+		file := cmp.Or(files[s], location)
+		if location.IsAbs() {
+			return file
+		}
+
+		segments := strings.Split(path.Join("/", file.Path), "/")
+
+		common := 0
+		for common < len(folder) && common < len(segments) && folder[common] == segments[common] {
+			common++
+		}
+
+		up := slices.Repeat([]string{".."}, len(folder)-common)
+
+		return &url.URL{Path: path.Join(slices.Concat([]string{"/"}, up, segments[common:])...)}
+	}
+}
+
+// basePath returns the path of the first of servers, which the operations they serve are under. A server's URL, its
+// variables set to their defaults, may be relative, as a link of the file it is written in, whose URL served returns:
+// v1 is beside it, and //api.example.com/v1 is /v1. It logs on log a server whose URL it cannot read, and servers
+// whose paths differ: the mocks answer the first one's only.
+func basePath(servers openapi3.Servers, served func(s *openapi3.Server) *url.URL, log *zerolog.Logger) string {
 	var paths []string
 
 	for _, s := range servers {
-		p, err := s.BasePath()
+		link := s.URL
+		for _, name := range slices.Sorted(maps.Keys(s.Variables)) {
+			link = strings.ReplaceAll(link, "{"+name+"}", s.Variables[name].Default)
+		}
+
+		u, err := url.Parse(link)
 		if err != nil {
 			log.Warn().Str("server", s.URL).Msgf("the server's path is not a URL: %v: ignored", err)
 			continue
 		}
 
-		paths = append(paths, strings.TrimSuffix(p, "/"))
+		paths = append(paths, strings.TrimSuffix(served(s).ResolveReference(u).Path, "/"))
 	}
 
 	if len(paths) == 0 {

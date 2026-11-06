@@ -5,6 +5,7 @@ import (
 	json "encoding/json/v2"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -285,6 +286,63 @@ components:
 	require.JSONEq(t, `{"name":"rex"}`, body)
 }
 
+func TestOpenAPI_AWriteOnlyPropertyIsLeftOutWhicheverAllOfBranchRequiresIt(t *testing.T) {
+	// The branches of allOf describe one object: a password one of them makes writeOnly is never in a response, even
+	// when another branch, inline or shared, requires it.
+	for _, version := range []string{"3.0.3", "3.1.0"} {
+		t.Run(version, func(t *testing.T) {
+			spec := `
+openapi: ` + version + `
+info: {title: Composed response, version: "1"}
+paths:
+  /inline:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - type: object
+                    properties:
+                      password: {type: string, writeOnly: true}
+                  - type: object
+                    required: [password, name]
+                    properties:
+                      name: {type: string, enum: [rex]}
+  /shared:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Account'
+                  - properties:
+                      password: {type: string, writeOnly: true}
+components:
+  schemas:
+    Account:
+      type: object
+      required: [password, name]
+      properties:
+        password: {type: string}
+        name: {type: string, enum: [rex]}
+`
+			m := serveSpec(t, spec)
+
+			for _, path := range []string{"/inline", "/shared"} {
+				status, _, body := call(t, m, http.MethodGet, path, "")
+				require.Equal(t, http.StatusOK, status, body)
+				require.JSONEq(t, `{"name":"rex"}`, body, path)
+			}
+		})
+	}
+}
+
 func TestOpenAPI_APathExampleIsSerializedInTheStyleOfItsParameter(t *testing.T) {
 	// A client sends a matrix parameter as ;id=7: that is the request the example answers, and 7 alone is another
 	// value, which the 404 answers.
@@ -549,6 +607,69 @@ paths:
 	require.Equal(t, http.StatusTeapot, status)
 }
 
+func TestOpenAPI_AServerURLIsALinkOfTheSpec(t *testing.T) {
+	// A spec served at /docs/openapi.yaml whose server is v1 serves its API at /docs/v1, and a server
+	// //api.example.test/v2 names a host, which is no part of the path.
+	spec := `
+openapi: 3.1.0
+info: {title: Relative servers, version: "1"}
+servers: [{url: v1}]
+paths:
+  /x:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain: {example: beside-the-spec}
+  /y:
+    get:
+      servers: [{url: "//api.example.test/v2"}]
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain: {example: on-its-host}
+`
+	docs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/docs/openapi.yaml" {
+			http.NotFound(w, r)
+			return
+		}
+
+		_, _ = io.WriteString(w, spec)
+	}))
+	t.Cleanup(docs.Close)
+
+	loc, err := url.Parse(docs.URL + "/docs/openapi.yaml")
+	require.NoError(t, err)
+
+	m, logs := serveSpecAt(t, loc)
+	require.Empty(t, logs)
+
+	tests := []struct {
+		path   string
+		status int
+		body   string
+	}{
+		{path: "/docs/v1/x", status: http.StatusOK, body: "beside-the-spec"},
+		{path: "/v2/y", status: http.StatusOK, body: "on-its-host"},
+		{path: "/x", status: http.StatusTeapot},
+		{path: "//api.example.test/v2/y", status: http.StatusTeapot},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			status, _, body := call(t, m, http.MethodGet, tt.path, "text/plain")
+			require.Equal(t, tt.status, status, body)
+
+			if tt.body != "" {
+				require.Equal(t, tt.body, body)
+			}
+		})
+	}
+}
+
 func TestOpenAPI_APathExampleOfAParameterWithContentIsWrittenInItsMediaType(t *testing.T) {
 	// A parameter with content is written in its media type: the JSON string "rex" is the value the example answers,
 	// and any other the 404.
@@ -745,13 +866,21 @@ func serveSpec(t *testing.T, spec string) *mockhttp.Server {
 func serveSpecLogging(t *testing.T, spec string) (*mockhttp.Server, string) {
 	t.Helper()
 
-	specDir, mocksDir := t.TempDir(), t.TempDir()
-	file := filepath.Join(specDir, "spec.yaml")
+	file := filepath.Join(t.TempDir(), "spec.yaml")
 	require.NoError(t, os.WriteFile(file, []byte(spec), 0o600))
 
 	loc, err := openapi.Location(file)
 	require.NoError(t, err)
 
+	return serveSpecAt(t, loc)
+}
+
+// serveSpecAt serves the mocks the generator writes of the OpenAPI document at loc, a file or an http(s) URL, and
+// returns what it logs, as JSON lines.
+func serveSpecAt(t *testing.T, loc *url.URL) (*mockhttp.Server, string) {
+	t.Helper()
+
+	mocksDir := t.TempDir()
 	read := func(u *url.URL) ([]byte, error) { return openapi.Read(t.Context(), http.DefaultClient, u) }
 
 	data, err := read(loc)

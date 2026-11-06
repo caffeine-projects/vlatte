@@ -49,7 +49,7 @@ func TestResolved_KeepsOnlyTheKeywordsBesideAReferenceItCannotFollow(t *testing.
 	}
 	doc := node{file: spec, v: r.file(spec)}
 
-	require.Nil(t, r.resolved(r.child(doc, "a"), _maxRefs))
+	require.Nil(t, r.resolved(r.child(doc, "a")))
 	require.Equal(t, node{}, r.annotated(r.child(doc, "a"), "example"))
-	require.Equal(t, map[string]any{"description": "c"}, r.resolved(r.child(doc, "c"), _maxRefs))
+	require.Equal(t, map[string]any{"description": "c"}, r.resolved(r.child(doc, "c")))
 }

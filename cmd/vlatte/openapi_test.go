@@ -99,6 +99,21 @@ func TestOpenAPI_FailsOnASpecItCannotUse(t *testing.T) {
 			want: "openapi: invalid spec: encoding f: expected an object, not null\n",
 		},
 		{
+			name: "a null server of a path",
+			spec: write("null-server.yaml", "openapi: 3.1.0\ninfo: {title: X, version: \"1\"}\npaths:\n  /x:\n    servers: [null]\n    get:\n      responses: {\"200\": {description: OK}}\n"),
+			want: "openapi: invalid spec: invalid path /x: invalid servers: value of url must be a non-empty string\n",
+		},
+		{
+			name: "a server of an operation without a URL",
+			spec: write("empty-server.yaml", "openapi: 3.1.0\ninfo: {title: X, version: \"1\"}\npaths:\n  /x:\n    get:\n      servers: [{url: \"\"}]\n      responses: {\"200\": {description: OK}}\n"),
+			want: "openapi: invalid spec: invalid path /x: invalid operation GET: invalid servers: value of url must be a non-empty string\n",
+		},
+		{
+			name: "a null variable of a server of an operation",
+			spec: write("null-variable.yaml", "openapi: 3.1.0\ninfo: {title: X, version: \"1\"}\npaths:\n  /x:\n    get:\n      servers: [{url: \"/{v}\", variables: {v: null}}]\n      responses: {\"200\": {description: OK}}\n"),
+			want: "openapi: invalid spec: invalid path /x: invalid operation GET: invalid servers: field default is required in {}\n",
+		},
+		{
 			name: "Swagger",
 			spec: write("swagger.yaml", "swagger: \"2.0\"\ninfo: {title: X, version: \"1\"}\npaths: {}\n"),
 			want: "openapi: version 2.0 is not supported: expected OpenAPI 3.0, 3.1 or 3.2\n",
