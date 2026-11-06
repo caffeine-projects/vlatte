@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/journal"
@@ -619,4 +620,45 @@ func TestRecording_AStopLetsTheCallsOnTheTargetFinish(t *testing.T) {
 
 	_, err = stream.Recv()
 	require.ErrorIs(t, err, io.EOF)
+}
+
+func TestRecording_TakesTheRequestAsTheClientSentIt(t *testing.T) {
+	// A recorded mock matches the message the client sent, as the target got it. The parsers read no call a
+	// recording's target answers, and a proxying mock that matched what they read records the envelope too.
+	target := serve(t)
+	target.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "hello"})))
+
+	p := &funcParser{parse: func(context.Context, *Call, proto.Message) (any, error) {
+		return map[string]string{"by": "parser"}, nil
+	}}
+	m := recorder(t, Setup().RequestParsers(p))
+
+	record := func(envelope string, options ...RecordConfigurer) string {
+		t.Helper()
+
+		require.NoError(t, m.StartRecording(append(options, RecordFormat("yaml"))...))
+
+		_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{Message: envelope})
+		require.NoError(t, err)
+
+		res, err := m.StopRecording(t.Context())
+		require.NoError(t, err)
+		require.Len(t, res.Recordings, 1)
+
+		b, err := os.ReadFile(res.Recordings[0].File)
+		require.NoError(t, err)
+
+		return string(b)
+	}
+
+	recorded := record("to the target", RecordTarget(target.Addr()))
+	require.Contains(t, recorded, "message: to the target")
+	require.Zero(t, p.parsed.Load(), "the parsers read no call the target answers")
+
+	m.MustMock(Method("Greetings").Field("by", match.Equal("parser")).Reply(From(target.Addr())))
+
+	recorded = record("to the mock")
+	require.Contains(t, recorded, "message: to the mock")
+	require.NotContains(t, recorded, "parser")
+	require.Equal(t, int64(1), p.parsed.Load())
 }

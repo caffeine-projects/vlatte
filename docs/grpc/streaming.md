@@ -46,6 +46,8 @@ m.MustMock(mockgrpc.Method("Chat/Talk").Reply(mockgrpc.Bidi().
 
 The client that sends `hi`, then `what`, then closes its side reads `hello`, `?` and `bye`.
 
+With [request parsers](/grpc/matching#parsed-requests), each message is parsed as it comes, before its rule is chosen. A message a parser fails to read ends the call: a status from the parser is the answer, and any other error fails the reply, with the `vlatte-error` trailer `reply`.
+
 `Echo()` answers each message of a bidi call as it comes. In a [mock file](/grpc/mock-files), `bidi` takes `header`, `trailer`, `on` (rules of `when`, a matcher list of the message, and `response`), `otherwise` and `on_end`.
 
 ```yaml

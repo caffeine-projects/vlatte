@@ -254,7 +254,7 @@ A gRPC mock renders its messages with `Template(texts...)`, `template` in a [gRP
 
 | Field | What it holds |
 |---|---|
-| `.Request.Message.<field>` | The request, by the field names of the `.proto` file. |
+| `.Request.Message.<field>` | The request, by the field names of the `.proto` file, or what the [request parsers](/grpc/matching#parsed-requests) read of it. |
 | `.Request.Header` | The call's metadata. |
 | `.KV`, `.Data`, `.Provided.<key>` | As for HTTP: `m.SetData` sets `.Data`, and `Setup().TemplateDataProviders(providers)` provide `.Provided`. |
 | `.Scenarios.State "name"`, `.Scenarios.StateOf "name" "key"` | The state of a [scenario](/scenarios/). |

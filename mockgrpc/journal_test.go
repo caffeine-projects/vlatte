@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -766,4 +767,131 @@ func TestJournal_ACallHasNoMethodToSelectBy(t *testing.T) {
 
 	_, err := m.VerifyRequests().Method("POST").Count(t.Context())
 	require.ErrorIs(t, err, verify.ErrNoMethod)
+}
+
+func TestJournal_VerifiesCallsByWhatTheParsersRead(t *testing.T) {
+	// A pattern reads a call of the journal as the mocks read it as it came: what the parsers read of its request, read
+	// again. A call they fail to read missed every mock, and misses the pattern: it isn't an error of the query. Only
+	// the calls of the pattern's method and header are parsed, and Body reads the request as the client sent it.
+	s := newSealer(t)
+	p := newSealParser(s)
+	p.reject = codes.InvalidArgument
+	m, c := journaled(t, Setup().RequestParsers(p))
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})), Method("List").Reply(Messages()))
+
+	envelope := s.seal(t, &pb.Rich{UserId: "u1"})
+	_, err := c.Greetings(sealed(t.Context()), &pb.HiReq{Message: envelope})
+	require.NoError(t, err)
+
+	_, err = c.Greetings(sealed(t.Context()), &pb.HiReq{Message: "not sealed"})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	listed := s.seal(t, &pb.Rich{UserId: "u1"})
+	stream, err := c.List(sealed(t.Context()), &pb.ListReq{Message: listed})
+	require.NoError(t, err)
+
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+
+	n, err := m.VerifyRequests().Matching(Method("Greetings").Field("user_id", match.Equal("u1"))).Count(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Equal(t, 2, p.times("not sealed"), "served, then verified")
+	require.Equal(t, 1, p.times(listed), "a pattern of Greetings doesn't parse a call of List")
+
+	require.True(t, m.VerifyRequests().Body(match.Contain(envelope)).Times(t, 1))
+}
+
+func TestRequestPattern_ARequestTheParsersCantReadMissesByIt(t *testing.T) {
+	// A request the parsers can't read misses by "request", after the parts that read none pass. A request of
+	// another method, or one the journal cut, is never parsed: the parts that read it are neither passed nor failed.
+	p := newSealParser(newSealer(t))
+	m := parsing(t, p)
+	pattern, err := m.RequestPattern(Method("Greetings").Field("user_id", match.Equal("u1")))
+	require.NoError(t, err)
+
+	unread := &journal.Entry{
+		Kind:   Kind,
+		Path:   pb.TestService_Greetings_FullMethodName,
+		Header: map[string][]string{"x-sealed": {"v1"}},
+		Body:   []byte(`{"message": "not sealed"}`),
+	}
+
+	ok, err := pattern.Match(t.Context(), unread)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	miss, err := pattern.Explain(t.Context(), unread)
+	require.NoError(t, err)
+	require.Equal(t, verify.Miss{Total: 2, Passed: 1, Failed: []string{"request"}}, miss)
+
+	cut := &journal.Entry{
+		Kind:          Kind,
+		Path:          pb.TestService_Greetings_FullMethodName,
+		Header:        map[string][]string{"x-sealed": {"v1"}},
+		Body:          []byte(`{"message": "not`),
+		BodyTruncated: true,
+	}
+
+	_, err = pattern.Match(t.Context(), cut)
+	require.ErrorIs(t, err, journal.ErrBodyCut)
+
+	listed := &journal.Entry{
+		Kind:   Kind,
+		Path:   pb.TestService_List_FullMethodName,
+		Header: map[string][]string{"x-sealed": {"v1"}},
+		Body:   []byte(`{"message": "not sealed"}`),
+	}
+
+	miss, err = pattern.Explain(t.Context(), listed)
+	require.NoError(t, err)
+	require.Equal(t, verify.Miss{Total: 1, Failed: []string{"method"}}, miss)
+	require.Equal(t, 2, p.total(), "the request of Greetings was parsed by Match and Explain, the others never")
+}
+
+func TestRequestPattern_AQueryWhoseContextEndedGivesTheParsersNothing(t *testing.T) {
+	// A query whose context ended, such as one its caller gave up on, gives no parser a request: it fails with the
+	// context's error, rather than report a miss for a call it never read.
+	p := newSealParser(newSealer(t))
+	m := parsing(t, p)
+	pattern, err := m.RequestPattern(Method("Greetings").Field("user_id", match.Equal("u1")))
+	require.NoError(t, err)
+
+	entry := &journal.Entry{
+		Kind:   Kind,
+		Path:   pb.TestService_Greetings_FullMethodName,
+		Header: map[string][]string{"x-sealed": {"v1"}},
+		Body:   []byte(`{"message": "not sealed"}`),
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err = pattern.Match(ctx, entry)
+	require.ErrorIs(t, err, vlatte.ErrMatching)
+	require.ErrorIs(t, err, context.Canceled)
+
+	_, err = pattern.Explain(ctx, entry)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, p.total())
+}
+
+func TestRequestPattern_ARequestWhoseParsedValuePanicsMisses(t *testing.T) {
+	// A parser's value that panics as it's written fails to read the request, as a panic of the parser does: the
+	// request misses the pattern, and the query goes on.
+	m := parsing(t, &funcParser{parse: func(context.Context, *Call, proto.Message) (any, error) {
+		return panicky{}, nil
+	}})
+	pattern, err := m.RequestPattern(Method("Greetings").Field("user_id", match.Equal("u1")))
+	require.NoError(t, err)
+
+	entry := &journal.Entry{Kind: Kind, Path: pb.TestService_Greetings_FullMethodName, Body: []byte(`{"message": "hi"}`)}
+
+	ok, err := pattern.Match(t.Context(), entry)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	miss, err := pattern.Explain(t.Context(), entry)
+	require.NoError(t, err)
+	require.Equal(t, verify.Miss{Total: 2, Passed: 1, Failed: []string{"request"}}, miss)
 }

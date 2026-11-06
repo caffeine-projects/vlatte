@@ -45,9 +45,10 @@ const (
 	_headerTableSize   = 4096 // the HPACK table size grpc encodes with, which a client can only lower
 )
 
-// cuts reports whether err, a reply's, asks to cut the call: it matches vlatte.ErrAbort or vlatte.ErrReset.
+// cuts reports whether err, a reply's, asks to cut the call: it matches vlatte.ErrAbort or vlatte.ErrReset. The error of
+// a request parser asks for no cut, whatever it wraps: it fails the reply.
 func cuts(err error) bool {
-	return errors.Is(err, vlatte.ErrAbort) || errors.Is(err, vlatte.ErrReset)
+	return !errors.Is(err, ErrParsing) && (errors.Is(err, vlatte.ErrAbort) || errors.Is(err, vlatte.ErrReset))
 }
 
 // cut answers call, whose mock's reply cut it with cause: the mock counts the call and its events run, then the
