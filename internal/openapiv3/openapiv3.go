@@ -117,25 +117,20 @@ func validate(ctx context.Context, t *openapi3.T) error {
 		content func(c openapi3.Content)
 	)
 
-	header := func(h *openapi3.HeaderRef) {
-		if h != nil && h.Value != nil {
-			content(h.Value.Content)
-		}
-	}
+	// kin-openapi resolves every reference it loads, or fails: a reference holds its value.
+	header := func(h *openapi3.HeaderRef) { content(h.Value.Content) }
 
 	content = func(c openapi3.Content) {
 		for name, mt := range c {
-			if mt == nil || seen[mt] {
+			if seen[mt] {
 				continue
 			}
 
 			seen[mt] = true
 
 			for _, e := range mt.Encoding {
-				if e != nil {
-					for _, h := range e.Headers {
-						header(h)
-					}
+				for _, h := range e.Headers {
+					header(h)
 				}
 			}
 
@@ -149,17 +144,9 @@ func validate(ctx context.Context, t *openapi3.T) error {
 		}
 	}
 
-	parameter := func(p *openapi3.ParameterRef) {
-		if p != nil && p.Value != nil {
-			content(p.Value.Content)
-		}
-	}
+	parameter := func(p *openapi3.ParameterRef) { content(p.Value.Content) }
 
 	response := func(r *openapi3.ResponseRef) {
-		if r == nil || r.Value == nil {
-			return
-		}
-
 		content(r.Value.Content)
 
 		for _, h := range r.Value.Headers {
@@ -171,16 +158,14 @@ func validate(ctx context.Context, t *openapi3.T) error {
 
 	callbacks := func(cs openapi3.Callbacks) {
 		for _, c := range cs {
-			if c != nil && c.Value != nil {
-				for _, p := range c.Value.Map() {
-					item(p)
-				}
+			for _, p := range c.Value.Map() {
+				item(p)
 			}
 		}
 	}
 
 	item = func(p *openapi3.PathItem) {
-		if p == nil || walked[p] {
+		if walked[p] {
 			return
 		}
 
@@ -195,7 +180,7 @@ func validate(ctx context.Context, t *openapi3.T) error {
 				parameter(param)
 			}
 
-			if op.RequestBody != nil && op.RequestBody.Value != nil {
+			if op.RequestBody != nil {
 				content(op.RequestBody.Value.Content)
 			}
 
@@ -229,9 +214,7 @@ func validate(ctx context.Context, t *openapi3.T) error {
 		}
 
 		for _, b := range c.RequestBodies {
-			if b != nil && b.Value != nil {
-				content(b.Value.Content)
-			}
+			content(b.Value.Content)
 		}
 
 		for _, r := range c.Responses {

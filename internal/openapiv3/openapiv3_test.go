@@ -308,6 +308,43 @@ paths:
 `})
 }
 
+func TestLoad_TakesAnExampleOutsideJSONAsWrittenWhereverTheSpecPutsIt(t *testing.T) {
+	// A spec may give a body anywhere: in a webhook, a callback, or a component its operations share.
+	xml := "{content: {application/xml: {schema: {type: object}, example: <Pet/>}}}"
+	load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    parameters: [{$ref: "#/components/parameters/Filter"}]
+    post:
+      requestBody: {$ref: "#/components/requestBodies/Pet"}
+      callbacks: {created: {$ref: "#/components/callbacks/Created"}}
+      responses: {"204": {description: OK, headers: {X-Pet: {$ref: "#/components/headers/Pet"}}}}
+    put:
+      callbacks: {created: {$ref: "#/components/callbacks/Created"}}
+      responses: {"204": {description: OK}}
+webhooks:
+  pet:
+    post:
+      requestBody: ` + xml + `
+      responses: {"204": {description: OK}}
+components:
+  parameters:
+    Filter: {name: filter, in: query, ` + xml[1:] + `
+  headers:
+    Pet: ` + xml + `
+  requestBodies:
+    Pet: ` + xml + `
+  callbacks:
+    Created:
+      "{$request.body#/url}":
+        post:
+          requestBody: ` + xml + `
+          responses: {"204": {description: OK}}
+`})
+}
+
 func TestLoad_FailsOnAnExampleOutsideJSONTheSpecForbids(t *testing.T) {
 	// Only the schema check is left out of an example outside JSON: the rest of what OpenAPI asks of it holds.
 	tests := []struct {
