@@ -24,7 +24,7 @@ func (m *equalBytesMatcher) Name() string { return "EqualBytes" }
 func (m *equalBytesMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	txt, ok := value.Text(arg.Value())
 	if !ok {
-		return mismatch("EqualBytes() Value is not text")
+		return mismatch(arg, "EqualBytes() Value is not text")
 	}
 
 	if txt == string(m.Expected) {
@@ -32,7 +32,7 @@ func (m *equalBytesMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	}
 
 	// In base64, as the bytes may not be text.
-	return mismatch("EqualBytes(" + base64.StdEncoding.EncodeToString(m.Expected) + ") Got: " +
+	return mismatch(arg, "EqualBytes("+base64.StdEncoding.EncodeToString(m.Expected)+") Got: "+
 		base64.StdEncoding.EncodeToString([]byte(txt)))
 }
 

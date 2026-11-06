@@ -1,12 +1,17 @@
 package match
 
+import (
+	"github.com/caffeine-projects/vlatte"
+)
+
 // success returns a successful match.
 func success() (bool, error) {
 	return true, nil
 }
 
-// mismatch returns a failed match (caller may use message for logging).
-func mismatch(message string) (bool, error) {
+// mismatch returns a failed match, and records message, why it failed, in the explanation of arg.
+func mismatch(arg vlatte.MatcherArg, message string) (bool, error) {
+	arg.Explain().AddMessage(message)
 	return false, nil
 }
 

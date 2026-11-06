@@ -22,14 +22,14 @@ func (m *globMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
 	text, ok := value.Text(v)
 	if !ok {
-		return mismatch("Glob() Value is not text")
+		return mismatch(arg, "Glob() Value is not text")
 	}
 
 	if glob.Glob(m.Pattern, text) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Glob(", m.Pattern, ") ", text}, ""))
+	return mismatch(arg, strings.Join([]string{"Glob(", m.Pattern, ") ", text}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

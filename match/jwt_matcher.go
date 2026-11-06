@@ -34,21 +34,21 @@ func (m *jwtMatcher) Name() string {
 func (m *jwtMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	text, ok := value.Text(arg.Value())
 	if !ok {
-		return mismatch(m.Name() + "() Value is not text")
+		return mismatch(arg, m.Name()+"() Value is not text")
 	}
 
 	tok, err := jose.Parse(bearerToken(text))
 	if err != nil {
-		return mismatch(m.Name() + "() " + err.Error())
+		return mismatch(arg, m.Name()+"() "+err.Error())
 	}
 
 	if m.keySet != nil {
 		if err := m.keySet.Verify(tok); err != nil {
-			return mismatch(m.Name() + "() " + err.Error())
+			return mismatch(arg, m.Name()+"() "+err.Error())
 		}
 
 		if err := tok.CheckTime(time.Now()); err != nil {
-			return mismatch(m.Name() + "() " + err.Error())
+			return mismatch(arg, m.Name()+"() "+err.Error())
 		}
 	}
 
@@ -63,7 +63,7 @@ func (m *jwtMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(m.Name() + "() claims did not match")
+	return mismatch(arg, m.Name()+"() claims did not match")
 }
 
 // Describe implements vlatte.SelfDescriptive.

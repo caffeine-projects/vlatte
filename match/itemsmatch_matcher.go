@@ -22,11 +22,11 @@ func (m *itemsMatchMatcher) Name() string { return "ItemsMatch" }
 func (m *itemsMatchMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	items, ok := value.List(arg.Value())
 	if !ok {
-		return mismatch("ItemsMatch() Value is not a list")
+		return mismatch(arg, "ItemsMatch() Value is not a list")
 	}
 
 	if len(items) != len(m.Expected) {
-		return mismatch(strings.Join(
+		return mismatch(arg, strings.Join(
 			[]string{"ItemsMatch() Expected value len to be ", strconv.Itoa(len(m.Expected)), ". Got: ", strconv.Itoa(len(items))},
 			"",
 		))
@@ -44,7 +44,7 @@ func (m *itemsMatchMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	}
 
 	if !paired {
-		return mismatch("ItemsMatch() Items doesn't match")
+		return mismatch(arg, "ItemsMatch() Items doesn't match")
 	}
 
 	return success()

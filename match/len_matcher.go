@@ -23,7 +23,7 @@ func (m *lenMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Len(", strconv.Itoa(m.Length), ") Got: ", strconv.Itoa(n)}, ""))
+	return mismatch(arg, strings.Join([]string{"Len(", strconv.Itoa(m.Length), ") Got: ", strconv.Itoa(n)}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

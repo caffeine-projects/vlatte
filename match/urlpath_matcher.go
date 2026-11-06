@@ -19,7 +19,7 @@ func (m *urlPathMatcher) Name() string { return "URLPath" }
 func (m *urlPathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	path, ok := urlPath(arg.Value())
 	if !ok {
-		return mismatch("URLPath() Value is not a URL")
+		return mismatch(arg, "URLPath() Value is not a URL")
 	}
 
 	ok, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), path))
@@ -31,7 +31,7 @@ func (m *urlPathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"URLPath(", path, ")"}, ""))
+	return mismatch(arg, strings.Join([]string{"URLPath(", path, ")"}, ""))
 }
 
 // urlPath returns the path of a URL: a *url.URL or url.URL, text that parses as one, or a value whose String does.

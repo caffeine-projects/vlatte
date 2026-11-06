@@ -29,14 +29,14 @@ func (m *requestURIMatcher) Name() string { return "RequestURI" }
 func (m *requestURIMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	u, ok := toURL(arg.Value())
 	if !ok {
-		return mismatch("RequestURI() Value is not a URL")
+		return mismatch(arg, "RequestURI() Value is not a URL")
 	}
 
 	if m.want.matches(u) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"RequestURI(", m.Expected, ") ", u.RequestURI()}, ""))
+	return mismatch(arg, strings.Join([]string{"RequestURI(", m.Expected, ") ", u.RequestURI()}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

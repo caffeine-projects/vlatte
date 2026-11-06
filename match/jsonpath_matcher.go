@@ -24,7 +24,7 @@ func (m *jsonPathMatcher) Name() string { return "JSONPath" }
 func (m *jsonPathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	doc, isJSON := jsonDoc(arg.Value())
 	if !isJSON {
-		return mismatch(strings.Join([]string{"Field(", m.Path, ") Value is not JSON"}, ""))
+		return mismatch(arg, strings.Join([]string{"Field(", m.Path, ") Value is not JSON"}, ""))
 	}
 
 	results := m.Expr.Get(doc)
@@ -52,7 +52,7 @@ func (m *jsonPathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Field(", m.Path, ") value did not match"}, ""))
+	return mismatch(arg, strings.Join([]string{"Field(", m.Path, ") value did not match"}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

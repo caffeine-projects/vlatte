@@ -1,6 +1,6 @@
 # Methods
 
-`Method` takes a method by whole segments of its full method: `SayHello`, `Greeter/SayHello`, `greeter.Greeter/SayHello`, or the full method, such as `pb.Greeter_SayHello_FullMethodName`. A mock fails to build, rather than wait for calls that never come, when its name names no method (`mockgrpc.ErrUnknownMethod`: a typo), or methods of different call types (`mockgrpc.ErrAmbiguousMethod`: name the service). A call of a method no descriptor describes answers `Unimplemented`.
+`Method` takes a method by whole segments of its full method: `SayHello`, `Greeter/SayHello`, `greeter.Greeter/SayHello`, or the full method, such as `pb.Greeter_SayHello_FullMethodName`, where `pb` is the generated code of the Greeter service of [examples/03-grpc-greeter](https://github.com/caffeine-projects/vlatte/tree/main/examples/03-grpc-greeter). A mock fails to build, rather than wait for calls that never come, when its name names no method (`mockgrpc.ErrUnknownMethod`: a typo), or methods of different call types (`mockgrpc.ErrAmbiguousMethod`: name the service). A call of a method no descriptor describes answers `Unimplemented`.
 
 ```go
 m.MustMock(mockgrpc.Method("SayHello").Reply(mockgrpc.Message(&pb.HelloReply{Message: "hi"})))

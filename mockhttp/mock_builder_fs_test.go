@@ -13,6 +13,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 )
 
@@ -255,4 +257,40 @@ func TestFromBytes_JSONRejectsTrailingDocuments(t *testing.T) {
 	require.True(t, ok, "%v", err)
 	require.Len(t, cfgErr.Problems, 1)
 	require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
+}
+
+// fileSays builds [file-says, name]: text equal to the content of the file name, which opens from the directory of
+// the mock file, as a custom matcher of a spec file would.
+func fileSays(r *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
+	if len(args) != 1 {
+		return nil, errors.New("takes a file name")
+	}
+
+	name, ok := args[0].(string)
+	if !ok {
+		return nil, errors.New("takes a file name")
+	}
+
+	content, err := os.ReadFile(r.Path(name))
+	if err != nil {
+		return nil, err
+	}
+
+	return match.StrictEqual(string(content)), nil
+}
+
+func TestFromFile_ACustomMatcherOpensFilesFromTheMockFilesDirectory(t *testing.T) {
+	// A mock file and the file its custom matcher names sit together, wherever the server runs from.
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "word.txt"), "hello")
+	path := filepath.Join(dir, "word.mock.yaml")
+	writeFile(t, path, "request: {method: GET, path: /word, query: {w: [file-says, word.txt]}}\nresponse: {status: 200}\n")
+
+	m := MustNew(Setup().Silent().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("file-says", fileSays))))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(FromFile(path))
+
+	status, _ := get(t, m, "/word?w=hello")
+	require.Equal(t, http.StatusOK, status)
 }

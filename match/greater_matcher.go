@@ -24,7 +24,7 @@ func (m *greaterMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Gt(", anyconv.Stringify(m.Expected), ") Got: ", anyconv.Stringify(v)}, ""))
+	return mismatch(arg, strings.Join([]string{"Gt(", anyconv.Stringify(m.Expected), ") Got: ", anyconv.Stringify(v)}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

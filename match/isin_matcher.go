@@ -24,7 +24,7 @@ func (m *isInMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(fmt.Sprintf("IsIn() Value %v is not contained in %v", v, m.Items))
+	return mismatch(arg, fmt.Sprintf("IsIn() Value %v is not contained in %v", v, m.Items))
 }
 
 // Describe implements vlatte.SelfDescriptive.

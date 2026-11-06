@@ -65,7 +65,7 @@ func (m *dateTimeMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 
 	got, zoned, ok := m.actual(v)
 	if !ok {
-		return mismatch(strings.Join([]string{m.Name(), "() Value is not a date and time: ", anyconv.Stringify(v)}, ""))
+		return mismatch(arg, strings.Join([]string{m.Name(), "() Value is not a date and time: ", anyconv.Stringify(v)}, ""))
 	}
 
 	want := m.expected()
@@ -96,7 +96,7 @@ func (m *dateTimeMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{m.Name(), "(", want.Format(time.RFC3339Nano), ") Got: ", got.Format(time.RFC3339Nano)}, ""))
+	return mismatch(arg, strings.Join([]string{m.Name(), "(", want.Format(time.RFC3339Nano), ") Got: ", got.Format(time.RFC3339Nano)}, ""))
 }
 
 // offset moves t by n units. Months and years keep the day of the month, or take the last day of a shorter month.

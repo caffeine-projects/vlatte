@@ -55,7 +55,7 @@ type mockDoc struct {
 
 // Build turns one expanded document into a mock for app.
 func (doc mockDoc) Build(app *Server) (*Mock, error) {
-	def := newMockDef(app.matchers())
+	def := newMockDef(app.matchers().InDir(doc.Dir))
 	def.dir = doc.Dir
 
 	if err := doc.Decode(_mockSchema, &def, def.check); err != nil {

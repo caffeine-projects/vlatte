@@ -50,6 +50,7 @@ Templates read:
 | `.Extra` | The reply's `template.data`, or `SetTemplateData` in Go. Webhooks don't have it. |
 | `.Scenarios.State "name"` | The state of a [scenario](/scenarios/). |
 | `.Scenarios.StateOf "name" "key"` | The state of the instance of a [scenario](/scenarios/) of a key. |
+| `range .Explanation.Messages` | What the matchers of the mock recorded when it matched, such as why the matcher under a `not` didn't match. Their wording may change between releases. gRPC doesn't have it. |
 
 ## Key-value store
 
@@ -257,6 +258,8 @@ A gRPC mock renders its messages with `Template(texts...)`, `template` in a [gRP
 | `.Request.Header` | The call's metadata. |
 | `.KV`, `.Data`, `.Provided.<key>` | As for HTTP: `m.SetData` sets `.Data`, and `Setup().TemplateDataProviders(providers)` provide `.Provided`. |
 | `.Scenarios.State "name"`, `.Scenarios.StateOf "name" "key"` | The state of a [scenario](/scenarios/). |
+
+For the Greeter service of [examples/03-grpc-greeter](https://github.com/caffeine-projects/vlatte/tree/main/examples/03-grpc-greeter), whose generated code the test imports:
 
 ```go
 m.MustMock(mockgrpc.Method("greeter.Greeter/SayHello").

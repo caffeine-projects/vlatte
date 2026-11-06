@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 )
 
 var (
@@ -27,6 +28,10 @@ var (
 //
 // An error rejects the spec, so a mock file that holds it doesn't load. The matcher may return errors from Match,
 // but an error stops the search for a mock, so it should only report a failure of its own.
+//
+// A file that args name opens from r.Path(name): a relative name is relative to the mock file. A matcher that names a
+// file in its description names it absolute, as the description may load back from another directory, such as the
+// admin API's; one that doesn't describe itself is described with args as given, which then open from there.
 type BuildFunc func(r *Registry, args []any) (vlatte.Matcher, error)
 
 // Registry builds matcher specs: the built-in matchers, and the custom ones it was given. It can't change once
@@ -36,6 +41,7 @@ type Registry struct {
 	// a spec reaches back to the registry for nested specs: a variable would refer to itself as it is initialized.
 	builtins map[string]builtin
 	custom   map[string]namedBuild // by lowercase name
+	dir      string                // the directory of the mock file whose specs it builds: see InDir
 }
 
 // namedBuild is a custom matcher's builder and its name, as given.
@@ -108,6 +114,22 @@ func MustNew(opts ...Option) *Registry {
 	}
 
 	return r
+}
+
+// InDir returns a copy of r for the specs of a mock file in dir, whose [Registry.Path] opens relative names from dir.
+// r is unchanged, so servers that share it are unaffected.
+func (r *Registry) InDir(dir string) *Registry {
+	c := *r
+	c.dir = dir
+
+	return &c
+}
+
+// Path returns where name, a file the arguments of a spec name, opens from: a relative name joined to the directory
+// of the mock file, or as it is from the working directory, for a mock built in Go or sent to the admin API. An
+// absolute name stays as it is.
+func (r *Registry) Path(name string) string {
+	return bodyfile.Path(r.dir, name)
 }
 
 // _builtins is built once: the built-in matchers by name.

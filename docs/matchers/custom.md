@@ -52,3 +52,5 @@ response:
 ```
 
 `matchbuild.Registry` builds the matchers of mock files: `registry.BuildMatcher(spec)` builds one from its spec in Go, as a mock file does.
+
+A custom matcher that opens a file its arguments name opens it from `r.Path(name)`, which reads a relative name from the directory of the mock file, as `body_file` does: `os.ReadFile(r.Path(name))`. Mocks built in Go or sent to the admin API read it from the working directory. A description can load back from another directory, so a matcher that names a file describes itself with the absolute path.

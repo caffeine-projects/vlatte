@@ -2,6 +2,8 @@
 
 A mock answers its method whatever its call type. `Build` checks a reply against it: a unary or client streaming method gets one message, or a status; a server or bidi streaming method gets any number of messages.
 
+Here, `pb` is the generated code of the service a snippet mocks, such as `Feed`.
+
 ## Server streaming
 
 `Messages(msgs...)` sends the messages of the stream in turn. `MessageDelay(d)` waits before each message, and `Status(code, msg)` ends the stream with a status after its messages.

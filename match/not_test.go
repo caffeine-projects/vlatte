@@ -27,3 +27,15 @@ func TestNot(t *testing.T) {
 		})
 	}
 }
+
+func TestNot_KeepsWhyItsMatcherDidNotMatch(t *testing.T) {
+	// A mock that matches through a not, such as one that refuses a request breaking a rule, can tell why from the
+	// explanation: what its matcher said.
+	exp := vlatte.NewExplanation()
+
+	ok, err := Not(StrictEqual("admin")).Match(vlatte.NewMatcherArg(t.Context(), exp, "user"))
+
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, []string{"StrictEq(admin) Got: user"}, exp.Messages())
+}

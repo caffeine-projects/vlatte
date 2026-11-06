@@ -37,6 +37,10 @@ type Data struct {
 	// a key, {{ .Scenarios.StateOf "checkout" (.Request.Header.Get "X-Test-Id") }}. A scenario the mock that matched
 	// moved is in the state it moved it to, even once another request moved it on.
 	Scenarios matchscenario.View
+
+	// Explanation holds what the matchers of the mock that matched recorded, such as why the matcher under a not
+	// didn't match: {{ range .Explanation.Messages }}.
+	Explanation *vlatte.Explanation
 }
 
 // Server describes the mock server to templates.
