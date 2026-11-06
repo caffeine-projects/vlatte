@@ -38,8 +38,11 @@ var (
 	ErrNotGenerated = errors.New("openapi: a file to write is not one generated from this spec")
 )
 
+// DefsPrefix starts a $ref to a schema of [Document.Defs]: DefsPrefix + name.
+const DefsPrefix = "#/$defs/"
+
 // Document is an OpenAPI description, in the terms every version shares. Its schemas are JSON Schema 2020-12
-// documents, maps or booleans, whose $ref values point into Defs as #/$defs/<name>.
+// documents, maps or booleans, whose $ref values point into Defs as [DefsPrefix] + name.
 type Document struct {
 	// Title is the title of the API. Generated files name it, so a rerun knows them.
 	Title string

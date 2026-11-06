@@ -69,7 +69,7 @@ func (g *generator) isBase64(schema any) bool {
 
 		ref, _ := s["$ref"].(string)
 
-		name, ok := strings.CutPrefix(ref, "#/$defs/")
+		name, ok := strings.CutPrefix(ref, DefsPrefix)
 		if !ok || slices.Contains(seen, name) {
 			return false
 		}

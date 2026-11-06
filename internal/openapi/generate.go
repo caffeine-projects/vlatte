@@ -871,8 +871,8 @@ func (g *generator) stripWriteOnly(v any, dropped []string) any {
 		}
 
 		ref, _ := x["$ref"].(string)
-		if name, ok := strings.CutPrefix(ref, "#/$defs/"); ok {
-			out["$ref"] = "#/$defs/" + g.copyWithout(name, dropped)
+		if name, ok := strings.CutPrefix(ref, DefsPrefix); ok {
+			out["$ref"] = DefsPrefix + g.copyWithout(name, dropped)
 		}
 
 		return out
@@ -951,7 +951,7 @@ func sameObject(s, defs map[string]any) []map[string]any {
 		}
 
 		ref, _ := s["$ref"].(string)
-		if name, ok := strings.CutPrefix(ref, "#/$defs/"); ok && !followed[name] {
+		if name, ok := strings.CutPrefix(ref, DefsPrefix); ok && !followed[name] {
 			followed[name] = true
 
 			def, _ := defs[name].(map[string]any)
@@ -1005,7 +1005,7 @@ func writeOnly(v any, defs map[string]any, seen []string) bool {
 
 	ref, _ := s["$ref"].(string)
 
-	name, ok := strings.CutPrefix(ref, "#/$defs/")
+	name, ok := strings.CutPrefix(ref, DefsPrefix)
 	if !ok || slices.Contains(seen, name) {
 		return false
 	}

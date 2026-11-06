@@ -667,7 +667,7 @@ func (c converter) translateEach(v any) any {
 // localRef returns ref pointing under $defs when it points to a shared schema.
 func localRef(ref any) any {
 	s, _ := ref.(string)
-	return strings.Replace(s, _componentsPrefix, "#/$defs/", 1)
+	return strings.Replace(s, _componentsPrefix, openapi.DefsPrefix, 1)
 }
 
 // discriminator returns the discriminator v with the references of its mapping pointing under $defs.
