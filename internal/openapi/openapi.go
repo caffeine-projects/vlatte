@@ -18,8 +18,9 @@
 // 422, get no mock.
 //
 // A body is the media type's first example, or a fake value of its schema. In JSON, it is written as JSON. In any
-// other media type, it is written as text, or as bytes when its schema says the string is base64: an object or a list
-// there, which has no text, leaves its mock disabled and without a body.
+// other media type, it is written as text, or as bytes when its schema says the string is base64, but for a serialized
+// example, the body as sent: an object or a list there, which has no text, leaves its mock disabled and without a
+// body.
 //
 // A rerun on the same document writes the same bytes: the operations are sorted, and fake values are seeded by the
 // mock they belong to.
@@ -146,4 +147,8 @@ type Example struct {
 
 	// Value is the example's value.
 	Value any
+
+	// Serialized tells whether Value is the spec's serializedValue of OpenAPI 3.2, the body as sent, encoding
+	// included: a body takes it as is, though its schema says base64.
+	Serialized bool
 }
