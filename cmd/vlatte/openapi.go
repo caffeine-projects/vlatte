@@ -69,7 +69,13 @@ func writeOpenAPIMocks(ctx context.Context, in, out string, stdout, stderr io.Wr
 		return 1
 	}
 
-	report, err := openapi.Write(out, doc.Title, openapi.Generate(doc, &log))
+	files, err := openapi.Generate(ctx, doc, &log)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	report, err := openapi.Write(out, doc.Title, files)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1

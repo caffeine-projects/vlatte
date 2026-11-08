@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -224,6 +225,27 @@ paths:
 	require.Regexp(t, `^\S+ WRN the body is data, not text: written disabled: give a string example `+
 		`media_type=text/csv method=GET mock=report-get-200-text-csv route=/report status=200\n$`, stderr.String())
 	require.Equal(t, "Wrote 2 mock files to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
+}
+
+func TestOpenAPI_StopsWhenInterrupted(t *testing.T) {
+	// A large spec takes minutes: Ctrl+C must stop the command, and leave the folder as it was.
+	dir := t.TempDir()
+	spec := filepath.Join(dir, "spec.yaml")
+	out := filepath.Join(dir, "mocks")
+	require.NoError(t, os.WriteFile(spec, []byte(`openapi: 3.1.0
+info: {title: X, version: "1"}
+paths:
+  /a: {get: {responses: {"204": {description: Done}}}}
+`), 0o600))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var stdout, stderr bytes.Buffer
+	require.Equal(t, 1, run(ctx, []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr))
+	require.Equal(t, "openapi: generating the mocks: context canceled\n", stderr.String())
+	require.Empty(t, stdout.String())
+	require.NoDirExists(t, out)
 }
 
 func TestOpenAPI_TakesAnInAndAnOut(t *testing.T) {
