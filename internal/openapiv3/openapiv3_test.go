@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
@@ -967,6 +968,116 @@ paths:
 	require.Equal(t, map[string]any{"type": "string", "maxLength": int64(3)}, components["schemas"].(map[string]any)["schemas_Name"])
 	require.Equal(t, []any{map[string]any{"$ref": "#/components/parameters/paths__1owners_get_parameters_0"}}, pets["get"].(map[string]any)["parameters"])
 	require.Equal(t, param, components["parameters"].(map[string]any)["paths__1owners_get_parameters_0"])
+}
+
+func TestLoad_CopiesTheSchemasOfTheSpecWithTheValuesTheyWrite(t *testing.T) {
+	// The mocks check a request against the copy: an integer past 2^53 read as a float64 is its rounded neighbor, and
+	// a const of null, which kin-openapi reads as none, takes any value. Shared schemas, those of other files and
+	// keywords beside a $ref alike.
+	doc := load(t, map[string]string{
+		"spec.yaml": `
+openapi: 3.1.0
+info: {title: Exact, version: "1"}
+paths:
+  /input:
+    post:
+      parameters: [{name: n, in: query, schema: {maximum: 9007199254740999}}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enum: {enum: [9007199254740999]}
+                none: {const: null}
+                shared: {$ref: "#/components/schemas/Shared"}
+                sibling: {$ref: "#/components/schemas/Shared", maximum: 9007199254740993}
+                other: {$ref: "other.yaml"}
+      responses: {"204": {description: Saved}}
+components:
+  schemas:
+    Shared: {type: integer, minimum: 9007199254740995}
+`,
+		"other.yaml": "{const: 9007199254740997}\n",
+	})
+
+	spec := doc.Spec.(map[string]any)
+	post := spec["paths"].(map[string]any)["/input"].(map[string]any)["post"].(map[string]any)
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+
+	param := post["parameters"].([]any)[0].(map[string]any)
+	require.Equal(t, map[string]any{"maximum": int64(9007199254740999)}, param["schema"])
+
+	body := post["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"]
+	require.Equal(t, map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"enum":    map[string]any{"enum": []any{int64(9007199254740999)}},
+			"none":    map[string]any{"const": nil},
+			"shared":  map[string]any{"$ref": "#/components/schemas/Shared"},
+			"sibling": map[string]any{"$ref": "#/components/schemas/Shared", "maximum": int64(9007199254740993)},
+			"other":   map[string]any{"$ref": "#/components/schemas/other"},
+		},
+	}, body)
+	require.Equal(t, map[string]any{"type": "integer", "minimum": int64(9007199254740995)}, schemas["Shared"])
+	require.Equal(t, map[string]any{"const": int64(9007199254740997)}, schemas["other"])
+}
+
+func TestRequestBodies_GivesTheSchemaOfABodyAsARequestSeesIt(t *testing.T) {
+	// The openapi matcher checks a body against these: the values the spec writes, an integer past 2^53 too, in JSON
+	// Schema 2020-12, as OpenAPI 3.0 means them, and without the requirement of a readOnly property, which a client
+	// needn't send. A request body the operations share is read once. A media type without a schema has none.
+	data := []byte(`
+openapi: 3.0.3
+info: {title: Bodies, version: "1"}
+paths:
+  /pets:
+    post:
+      requestBody: {$ref: "#/components/requestBodies/Pet"}
+      responses: {"201": {description: Created}}
+    put:
+      requestBody: {$ref: "#/components/requestBodies/Pet"}
+      responses: {"204": {description: Saved}}
+  /counts:
+    post:
+      requestBody:
+        content:
+          application/json: {schema: {type: integer, nullable: true, maximum: 9007199254740999, exclusiveMaximum: true}}
+          text/plain: {}
+      responses: {"204": {description: Saved}}
+components:
+  requestBodies:
+    Pet: {content: {application/json: {schema: {$ref: "#/components/schemas/Pet"}}}}
+  schemas:
+    Pet:
+      type: object
+      required: [id, kind]
+      properties:
+        id: {type: integer, readOnly: true}
+        kind: {enum: [9007199254740993]}
+`)
+
+	tt, err := openapi3.NewLoader().LoadFromData(data)
+	require.NoError(t, err)
+
+	bodies := openapiv3.RequestBodies(tt, data, &url.URL{Scheme: "file", Path: "/specs/pets.yaml"})
+	require.Len(t, bodies, 2)
+
+	pet := bodies[tt.Components.RequestBodies["Pet"].Value.Content.Get("application/json")]
+	name, ok := strings.CutPrefix(pet["$ref"].(string), "#/$defs/")
+	require.True(t, ok)
+	require.Equal(t, map[string]any{
+		"type": "object", "required": []any{"kind"},
+		"properties": map[string]any{
+			"id":   map[string]any{"type": "integer", "readOnly": true},
+			"kind": map[string]any{"enum": []any{int64(9007199254740993)}},
+		},
+	}, pet["$defs"].(map[string]any)[name])
+
+	counts := tt.Paths.Value("/counts").Post.RequestBody.Value.Content.Get("application/json")
+	require.Equal(t, map[string]any{
+		"type": []any{"integer", "null"}, "exclusiveMaximum": int64(9007199254740999), "$defs": make(map[string]any),
+	}, bodies[counts])
 }
 
 func TestLoad_ResolvesAServerURLAgainstWhereItsFileIsServed(t *testing.T) {

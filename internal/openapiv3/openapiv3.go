@@ -111,7 +111,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		}
 	}
 
-	if doc.Spec, err = specCopy(t, bases); err != nil {
+	if doc.Spec, err = specCopy(t, bases, r); err != nil {
 		return nil, fmt.Errorf("openapi: copying the spec: %w", err)
 	}
 
@@ -120,8 +120,9 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 
 // specCopy returns t as data, for the mocks that refuse a request that breaks it: each operation under one server,
 // of its base path in bases, or none for none, and the document and its paths without servers. Its paths are as t
-// writes them, so a reference into them still resolves.
-func specCopy(t *openapi3.T, bases map[*openapi3.Operation]string) (any, error) {
+// writes them, so a reference into them still resolves. Its schemas hold their values as r has them: each integer
+// and each null as the spec writes it.
+func specCopy(t *openapi3.T, bases map[*openapi3.Operation]string, r raw) (any, error) {
 	t.Servers = nil
 
 	for _, item := range t.Paths.Map() {
@@ -141,7 +142,78 @@ func specCopy(t *openapi3.T, bases map[*openapi3.Operation]string) (any, error) 
 		return nil, err
 	}
 
-	return value.DecodeJSON(data)
+	spec, err := value.DecodeJSON(data)
+	if err != nil {
+		return nil, err
+	}
+
+	// Each schema kin-openapi read is in the copy where it walks to it first, whole, with the schemas within it, but
+	// for a $ref, which is there as written. Elsewhere, such as below a $ref, the walk passes what the copy lacks.
+	_ = t.WalkSchemas(func(ptr string, ref *openapi3.SchemaRef) error {
+		node := pointer(spec, ptr)
+		if node == nil {
+			return nil
+		}
+
+		key := field{object: ref.Value}
+		if ref.Ref != "" {
+			key = field{object: ref}
+		}
+
+		exact(node, r[key])
+
+		return openapi3.SkipSubtree
+	})
+
+	return spec, nil
+}
+
+// RequestBodies returns the schema of each media type of the request body of each operation of t, which
+// kin-openapi read from data, the spec at location, in one document: in JSON Schema 2020-12, as [Load] gives a
+// document's schemas, each integer and each null as data writes it, and as a request sees it, by
+// [openapi.RequestRoots]. It keeps what kin-openapi checks of a request that JSON Schema doesn't: a oneOf or an anyOf
+// with a discriminator takes an object by the branch the discriminator names, and, in OpenAPI 3.0, a nullable schema
+// takes null whatever its other keywords say. A media type without a schema has none.
+func RequestBodies(t *openapi3.T, data []byte, location *url.URL) map[*openapi3.MediaType]map[string]any {
+	r, _, _ := readRaw(t, location, map[string][]byte{fileKey(location): data})
+	c := converter{v30: t.IsOpenAPI30(), raw: r, request: true}
+
+	defs := make(map[string]any)
+	if t.Components != nil {
+		for name, ref := range t.Components.Schemas {
+			defs[name] = c.schema(ref)
+		}
+	}
+
+	bodies := make(map[*openapi3.MediaType]any)
+
+	for _, item := range t.Paths.Map() {
+		for _, op := range item.Operations() {
+			if op.RequestBody == nil || op.RequestBody.Value == nil {
+				continue
+			}
+
+			for _, mt := range op.RequestBody.Value.Content {
+				if mt != nil && mt.Schema != nil {
+					bodies[mt] = c.schema(mt.Schema)
+				}
+			}
+		}
+	}
+
+	media := slices.Collect(maps.Keys(bodies))
+
+	schemas := make([]any, len(media))
+	for i, mt := range media {
+		schemas[i] = bodies[mt]
+	}
+
+	roots := make(map[*openapi3.MediaType]map[string]any, len(media))
+	for i, root := range openapi.RequestRoots(defs, schemas) {
+		roots[media[i]] = root
+	}
+
+	return roots
 }
 
 // refNames returns how kin-openapi names, as a shared component, what a reference of the spec at location names
@@ -597,6 +669,9 @@ type converter struct {
 	security openapi3.SecurityRequirements // the document's, which an operation without its own has
 	schemes  openapi3.SecuritySchemes      // the security schemes of the document, by name
 	title    string                        // the title of the document, which a Basic challenge names as its realm
+
+	// request is whether the schemas are for checking a request as kin-openapi does, by RequestBodies.
+	request bool
 }
 
 // operation translates op, of the path item with the parameters common.
@@ -795,7 +870,7 @@ func (c converter) schema(ref *openapi3.SchemaRef) any {
 
 // translate rewrites schema v of the document as JSON Schema 2020-12: its references to shared schemas point under
 // $defs, and, in OpenAPI 3.0, nullable adds the null type, and a boolean exclusiveMinimum or exclusiveMaximum takes
-// the value of minimum or maximum.
+// the value of minimum or maximum. For a request, it keeps what kin-openapi checks besides, as RequestBodies says.
 func (c converter) translate(v any) any {
 	switch x := v.(type) {
 	case map[string]any:
@@ -815,8 +890,18 @@ func (c converter) translate(v any) any {
 			}
 		}
 
+		nullable, _ := x["nullable"].(bool)
+
 		if c.v30 {
 			translate30(out)
+		}
+
+		if c.request {
+			discriminate(out)
+
+			if c.v30 && nullable {
+				takeNull(out)
+			}
 		}
 
 		return out
@@ -829,6 +914,104 @@ func (c converter) translate(v any) any {
 		return out
 	default:
 		return v
+	}
+}
+
+// _xOf are the keywords of a schema that take a value by the schemas they list, or the one they hold.
+var _xOf = []string{"allOf", "anyOf", "oneOf", "not"}
+
+// takeNull makes s, a nullable schema of OpenAPI 3.0, take null, as kin-openapi does before it checks any other
+// keyword: its enum, and the schemas of its allOf, anyOf, oneOf or not, which hold a nullable $ref, say.
+func takeNull(s map[string]any) {
+	if enum, ok := s["enum"].([]any); ok && !slices.Contains(enum, nil) {
+		s["enum"] = append(enum, nil)
+	}
+
+	moved := make(map[string]any)
+	for _, k := range append(_xOf, "discriminator") {
+		if v, ok := s[k]; ok {
+			moved[k] = v
+			delete(s, k)
+		}
+	}
+
+	// OpenAPI 3.0 has no if: a schema of it has none of its own.
+	if len(moved) > 0 {
+		s["if"], s["else"] = map[string]any{"type": "null"}, moved
+	}
+}
+
+// discriminate makes the oneOf and the anyOf of s, a schema with a discriminator, take an object as kin-openapi does:
+// one whose property the discriminator names is a string, and, when the discriminator has a mapping, one of its
+// values, by the branches whose $ref it maps that value to. They take any other value by all their branches.
+func discriminate(s map[string]any) {
+	d, _ := s["discriminator"].(map[string]any)
+	name, _ := d["propertyName"].(string)
+	mapping, _ := d["mapping"].(map[string]any)
+
+	if name == "" {
+		return
+	}
+
+	for _, k := range []string{"oneOf", "anyOf"} {
+		branches, ok := s[k].([]any)
+		if !ok {
+			continue
+		}
+
+		delete(s, k)
+
+		property := map[string]any{"type": "string"}
+		then := map[string]any{"required": []any{name}, "properties": map[string]any{name: property}}
+
+		if len(mapping) == 0 {
+			then[k] = branches
+		} else {
+			values := slices.Sorted(maps.Keys(mapping))
+			enum, cases := make([]any, len(values)), make([]any, len(values))
+
+			for i, v := range values {
+				enum[i] = v
+				cases[i] = map[string]any{
+					"if":   map[string]any{"required": []any{name}, "properties": map[string]any{name: map[string]any{"const": v}}},
+					"then": named(k, branches, mapping[v]),
+				}
+			}
+
+			property["enum"], then["allOf"] = enum, cases
+		}
+
+		all, _ := s["allOf"].([]any)
+		s["allOf"] = append(all, map[string]any{
+			"if":   map[string]any{"type": "object"},
+			"then": then,
+			"else": map[string]any{k: branches},
+		})
+	}
+}
+
+// named returns the schema that takes a value as the keyword k, oneOf or anyOf, of branches does, by the branches
+// whose $ref is ref, a value of a discriminator's mapping: a $ref, or the name of a shared schema.
+func named(k string, branches []any, ref any) any {
+	r, _ := ref.(string)
+	if !strings.Contains(r, "/") {
+		r = openapi.DefsPrefix + r
+	}
+
+	var of []any
+	for _, b := range branches {
+		if m, ok := b.(map[string]any); ok && m["$ref"] == r {
+			of = append(of, b)
+		}
+	}
+
+	switch len(of) {
+	case 0:
+		return false
+	case 1:
+		return of[0]
+	default:
+		return map[string]any{k: of}
 	}
 }
 

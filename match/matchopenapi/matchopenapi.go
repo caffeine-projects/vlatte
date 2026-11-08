@@ -9,8 +9,10 @@
 package matchopenapi
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/url"
@@ -27,6 +29,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/openapi/pathtemplate"
+	"github.com/caffeine-projects/vlatte/internal/openapiv3"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
@@ -56,8 +59,13 @@ const (
 // The matcher compares a request's path as the mocks vlatte openapi writes of the operation do, under the path of
 // its first server: GET /foo%2Fbar is a request of GET /foo/bar.
 //
-// The request check is kin-openapi's, which reads each number as a float64 and a const of null as none: a bound or an
-// enum value past 2^53 is checked rounded, and const: null takes any value.
+// The request check reads and checks parameters as kin-openapi does, each number as a float64. It checks a body
+// against the schema of its media type as the spec writes it, an integer past 2^53 and a const of null included, with
+// JSON Schema 2020-12, which an OpenAPI 3.0 schema is translated to, keeping what kin-openapi checks besides: a oneOf
+// or an anyOf with a discriminator takes an object by the branch the discriminator names, a nullable schema of
+// OpenAPI 3.0 takes null, and only the formats kin-openapi checks are, byte, date, date-time, int32 and int64. A body
+// other than JSON is read as kin-openapi reads it, a number of a form as a float64. A body whose schema doesn't
+// compile, such as one that refers into the paths of the spec, is checked as kin-openapi checks it.
 //
 // The matcher records what a request breaks in its explanation, and never fails: a spec that doesn't load fails the
 // mock file. The matchers of a registry load each spec once, and again when its file changes.
@@ -148,9 +156,7 @@ func (s *specs) load(path string) (*spec, error) {
 		return nil, fmt.Errorf("spec: loading %s: %w", path, err)
 	}
 
-	unrequireReadOnly(t)
-
-	sp := newSpec(t)
+	sp := newSpec(t, openapiv3.RequestBodies(t, data, &url.URL{Scheme: "file", Path: filepath.ToSlash(path)}))
 	sp.modTime, sp.size = info.ModTime(), info.Size()
 	s.loaded[path] = sp
 
@@ -167,9 +173,15 @@ type spec struct {
 	size    int64
 }
 
-// newSpec returns t and its routes: each operation under the path of its first server.
-func newSpec(t *openapi3.T) *spec {
+// newSpec returns t and its routes: each operation under the path of its first server, its bodies checked against
+// roots, the schema of each media type, as openapiv3.RequestBodies gives them.
+func newSpec(t *openapi3.T, roots map[*openapi3.MediaType]map[string]any) *spec {
 	sp := &spec{t: t, byID: make(map[string]*route), byRoute: make(map[string]*route)}
+
+	bodies := make(map[*openapi3.MediaType]*body, len(roots))
+	for mt, root := range roots {
+		bodies[mt] = newBody(mt, root, t.IsOpenAPI30())
+	}
 
 	for path, item := range t.Paths.Map() {
 		for method, op := range item.Operations() {
@@ -180,7 +192,7 @@ func newSpec(t *openapi3.T) *spec {
 				}
 			}
 
-			rt := newRoute(t, strings.ToUpper(method), base, path, item, op)
+			rt := newRoute(t, strings.ToUpper(method), base, path, item, op, bodies)
 			sp.byRoute[rt.method+" "+rt.path] = rt
 			sp.routes = append(sp.routes, rt)
 
@@ -225,15 +237,22 @@ type route struct {
 	content  openapi3.Content         // the media types the request body takes, or nil for none
 	consumes []string                 // the keys of content, sorted
 
+	// bodies are how the matcher checks a body, by media type, of the spec's operations.
+	bodies map[*openapi3.MediaType]*body
+
 	// request is what kin-openapi checks a request against: the operation without its security, which the
-	// security check checks.
+	// security check checks, and without the schemas of its body, which bodies check.
 	request *routers.Route
 }
 
-// newRoute returns the route of op, of method, of the path item of path in t, under base, a base path decoded.
-func newRoute(t *openapi3.T, method, base, path string, item *openapi3.PathItem, op *openapi3.Operation) *route {
+// newRoute returns the route of op, of method, of the path item of path in t, under base, a base path decoded, which
+// checks a body of a media type bodies has as it does, and any other as kin-openapi does.
+func newRoute(t *openapi3.T, method, base, path string, item *openapi3.PathItem, op *openapi3.Operation, bodies map[*openapi3.MediaType]*body) *route {
 	at := pathtemplate.Join(base, path)
-	rt := &route{method: method, path: at, where: pathtemplate.NewRoute(base, path), templated: pathtemplate.Templated(at), security: t.Security}
+	rt := &route{
+		method: method, path: at, where: pathtemplate.NewRoute(base, path), templated: pathtemplate.Templated(at), security: t.Security,
+		bodies: bodies,
+	}
 
 	if op.Security != nil {
 		rt.security = *op.Security
@@ -256,6 +275,24 @@ func newRoute(t *openapi3.T, method, base, path string, item *openapi3.PathItem,
 
 	unsecured := *op
 	unsecured.Security = &openapi3.SecurityRequirements{}
+
+	// kin-openapi still checks that a body the operation requires is there, in a media type it takes.
+	if rt.content != nil {
+		rb := *op.RequestBody.Value
+		rb.Content = make(openapi3.Content, len(rt.content))
+
+		for name, mt := range rt.content {
+			rb.Content[name] = mt
+			if bodies[mt] != nil {
+				unchecked := *mt
+				unchecked.Schema = nil
+				rb.Content[name] = &unchecked
+			}
+		}
+
+		unsecured.RequestBody = &openapi3.RequestBodyRef{Value: &rb}
+	}
+
 	rt.request = &routers.Route{Spec: t, Path: path, PathItem: item, Method: method, Operation: &unsecured}
 
 	return rt
@@ -381,9 +418,10 @@ func hasBody(r *http.Request) bool {
 }
 
 // invalid returns what the parameters and body of r, whose path holds the values params of the parameters of rt's
-// path, break, as kin-openapi checks them. A body the server didn't keep for its matchers to read again, such as one
-// past its parsing limit, isn't checked, nor one in a media type kin-openapi can't read, nor a string against a
-// pattern Go can't compile.
+// path, break: its parameters as kin-openapi checks them, and its body against the schema of its media type, as the
+// spec writes it, or as kin-openapi checks it when that schema doesn't compile. A body the server didn't keep for its
+// matchers to read again, such as one past its parsing limit, isn't checked, nor one in a media type kin-openapi
+// can't read, nor a string against a pattern Go can't compile.
 func (rt *route) invalid(r *http.Request, params map[string]string) []string {
 	req := r.WithContext(r.Context())
 	opts := &openapi3filter.Options{
@@ -393,13 +431,15 @@ func (rt *route) invalid(r *http.Request, params map[string]string) []string {
 		AuthenticationFunc:         openapi3filter.NoopAuthenticationFunc,
 	}
 
+	var data []byte
+
 	switch {
 	case r.GetBody != nil:
-		body, err := r.GetBody()
-		if err != nil {
+		var err error
+		if data, err = readAgain(r); err != nil {
 			opts.ExcludeRequestBody = true
 		} else {
-			req.Body = body
+			req.Body = io.NopCloser(bytes.NewReader(data))
 		}
 	case !hasBody(r):
 		req.Body = http.NoBody
@@ -411,7 +451,51 @@ func (rt *route) invalid(r *http.Request, params map[string]string) []string {
 		Request: req, PathParams: params, Route: rt.request, Options: opts,
 	})
 
-	return reasons(err)
+	broken := reasons(err)
+
+	mt := rt.content.Get(r.Header.Get("Content-Type"))
+	if b := rt.bodies[mt]; b != nil && len(data) > 0 {
+		messages, checked := b.check(data, r.Header)
+		if !checked {
+			messages = rt.kinBody(r, data, mt, opts)
+		}
+
+		broken = append(broken, messages...)
+	}
+
+	return broken
+}
+
+// kinBody returns what data, the body of r, of the media type mt, breaks, as kin-openapi checks it with opts.
+func (rt *route) kinBody(r *http.Request, data []byte, mt *openapi3.MediaType, opts *openapi3filter.Options) []string {
+	req := r.WithContext(r.Context())
+	req.Body = io.NopCloser(bytes.NewReader(data))
+
+	content := make(openapi3.Content, 1)
+	for name, other := range rt.content {
+		if other == mt {
+			content[name] = mt
+		}
+	}
+
+	err := openapi3filter.ValidateRequestBody(r.Context(), &openapi3filter.RequestValidationInput{Request: req, Options: opts}, &openapi3.RequestBody{Content: content})
+	if err == nil {
+		return nil
+	}
+
+	return reasons(openapi3.MultiError{err})
+}
+
+// readAgain returns the body of r, which GetBody gives again.
+func readAgain(r *http.Request) ([]byte, error) {
+	body, err := r.GetBody()
+	if err != nil {
+		return nil, err
+	}
+
+	defer body.Close()
+
+	return io.ReadAll(body)
 }
 
 // reasons returns what err, an error of openapi3filter.ValidateRequest with MultiError, says a request breaks, one
@@ -494,100 +578,4 @@ func reason(se *openapi3.SchemaError, at string) string {
 	r = strings.TrimPrefix(r, `error at "`+at+`": `)
 
 	return strings.TrimPrefix(r, "at '"+at+"': ")
-}
-
-// unrequireReadOnly drops from the required properties of each schema of t, and of the schemas of its allOf, the
-// ones it marks readOnly: a client needn't send them. A schema marks readOnly a property that a schema of its allOf,
-// or of theirs, gives a schema that is readOnly, or one of whose allOf is: the annotations of an allOf apply to the
-// object, whichever branch holds them. kin-openapi's own check, which a 3.1 spec gets only for a schema with a
-// reference and no keyword of JSON Schema 2020, misses a property readOnly through its own allOf.
-func unrequireReadOnly(t *openapi3.T) {
-	var schemas []*openapi3.Schema
-
-	_ = t.WalkSchemas(func(_ string, ref *openapi3.SchemaRef) error {
-		if ref.Value != nil {
-			schemas = append(schemas, ref.Value)
-		}
-
-		return nil
-	})
-
-	// The names a schema marks readOnly are marked wherever it applies: it is changed in place. A schema of its allOf
-	// may apply elsewhere without them: it is changed in a copy.
-	for _, s := range schemas {
-		if names := readOnlyNames(s); len(names) > 0 {
-			unrequire(s, names, map[*openapi3.Schema]*openapi3.Schema{s: nil})
-		}
-	}
-}
-
-// readOnlyNames returns the names of the properties s marks readOnly.
-func readOnlyNames(s *openapi3.Schema) map[string]bool {
-	names := make(map[string]bool)
-
-	for _, branch := range allOf(s) {
-		for name, p := range branch.Properties {
-			if p != nil && p.Value != nil && slices.ContainsFunc(allOf(p.Value), func(x *openapi3.Schema) bool { return x.ReadOnly }) {
-				names[name] = true
-			}
-		}
-	}
-
-	return names
-}
-
-// allOf returns s and the schemas of its allOf, and of theirs, each once.
-func allOf(s *openapi3.Schema) []*openapi3.Schema {
-	out := []*openapi3.Schema{s}
-
-	for i := 0; i < len(out); i++ {
-		for _, ref := range out[i].AllOf {
-			if ref != nil && ref.Value != nil && !slices.Contains(out, ref.Value) {
-				out = append(out, ref.Value)
-			}
-		}
-	}
-
-	return out
-}
-
-// unrequire drops names from the required properties of s, and replaces each schema of its allOf that requires one
-// of them, or whose allOf does, by a copy that doesn't. copies are the copies made, by schema, and nil for each
-// schema being changed: one that is reached again, through a cycle, is left as it is.
-func unrequire(s *openapi3.Schema, names map[string]bool, copies map[*openapi3.Schema]*openapi3.Schema) {
-	s.Required = slices.DeleteFunc(slices.Clone(s.Required), func(name string) bool { return names[name] })
-
-	branches := slices.Clone(s.AllOf)
-	for i, ref := range branches {
-		if ref == nil || ref.Value == nil || !requiresAny(ref.Value, names) {
-			continue
-		}
-
-		c, ok := copies[ref.Value]
-		if ok && c == nil {
-			continue
-		}
-
-		if !ok {
-			copies[ref.Value] = nil
-
-			branch := *ref.Value
-			unrequire(&branch, names, copies)
-
-			c = &branch
-			copies[ref.Value] = c
-		}
-
-		// Without its reference, kin-openapi checks the copy, not the schema the reference names.
-		branches[i] = &openapi3.SchemaRef{Value: c}
-	}
-
-	s.AllOf = branches
-}
-
-// requiresAny reports whether s, or a schema of its allOf, requires one of names.
-func requiresAny(s *openapi3.Schema, names map[string]bool) bool {
-	return slices.ContainsFunc(allOf(s), func(x *openapi3.Schema) bool {
-		return slices.ContainsFunc(x.Required, func(name string) bool { return names[name] })
-	})
 }

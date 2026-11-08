@@ -134,14 +134,7 @@ type Reply struct {
 // it: a body no value fits, by its examples or its schema, leaves its mock without one and disabled. It fails only when
 // ctx is done.
 func Generate(ctx context.Context, doc *Document, log *zerolog.Logger) ([]File, error) {
-	g := generator{
-		doc: doc, defs: make(map[string]any, len(doc.Defs)), copies: make(map[string]string),
-		spec: specName(doc), routes: make(map[string]*routeMethods),
-	}
-	// Sorted, so the copies of shared schemas get the same names on every run.
-	for _, name := range slices.Sorted(maps.Keys(doc.Defs)) {
-		g.defs[name] = g.stripWriteOnly(doc.Defs[name], nil)
-	}
+	g := generator{doc: doc, responses: newView(doc.Defs, "writeOnly", false), spec: specName(doc), routes: make(map[string]*routeMethods)}
 
 	ops := slices.Clone(doc.Operations)
 	slices.SortFunc(ops, func(a, b Operation) int {
@@ -207,14 +200,13 @@ func stopped(ctx context.Context) error {
 
 // generator holds the mocks and warnings of a document as they are made.
 type generator struct {
-	doc      *Document
-	defs     map[string]any           // the document's shared schemas without writeOnly properties, and copyWithout's copies
-	copies   map[string]string        // the names in defs of copyWithout's copies, by shared schema and properties left out
-	spec     string                   // the name of the file of the copy of the spec, beside the mocks
-	routes   map[string]*routeMethods // the methods of each route, for its 405
-	mocks    []Mock
-	pending  []string
-	warnings []warning
+	doc       *Document
+	responses *view                    // how a response sees the document's schemas
+	spec      string                   // the name of the file of the copy of the spec, beside the mocks
+	routes    map[string]*routeMethods // the methods of each route, for its 405
+	mocks     []Mock
+	pending   []string
+	warnings  []warning
 }
 
 // routeMethods are the methods of a route, a path of the spec under its base path, and what its mocks match.
@@ -483,7 +475,7 @@ func (g *generator) body(m Mock, r Response, c Content, status int, extras bool)
 	case len(c.Examples) > 0:
 		g.setBody(&m, c, c.Examples[0].Value)
 	case c.Schema != nil:
-		v, err := fakefy.New(fakefy.WithSeed(seed(m))).Schema(g.root(c.Schema))
+		v, err := fakefy.New(fakefy.WithSeed(seed(m))).Schema(g.responses.root(c.Schema))
 		if err != nil {
 			g.warnf("no body fits: %v: written disabled", err)
 			m.Enabled = false
@@ -603,7 +595,7 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 			continue
 		default:
 			var err error
-			if v, err = f.Field(hd.Name, g.root(hd.Schema)); err != nil {
+			if v, err = f.Field(hd.Name, g.responses.root(hd.Schema)); err != nil {
 				g.warnf("no value of header %s fits: %v: left out", hd.Name, err)
 				continue
 			}
@@ -617,13 +609,50 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 	return h
 }
 
-// root returns schema, without its writeOnly properties, with the document's shared schemas its $ref values name, in
-// turn, under $defs, for them to resolve. Its own $defs win over a shared schema of the same name. Leaving out the
-// others keeps fakefy from compiling every schema of a large spec for each value.
-func (g *generator) root(schema any) map[string]any {
+// view is how one side of an exchange sees the schemas of a document: a response never holds a property its schema
+// marks writeOnly, and a request needn't send one it marks readOnly, though it may.
+type view struct {
+	marker string            // the annotation of the properties the side leaves out: writeOnly or readOnly
+	keep   bool              // whether the side keeps those properties, and only stops requiring them
+	doc    map[string]any    // the document's shared schemas
+	defs   map[string]any    // the shared schemas as the side sees them, and copyWithout's copies
+	copies map[string]string // the names in defs of copyWithout's copies, by shared schema and properties left out
+}
+
+// newView returns how a side that leaves out the properties marker marks, or with keep, only stops requiring them,
+// sees doc, the shared schemas of a document.
+func newView(doc map[string]any, marker string, keep bool) *view {
+	vw := &view{marker: marker, keep: keep, doc: doc, defs: make(map[string]any, len(doc)), copies: make(map[string]string)}
+
+	// Sorted, so the copies of shared schemas get the same names on every run.
+	for _, name := range slices.Sorted(maps.Keys(doc)) {
+		vw.defs[name] = vw.strip(doc[name], nil)
+	}
+
+	return vw
+}
+
+// RequestRoots returns each of schemas, schemas of a document whose shared schemas are defs, as a request sees it: a
+// property a schema marks readOnly is no longer required, as a request needn't send it, but stays declared, as it
+// may. Each is a root, as a response's is, with the shared schemas its $ref values name under $defs.
+func RequestRoots(defs map[string]any, schemas []any) []map[string]any {
+	vw := newView(defs, "readOnly", true)
+
+	roots := make([]map[string]any, len(schemas))
+	for i, s := range schemas {
+		roots[i] = vw.root(s)
+	}
+
+	return roots
+}
+
+// root returns schema as vw's side sees it, with the document's shared schemas its $ref values name, in turn, under
+// $defs, for them to resolve. Its own $defs win over a shared schema of the same name. Leaving out the others keeps
+// fakefy from compiling every schema of a large spec for each value.
+func (vw *view) root(schema any) map[string]any {
 	root := make(map[string]any, 2)
 
-	switch s := g.stripWriteOnly(schema, nil).(type) {
+	switch s := vw.strip(schema, nil).(type) {
 	case map[string]any:
 		root = s
 	case bool:
@@ -638,33 +667,33 @@ func (g *generator) root(schema any) map[string]any {
 		defs = make(map[string]any)
 	}
 
-	g.named(root, defs)
+	vw.named(root, defs)
 	root["$defs"] = defs
 
 	return root
 }
 
-// named adds to defs each shared schema of the generator that a $ref in v names, and those that one names, in turn,
-// but for the names defs holds. It reads every $ref key as one: one in data, such as an example, only adds a schema.
-func (g *generator) named(v any, defs map[string]any) {
+// named adds to defs each shared schema of vw that a $ref in v names, and those that one names, in turn, but for the
+// names defs holds. It reads every $ref key as one: one in data, such as an example, only adds a schema.
+func (vw *view) named(v any, defs map[string]any) {
 	switch x := v.(type) {
 	case map[string]any:
 		ref, _ := x["$ref"].(string)
 		if name, ok := defName(ref); ok {
-			if def, shared := g.defs[name]; shared {
+			if def, shared := vw.defs[name]; shared {
 				if _, added := defs[name]; !added {
 					defs[name] = def
-					g.named(def, defs)
+					vw.named(def, defs)
 				}
 			}
 		}
 
 		for _, val := range x {
-			g.named(val, defs)
+			vw.named(val, defs)
 		}
 	case []any:
 		for _, item := range x {
-			g.named(item, defs)
+			vw.named(item, defs)
 		}
 	}
 }
@@ -965,15 +994,15 @@ func (g *generator) mediaValue(what, mediaType string, v any) (string, bool) {
 	return text(v), true
 }
 
-// stripWriteOnly returns a copy of the schema v without its writeOnly properties, which a response never holds, at
-// any depth, nor their names in required. The schemas sameObject has for a schema describe one object: a property any
-// of them makes writeOnly is left out of each, as are dropped, those the schemas v applies with make writeOnly. A
-// shared schema is applied as copyWithout has it. The branches of anyOf and oneOf, which may not apply, and the
-// object a property holds keep their own.
-func (g *generator) stripWriteOnly(v any, dropped []string) any {
+// strip returns a copy of the schema v without the properties vw's side leaves out, at any depth, nor their names in
+// required, or, when it keeps them, only without their names in required. The schemas sameObject has for a schema
+// describe one object: a property any of them marks is left out of each, as are dropped, those the schemas v applies
+// with mark. A shared schema is applied as copyWithout has it. The branches of anyOf and oneOf, which may not apply,
+// and the object a property holds keep their own.
+func (vw *view) strip(v any, dropped []string) any {
 	switch x := v.(type) {
 	case map[string]any:
-		dropped = slices.Concat(dropped, writeOnlyProperties(x, g.doc.Defs))
+		dropped = slices.Concat(dropped, markedProperties(x, vw.doc, vw.marker))
 		out := make(map[string]any, len(x))
 
 		for k, val := range x {
@@ -983,12 +1012,12 @@ func (g *generator) stripWriteOnly(v any, dropped []string) any {
 			case slices.Contains(ValueKeywords, k):
 				// Data, whatever keys it holds.
 				out[k] = val
-			case k == "properties" && isMap:
+			case k == "properties" && isMap && !vw.keep:
 				kept := make(map[string]any, len(named))
 
 				for name, p := range named {
 					if !slices.Contains(dropped, name) {
-						kept[name] = g.stripWriteOnly(p, nil)
+						kept[name] = vw.strip(p, nil)
 					}
 				}
 
@@ -997,14 +1026,14 @@ func (g *generator) stripWriteOnly(v any, dropped []string) any {
 				// Names, not keywords: a schema named const is a schema.
 				each := make(map[string]any, len(named))
 				for name, p := range named {
-					each[name] = g.stripWriteOnly(p, nil)
+					each[name] = vw.strip(p, nil)
 				}
 
 				out[k] = each
 			case k == "allOf":
-				out[k] = g.stripWriteOnly(val, dropped)
+				out[k] = vw.strip(val, dropped)
 			default:
-				out[k] = g.stripWriteOnly(val, nil)
+				out[k] = vw.strip(val, nil)
 			}
 		}
 
@@ -1017,14 +1046,14 @@ func (g *generator) stripWriteOnly(v any, dropped []string) any {
 
 		ref, _ := x["$ref"].(string)
 		if name, ok := strings.CutPrefix(ref, DefsPrefix); ok {
-			out["$ref"] = DefsPrefix + g.copyWithout(name, dropped)
+			out["$ref"] = DefsPrefix + vw.copyWithout(name, dropped)
 		}
 
 		return out
 	case []any:
 		out := make([]any, len(x))
 		for i, item := range x {
-			out[i] = g.stripWriteOnly(item, dropped)
+			out[i] = vw.strip(item, dropped)
 		}
 
 		return out
@@ -1033,17 +1062,17 @@ func (g *generator) stripWriteOnly(v any, dropped []string) any {
 	}
 }
 
-// copyWithout returns the name, in the generator's shared schemas, of the document's shared schema name without the
-// properties of dropped it declares or requires, or name when it has none of them. Each copy is made once, so one
-// that holds itself refers to itself.
-func (g *generator) copyWithout(name string, dropped []string) string {
-	def, _ := g.doc.Defs[name].(map[string]any)
+// copyWithout returns the name, in vw's shared schemas, of the document's shared schema name as strip has it without
+// the properties of dropped, or name when changes finds it the same. Each copy is made once, so one that holds itself
+// refers to itself.
+func (vw *view) copyWithout(name string, dropped []string) string {
+	def, _ := vw.doc[name].(map[string]any)
 
 	var without []string
 
-	for _, s := range sameObject(def, g.doc.Defs) {
+	for _, s := range sameObject(def, vw.doc) {
 		for _, d := range dropped {
-			if declares(s, d) && !slices.Contains(without, d) {
+			if vw.changes(s, d) && !slices.Contains(without, d) {
 				without = append(without, d)
 			}
 		}
@@ -1056,7 +1085,7 @@ func (g *generator) copyWithout(name string, dropped []string) string {
 	slices.Sort(without)
 
 	key := name + "\x00" + strings.Join(without, "\x00")
-	if copied, ok := g.copies[key]; ok {
+	if copied, ok := vw.copies[key]; ok {
 		return copied
 	}
 
@@ -1064,16 +1093,16 @@ func (g *generator) copyWithout(name string, dropped []string) string {
 	for i := 2; ; i++ {
 		copied = name + "_" + strconv.Itoa(i)
 
-		_, shared := g.doc.Defs[copied]
-		if _, made := g.defs[copied]; !shared && !made {
+		_, shared := vw.doc[copied]
+		if _, made := vw.defs[copied]; !shared && !made {
 			break
 		}
 	}
 
 	// Taken before the copy is made, for the copy to refer to itself.
-	g.copies[key] = copied
-	g.defs[copied] = nil
-	g.defs[copied] = g.stripWriteOnly(def, without)
+	vw.copies[key] = copied
+	vw.defs[copied] = nil
+	vw.defs[copied] = vw.strip(def, without)
 
 	return copied
 }
@@ -1109,15 +1138,15 @@ func sameObject(s, defs map[string]any) []map[string]any {
 	return out
 }
 
-// writeOnlyProperties returns the names of the properties that schema s, or a schema sameObject has for it, makes
-// writeOnly, as writeOnly decides.
-func writeOnlyProperties(s, defs map[string]any) []string {
+// markedProperties returns the names of the properties that schema s, or a schema sameObject has for it, marks with
+// marker, as marked decides.
+func markedProperties(s, defs map[string]any, marker string) []string {
 	var names []string
 
 	for _, o := range sameObject(s, defs) {
 		props, _ := o["properties"].(map[string]any)
 		for name, p := range props {
-			if writeOnly(p, defs, nil) {
+			if marked(p, defs, marker, nil) {
 				names = append(names, name)
 			}
 		}
@@ -1126,25 +1155,27 @@ func writeOnlyProperties(s, defs map[string]any) []string {
 	return names
 }
 
-// declares reports whether schema s declares or requires the property name.
-func declares(s map[string]any, name string) bool {
+// changes reports whether vw's side sees schema s other than it is without the property name: s requires it, or
+// declares it, when the side leaves it out.
+func (vw *view) changes(s map[string]any, name string) bool {
 	props, _ := s["properties"].(map[string]any)
 	required, _ := s["required"].([]any)
-	_, ok := props[name]
+	_, declared := props[name]
 
-	return ok || slices.Contains(required, any(name))
+	return slices.Contains(required, any(name)) || declared && !vw.keep
 }
 
-// writeOnly reports whether schema v is writeOnly, or refers to a schema of defs that is, or allOf applies one to it.
-// seen holds the names of the schemas the references followed so far, which a cycle comes back to.
-func writeOnly(v any, defs map[string]any, seen []string) bool {
+// marked reports whether schema v is marked with marker, such as writeOnly, or refers to a schema of defs that is, or
+// allOf applies one to it. seen holds the names of the schemas the references followed so far, which a cycle comes
+// back to.
+func marked(v any, defs map[string]any, marker string, seen []string) bool {
 	s, _ := v.(map[string]any)
-	if s["writeOnly"] == true {
+	if s[marker] == true {
 		return true
 	}
 
 	all, _ := s["allOf"].([]any)
-	if slices.ContainsFunc(all, func(b any) bool { return writeOnly(b, defs, seen) }) {
+	if slices.ContainsFunc(all, func(b any) bool { return marked(b, defs, marker, seen) }) {
 		return true
 	}
 
@@ -1155,5 +1186,5 @@ func writeOnly(v any, defs map[string]any, seen []string) bool {
 		return false
 	}
 
-	return writeOnly(defs[name], defs, append(seen, name))
+	return marked(defs[name], defs, marker, append(seen, name))
 }

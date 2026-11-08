@@ -1135,26 +1135,69 @@ paths:
       responses: {"201": {description: Created}}
 `)
 
-	post := func(body string) (int, string) {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, m.URL()+"/pets", strings.NewReader(body))
-		require.NoError(t, err)
-		req.Header.Set("Content-Type", "application/json")
+	res, body := sendBody(t, m, http.MethodPost, "/pets", "application/json", `{"name":"Rex"}`)
+	require.Equal(t, http.StatusCreated, res.StatusCode, body)
 
-		res, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
+	res, body = sendBody(t, m, http.MethodPost, "/pets", "application/json", `{}`)
+	require.Equal(t, http.StatusBadRequest, res.StatusCode, body)
+}
 
-		data, err := io.ReadAll(res.Body)
-		require.NoError(t, err)
-		require.NoError(t, res.Body.Close())
+func TestOpenAPI_ABodyIsCheckedAgainstTheValuesItsSchemaWrites(t *testing.T) {
+	// A float64 holds every integer up to 2^53 only: an enum or a bound past it, read as one, takes its rounded
+	// neighbor, and refuses the value the spec writes. A const of null is a value too. The mocks check a body against
+	// the schema as the spec writes it, through the copy of the spec beside them.
+	m := serveSpec(t, `{
+  "openapi": "3.1.0",
+  "info": {"title": "Exact", "version": "1"},
+  "paths": {
+    "/enum": {"post": {
+      "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "integer", "enum": [9007199254740999]}}}},
+      "responses": {"204": {"description": "Saved"}}
+    }},
+    "/maximum": {"post": {
+      "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "integer", "maximum": 9007199254740999}}}},
+      "responses": {"204": {"description": "Saved"}}
+    }},
+    "/null": {"post": {
+      "requestBody": {"required": true, "content": {"application/json": {"schema": {"const": null}}}},
+      "responses": {"204": {"description": "Saved"}}
+    }}
+  }
+}`)
 
-		return res.StatusCode, string(data)
+	tests := []struct {
+		path   string
+		body   string
+		status int
+		want   string
+	}{
+		{path: "/enum", body: "9007199254740999", status: http.StatusNoContent},
+		{
+			path: "/enum", body: "9007199254741000", status: http.StatusBadRequest,
+			want: `{"title":"Bad Request","status":400,"errors":["body: value must be 9007199254740999"]}`,
+		},
+		{path: "/maximum", body: "9007199254740999", status: http.StatusNoContent},
+		{
+			path: "/maximum", body: "9007199254741000", status: http.StatusBadRequest,
+			want: `{"title":"Bad Request","status":400,"errors":["body: maximum: got 9007199254741000, want 9007199254740999"]}`,
+		},
+		{path: "/null", body: "null", status: http.StatusNoContent},
+		{
+			path: "/null", body: "{}", status: http.StatusBadRequest,
+			want: `{"title":"Bad Request","status":400,"errors":["body: value must be null"]}`,
+		},
 	}
 
-	status, body := post(`{"name":"Rex"}`)
-	require.Equal(t, http.StatusCreated, status, body)
+	for _, tt := range tests {
+		t.Run(tt.path+" "+tt.body, func(t *testing.T) {
+			res, body := sendBody(t, m, http.MethodPost, tt.path, "application/json", tt.body)
+			require.Equal(t, tt.status, res.StatusCode, body)
 
-	status, body = post(`{}`)
-	require.Equal(t, http.StatusBadRequest, status, body)
+			if tt.want != "" {
+				require.JSONEq(t, tt.want, body)
+			}
+		})
+	}
 }
 
 func TestOpenAPI_TheStaleMocksOfARemovedOperationStillLoad(t *testing.T) {
@@ -1276,6 +1319,24 @@ func call(t *testing.T, m *mockhttp.Server, method, path, accept string) (int, s
 	res, body := respond(t, m, method, path, accept)
 
 	return res.StatusCode, res.Header.Get(vlatte.HeaderMatchedMockID), body
+}
+
+// sendBody sends a request of body to m, with contentType as its Content-Type, and returns the response and its body.
+func sendBody(t *testing.T, m *mockhttp.Server, method, path, contentType, body string) (*http.Response, string) {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(t.Context(), method, m.URL()+path, strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", contentType)
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+
+	data, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	return res, string(data)
 }
 
 // respond sends a request to m, with accept as its Accept when not empty, and returns the response and its body.

@@ -139,9 +139,9 @@ func TestOpenAPI_MatchesARequestWhoseParametersAndBodyKeepTheSpec(t *testing.T) 
 				return request(t, "PUT", "/v1/pets/"+_id, "application/json", `{"age": -1, "tags": [{"name": 1}]}`)
 			},
 			want30: []string{
-				`body at /age: number must be at least 0`,
-				`body at /name: property "name" is missing`,
-				`body at /tags/0/name: value must be a string`,
+				`body at /age: minimum: got -1, want 0`,
+				`body at /tags/0/name: got number, want string`,
+				`body: missing property 'name'`,
 			},
 			want31: []string{
 				`body at /age: minimum: got -1, want 0`,
@@ -152,14 +152,14 @@ func TestOpenAPI_MatchesARequestWhoseParametersAndBodyKeepTheSpec(t *testing.T) 
 		{
 			name: "a body that leaves out a readOnly property of a schema of its allOf", operation: "POST /owners",
 			req:    func() *http.Request { return request(t, "POST", "/owners", "application/json", `{}`) },
-			want30: []string{`body at /name: property "name" is missing`},
+			want30: []string{`body: missing property 'name'`},
 			want31: []string{`body: missing property 'name'`},
 		},
 		{
 			name: "a body that isn't JSON", operation: "PUT /v1/pets/{id}",
 			req:    func() *http.Request { return request(t, "PUT", "/v1/pets/"+_id, "application/json", `{`) },
-			want30: []string{`body: failed to decode request body: unexpected EOF`},
-			want31: []string{`body: failed to decode request body: unexpected EOF`},
+			want30: []string{`body: decoding request body: unexpected EOF`},
+			want31: []string{`body: decoding request body: unexpected EOF`},
 		},
 		{
 			name: "no body", operation: "PUT /v1/pets/{id}",
@@ -279,13 +279,13 @@ components:
 		{name: "a property a sibling branch makes readOnly", operation: "POST /pets", body: `{"name": "Rex"}`},
 		{
 			name: "a property the branch requires", operation: "POST /pets", body: `{}`,
-			want30: []string{`body at /name: property "name" is missing`},
-			want31: []string{"body: 'allOf' failed"},
+			want30: []string{"body: missing property 'name'"},
+			want31: []string{"body: missing property 'name'"},
 		},
 		{name: "a property a sibling of a shared branch makes readOnly", operation: "POST /cats", body: `{"name": "Tom"}`},
 		{
 			name: "the shared branch alone", operation: "PUT /cats", body: `{"name": "Tom"}`,
-			want30: []string{`body at /id: property "id" is missing`},
+			want30: []string{"body: missing property 'id'"},
 			want31: []string{"body: missing property 'id'"},
 		},
 		{name: "a property whose allOf makes it readOnly", operation: "POST /owners", body: `{}`},

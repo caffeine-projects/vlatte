@@ -909,6 +909,51 @@ func TestGenerate_LeavesOutAWriteOnlyPropertyThatAnotherSchemaOfTheObjectRequire
 	require.Equal(t, map[string]any{"token": "t"}, mocks["b-get-200-json"].Reply.Body)
 }
 
+func TestRequestRoots_ARequestNeedNotSendWhatAnySchemaOfTheObjectMarksReadOnly(t *testing.T) {
+	// A client needn't send what the server sets: a property one schema of an object, of its allOf or its $ref, marks
+	// readOnly is required by none of them, though it is still declared, as a client may send it back. A shared schema
+	// keeps its requirements where nothing marks them readOnly, as does an object a property holds.
+	base := map[string]any{
+		"type": "object", "required": []any{"id", "name"},
+		"properties": map[string]any{"id": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}},
+	}
+	id := map[string]any{"properties": map[string]any{"id": map[string]any{"readOnly": true}}}
+
+	roots := openapi.RequestRoots(map[string]any{"Base": base, "ID": id}, []any{
+		map[string]any{"allOf": []any{map[string]any{"$ref": "#/$defs/ID"}, map[string]any{"$ref": "#/$defs/Base"}}},
+		map[string]any{"$ref": "#/$defs/Base"},
+		map[string]any{
+			"type": "object", "required": []any{"id", "owner"},
+			"properties": map[string]any{
+				"id":    map[string]any{"allOf": []any{map[string]any{"readOnly": true}}},
+				"owner": map[string]any{"type": "object", "required": []any{"id"}, "properties": map[string]any{"id": make(map[string]any)}},
+			},
+		},
+	})
+
+	require.Equal(t, []map[string]any{
+		{
+			"allOf": []any{map[string]any{"$ref": "#/$defs/ID"}, map[string]any{"$ref": "#/$defs/Base_2"}},
+			"$defs": map[string]any{
+				"ID": id,
+				"Base_2": map[string]any{
+					"type": "object", "required": []any{"name"},
+					"properties": map[string]any{"id": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}},
+				},
+			},
+		},
+		{"$ref": "#/$defs/Base", "$defs": map[string]any{"Base": base}},
+		{
+			"type": "object", "required": []any{"owner"},
+			"properties": map[string]any{
+				"id":    map[string]any{"allOf": []any{map[string]any{"readOnly": true}}},
+				"owner": map[string]any{"type": "object", "required": []any{"id"}, "properties": map[string]any{"id": make(map[string]any)}},
+			},
+			"$defs": make(map[string]any),
+		},
+	}, roots)
+}
+
 func TestGenerate_FinishesOnASharedSchemaThatAppliesToItself(t *testing.T) {
 	// A shared schema copied without a writeOnly property may hold itself, in a property or in an allOf: the
 	// generator copies it once, and the copy holds the copy, at any depth. No value fits an allOf that applies itself,
