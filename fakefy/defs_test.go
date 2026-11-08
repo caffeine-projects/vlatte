@@ -1,6 +1,7 @@
 package fakefy_test
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -128,7 +129,10 @@ func TestWithDefs_MakesTheValuesOfTheSchemaWithTheSchemasItReachesUnderItsDefs(t
 		map[string]any{"type": "object", "required": []any{"c"}, "properties": map[string]any{"c": map[string]any{"$ref": "#/$defs/R"}}},
 		map[string]any{"type": "integer", "minimum": 1, "example": 0},
 	}}
-	toRoot := map[string]any{"$ref": "#"}
+	toRoot := map[string]any{"allOf": []any{map[string]any{"$ref": "#"}}}
+
+	// A Go caller's schema can hold what JSON can't: its values go unchecked, with Defs or without.
+	notJSON := map[string]any{"type": "integer", "minimum": 1, "example": 0, "x-limit": math.Inf(1)}
 
 	// X is a resource of its own that names itself defs.json and holds an N of its own.
 	own := map[string]any{"X": map[string]any{"$id": "defs.json", "$defs": map[string]any{"N": map[string]any{"description": "x"}}}}
@@ -157,6 +161,18 @@ func TestWithDefs_MakesTheValuesOfTheSchemaWithTheSchemasItReachesUnderItsDefs(t
 			shared:   map[string]any{"N": checked},
 			schema:   map[string]any{"$ref": "#/$defs/N", "$defs": own},
 			embedded: map[string]any{"$ref": "#/$defs/N", "$defs": map[string]any{"X": own["X"], "N": checked}},
+		},
+		{
+			name:     "a schema that is not JSON",
+			shared:   map[string]any{"N": checked},
+			schema:   map[string]any{"$ref": "#/$defs/N", "x-limit": math.Inf(1)},
+			embedded: map[string]any{"$ref": "#/$defs/N", "x-limit": math.Inf(1), "$defs": map[string]any{"N": checked}},
+		},
+		{
+			name:     "a shared schema that is not JSON",
+			shared:   map[string]any{"N": notJSON},
+			schema:   map[string]any{"$ref": "#/$defs/N"},
+			embedded: map[string]any{"$ref": "#/$defs/N", "$defs": map[string]any{"N": notJSON}},
 		},
 	}
 
