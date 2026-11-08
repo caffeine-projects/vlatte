@@ -381,10 +381,10 @@ func inOrder[M ~map[string]V, V any](m M) []V {
 }
 
 // lenient validates t as kin-openapi does, but for the values of examples, and returns the first problem that would
-// make a mock wrong. It logs the
-// others on log, at warn level: a field OpenAPI doesn't define, which the mocks ignore, and two paths that differ only
-// in the names of their parameters, whose mocks of one method answer the same requests. It doesn't compile patterns:
-// a pattern is an ECMA-262 regular expression, such as a lookahead, which Go's regexp may not compile.
+// make a mock wrong. It logs the others on log, at warn level: a field OpenAPI doesn't define, which the mocks ignore,
+// and two paths that differ only in the names of their parameters, whose mocks of one method answer the same
+// requests. It doesn't compile patterns: a pattern is an ECMA-262 regular expression, such as a lookahead, which Go's
+// regexp may not compile.
 func lenient(ctx context.Context, t *openapi3.T, log *zerolog.Logger) error {
 	var allowed []string
 
