@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	json "encoding/json/v2"
+	"errors"
 	"fmt"
 	"maps"
 	"net/url"
@@ -53,7 +54,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 
 	r, nullAt, serverFiles := readRaw(t, location, files)
 
-	if err := validate(ctx, t, r, nullAt); err != nil {
+	if err := validate(ctx, t, r, nullAt, log); err != nil {
 		return nil, fmt.Errorf("%w: %w", openapi.ErrInvalid, err)
 	}
 
@@ -175,8 +176,9 @@ func hasComponent(t *openapi3.T, collection, name string) bool {
 
 // validate validates t as kin-openapi does, but for the examples of media types that aren't JSON: OpenAPI writes
 // those as the body itself, such as XML text, which their schema, describing the data, rejects. An example or a
-// default r says is null, which kin-openapi reads as no value, is checked as null: nullAt says where each is.
-func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string) error {
+// default r says is null, which kin-openapi reads as no value, is checked as null: nullAt says where each is. What
+// leaves no mock wrong, [lenient] logs on log instead.
+func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string, log *zerolog.Logger) error {
 	type stashed struct {
 		media    *openapi3.MediaType
 		example  any
@@ -357,7 +359,7 @@ func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string
 		}
 	}()
 
-	if err := t.Validate(ctx); err != nil {
+	if err := lenient(ctx, t, log); err != nil {
 		return err
 	}
 
@@ -373,6 +375,88 @@ func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string
 	return validateNulls(t, nullAt, func(mt *openapi3.MediaType) bool {
 		return slices.ContainsFunc(stash, func(st stashed) bool { return st.media == mt })
 	})
+}
+
+// lenient validates t as kin-openapi does, and returns the first problem that would make a mock wrong. It logs the
+// others on log, at warn level: a field OpenAPI doesn't define, which the mocks ignore, and two paths that differ only
+// in the names of their parameters, whose mocks of one method answer the same requests. It doesn't compile patterns:
+// a pattern is an ECMA-262 regular expression, such as a lookahead, which Go's regexp may not compile.
+func lenient(ctx context.Context, t *openapi3.T, log *zerolog.Logger) error {
+	var allowed []string
+
+	for {
+		opts := []openapi3.ValidationOption{
+			openapi3.EnableMultiError(), openapi3.DisableSchemaPatternValidation(), openapi3.AllowExtraSiblingFields(allowed...),
+		}
+
+		if t.IsOpenAPI31OrLater() {
+			opts = append(opts, openapi3.IsOpenAPI31OrLater())
+		}
+
+		if t.IsOpenAPI32OrLater() {
+			opts = append(opts, openapi3.IsOpenAPI32OrLater())
+		}
+
+		problems := flatten(t.Validate(ctx, opts...))
+
+		// kin-openapi skips a path that conflicts with another: it is checked on its own.
+		for i := 0; i < len(problems); i++ {
+			if c, ok := errors.AsType[*openapi3.ConflictingPathsError](problems[i]); ok {
+				skipped := openapi3.NewPaths(openapi3.WithPath(c.Path1, t.Paths.Value(c.Path1)))
+				problems = append(problems, flatten(skipped.Validate(ctx, opts...))...)
+			}
+		}
+
+		// kin-openapi checks no more of a schema past an unknown field: a field allowed, it checks again.
+		more := len(allowed)
+
+		for _, p := range problems {
+			if e, ok := errors.AsType[*openapi3.ExtraSiblingFieldsError](p); ok {
+				log.Warn().Msgf("%v: ignored", p)
+
+				for _, f := range e.Fields {
+					if !slices.Contains(allowed, f) {
+						allowed = append(allowed, f)
+					}
+				}
+			}
+		}
+
+		if len(allowed) > more {
+			continue
+		}
+
+		for _, p := range problems {
+			switch {
+			case is[*openapi3.ExtraSiblingFieldsError](p):
+			case is[*openapi3.ConflictingPathsError](p):
+				log.Warn().Msgf("%v: their mocks of one method answer the same requests", p)
+			default:
+				return p
+			}
+		}
+
+		return nil
+	}
+}
+
+// flatten returns the problems of err, the error of a validation in kin-openapi's multi-error mode.
+func flatten(err error) []error {
+	if multi, ok := errors.AsType[openapi3.MultiError](err); ok {
+		return multi
+	}
+
+	if err != nil {
+		return []error{err}
+	}
+
+	return nil
+}
+
+// is reports whether err, or an error it wraps, is a T.
+func is[T error](err error) bool {
+	_, ok := errors.AsType[T](err)
+	return ok
 }
 
 // validateNulls checks each example and default of nullAt, which is null, as kin-openapi checks one that isn't,

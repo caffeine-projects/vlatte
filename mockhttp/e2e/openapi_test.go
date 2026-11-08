@@ -42,7 +42,10 @@ func TestOpenAPI_TheGeneratedMocksServeTheSpec(t *testing.T) {
 	doc, err := openapiv3.Load(t.Context(), data, loc, read, &log)
 	require.NoError(t, err)
 
-	_, err = openapi.Write(dir, doc.Title, openapi.Generate(doc, &log))
+	files, err := openapi.Generate(t.Context(), doc, &log)
+	require.NoError(t, err)
+
+	_, err = openapi.Write(dir, doc.Title, files)
 	require.NoError(t, err)
 	require.Empty(t, logs.String())
 
@@ -892,7 +895,10 @@ func serveSpecAt(t *testing.T, loc *url.URL) (*mockhttp.Server, string) {
 	doc, err := openapiv3.Load(t.Context(), data, loc, read, &log)
 	require.NoError(t, err)
 
-	_, err = openapi.Write(mocksDir, doc.Title, openapi.Generate(doc, &log))
+	files, err := openapi.Generate(t.Context(), doc, &log)
+	require.NoError(t, err)
+
+	_, err = openapi.Write(mocksDir, doc.Title, files)
 	require.NoError(t, err)
 
 	m := mockhttp.MustNew(mockhttp.Setup().Silent().MockFilePatterns(filepath.Join(mocksDir, "*.mock.yaml")))

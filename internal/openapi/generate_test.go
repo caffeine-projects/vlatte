@@ -552,6 +552,57 @@ func TestGenerate_ASchemaKeepsItsOwnDefs(t *testing.T) {
 	require.Equal(t, []any{"rex", "pet"}, mocks["a-get-200-json"].Reply.Body)
 }
 
+func TestGenerate_ResolvesEveryRefOfASchemaHowEverItReachesASharedSchema(t *testing.T) {
+	// A fake value gets only the shared schemas its schema reaches: one it reaches from its own $defs, or by a
+	// pointer into a shared schema, must resolve too, and its own $defs keep winning over a shared one's name.
+	shared := map[string]any{
+		"Pet":  map[string]any{"type": "object", "required": []any{"name"}, "properties": map[string]any{"name": map[string]any{"const": "rex"}}},
+		"Name": map[string]any{"const": "shared"},
+	}
+
+	tests := []struct {
+		name   string
+		schema map[string]any
+		want   any
+	}{
+		{
+			name:   "a pointer into a shared schema",
+			schema: map[string]any{"$ref": "#/$defs/Pet/properties/name"},
+			want:   `"rex"`,
+		},
+		{
+			name: "a shared schema its own $defs name",
+			schema: map[string]any{
+				"$defs": map[string]any{"Wrap": map[string]any{"$ref": "#/$defs/Pet/properties/name"}},
+				"$ref":  "#/$defs/Wrap",
+			},
+			want: `"rex"`,
+		},
+		{
+			name: "its own $defs over a shared schema of the same name",
+			schema: map[string]any{
+				"$defs": map[string]any{"Name": map[string]any{"const": "own"}},
+				"$ref":  "#/$defs/Name",
+			},
+			want: `"own"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mocks := generate(t, &openapi.Document{
+				Defs: shared,
+				Operations: []openapi.Operation{{
+					Method: "GET", Path: "/a",
+					Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{MediaType: "application/json", Schema: tt.schema}}}},
+				}},
+			})
+
+			require.Equal(t, tt.want, mocks["a-get-200-json"].Reply.Body)
+		})
+	}
+}
+
 func TestGenerate_LeavesOutWriteOnlyPropertiesOfASharedSchemaOfAnyName(t *testing.T) {
 	// The shared schemas are named by the spec: one named properties is a schema like the others.
 	mocks := generate(t, &openapi.Document{
@@ -859,7 +910,8 @@ func generateWithWarnings(t *testing.T, doc *openapi.Document) (map[string]opena
 	var logs bytes.Buffer
 
 	log := zerolog.New(&logs)
-	files := openapi.Generate(doc, &log)
+	files, err := openapi.Generate(t.Context(), doc, &log)
+	require.NoError(t, err)
 
 	mocks := make(map[string]openapi.Mock, len(files))
 	for _, f := range files {
