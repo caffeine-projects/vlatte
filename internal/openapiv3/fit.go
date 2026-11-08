@@ -144,10 +144,8 @@ func (c converter) fitSchema(v any, ref *openapi3.SchemaRef) {
 			return
 		}
 
+		// kin-openapi resolves every reference it loads, or fails: a reference holds its value.
 		s = s.AllOf[len(s.AllOf)-1].Value
-		if s == nil {
-			return
-		}
 	}
 
 	one, lists, named := schemasIn(s)
@@ -179,17 +177,10 @@ func (c converter) fitSchema(v any, ref *openapi3.SchemaRef) {
 // and adds each scalar it converts to changes, with where it is, ptr, the JSON pointer of v. It shares with v what it
 // doesn't convert.
 func coerce(v any, s *openapi3.Schema, ptr string, written func(ptr string) (string, bool), changes *[]string) (any, bool) {
-	if s == nil {
-		return v, false
-	}
-
 	converted := false
 
+	// kin-openapi resolves every reference it loads, or fails: a reference holds its value.
 	for _, sub := range s.AllOf {
-		if sub == nil {
-			continue
-		}
-
 		var ok bool
 		if v, ok = coerce(v, sub.Value, ptr, written, changes); ok {
 			converted = true
@@ -260,7 +251,8 @@ func coerce(v any, s *openapi3.Schema, ptr string, written func(ptr string) (str
 
 // convert returns scalar v as the first type of schema s it reads as, when s doesn't allow the type of v, and v as
 // the spec writes it: a number or a boolean is the string of the text the spec writes for it, which written gives,
-// such as 1.0 or 01234, and a string that is the JSON text of a number or of a boolean is that value.
+// such as 1.0 or 01234, or of its JSON text where written gives none, as for a value a YAML merge key gives; and a
+// string that is the JSON text of a number or of a boolean is that value.
 func convert(v any, s *openapi3.Schema, written func() (string, bool)) (to any, from string, ok bool) {
 	if s.Type.IsEmpty() || allows(s, v) {
 		return nil, "", false
@@ -273,12 +265,13 @@ func convert(v any, s *openapi3.Schema, written func() (string, bool)) (to any, 
 				continue
 			}
 
-			// Its value, read back, may be written otherwise: 1.0 is 1.
-			if w, ok := written(); ok {
-				return w, w, true
+			// Its value, read back, may be written otherwise: 1.0 is 1. A YAML merge key writes it elsewhere.
+			w, ok := written()
+			if !ok {
+				w = text(x)
 			}
 
-			return nil, "", false
+			return w, w, true
 		case string:
 			if parsed, ok := scalar(x); ok && (typeOf(parsed) == t || typeOf(parsed) == openapi3.TypeInteger && t == openapi3.TypeNumber) {
 				return parsed, text(x), true
@@ -301,14 +294,14 @@ func scalar(s string) (any, bool) {
 	}
 }
 
-// allows reports whether schema s allows the JSON type of v, an integer as a number too.
+// allows reports whether schema s allows the JSON type of v, a scalar, an integer as a number too.
 func allows(s *openapi3.Schema, v any) bool {
 	t := typeOf(v)
 
 	return s.Type.Permits(t) || t == openapi3.TypeInteger && s.Type.Includes(openapi3.TypeNumber) || t == openapi3.TypeNull && s.Nullable
 }
 
-// typeOf returns the JSON Schema type of v, a value of the spec.
+// typeOf returns the JSON Schema type of v, a scalar of the spec.
 func typeOf(v any) string {
 	switch v.(type) {
 	case nil:
@@ -319,12 +312,8 @@ func typeOf(v any) string {
 		return openapi3.TypeString
 	case int64:
 		return openapi3.TypeInteger
-	case float64:
-		return openapi3.TypeNumber
-	case []any:
-		return openapi3.TypeArray
 	default:
-		return openapi3.TypeObject
+		return openapi3.TypeNumber
 	}
 }
 

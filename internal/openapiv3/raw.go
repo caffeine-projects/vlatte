@@ -69,11 +69,10 @@ func (p *places) text(f field, ptr string) (string, bool) {
 
 	doc, ok := p.nodes[key]
 	if !ok {
-		// JSON is YAML too, which keeps the text of each scalar.
+		// JSON is YAML too, which keeps the text of each scalar. kin-openapi read the file: a file it cannot read
+		// again leaves doc empty, where scalarAt finds nothing.
 		doc = new(yaml.Node)
-		if err := yaml.Unmarshal(p.data[key], doc); err != nil {
-			doc = nil
-		}
+		yaml.Unmarshal(p.data[key], doc)
 
 		p.nodes[key] = doc
 	}

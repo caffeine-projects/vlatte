@@ -94,6 +94,18 @@ func TestLoad_ConvertsAnExampleToTheTypeOfItsSchema(t *testing.T) {
 			},
 		},
 		{
+			name: "a body a YAML alias and merge key write",
+			operation: "responses: {\"200\": {description: OK, content: {application/json: {" +
+				"schema: {properties: {n: {type: string}, k: {type: string}, j: {type: string}, a: {properties: {m: {type: string}}}}}, " +
+				"example: {<<: {n: 5, a: {m: 6}}, k: &seven 7.0, j: *seven}}}}}",
+			got:  func(doc *openapi.Document) any { return doc.Operations[0].Responses[0].Content[0].Examples },
+			want: []openapi.Example{{Value: map[string]any{"a": map[string]any{"m": "6"}, "j": "7.0", "k": "7.0", "n": "5"}}},
+			warning: map[string]any{
+				"example": "spec.yaml#/paths/~1orders~1{id}/get/responses/200/content/application~1json/example",
+				"message": `the example does not fit its schema: converted 6 at /a/m to "6", 7.0 at /j to "7.0", 7.0 at /k to "7.0", 5 at /n to "5"`,
+			},
+		},
+		{
 			name:      "a header",
 			operation: "responses: {\"204\": {description: OK, headers: {X-Rate: {schema: {type: integer}, example: \"5\"}}}}",
 			got:       func(doc *openapi.Document) any { return doc.Operations[0].Responses[0].Headers[0].Examples },
@@ -168,6 +180,18 @@ func TestLoad_ConvertsAnExampleToTheTypeOfItsSchema(t *testing.T) {
 		}.check(t)
 	})
 
+	t.Run("a number for the one type of several it reads as", func(t *testing.T) {
+		fitCase{
+			operation: "parameters: [{name: id, in: path, required: true, schema: {type: [boolean, string]}, example: 12345}]\n      responses: {\"204\": {description: OK}}",
+			got:       func(doc *openapi.Document) any { return doc.Operations[0].PathParams[0].Examples },
+			want:      []openapi.Example{{Value: "12345"}},
+			warning: map[string]any{
+				"example": "spec.yaml#/paths/~1orders~1{id}/get/parameters/0/example",
+				"message": `the example does not fit its schema: converted 12345 to "12345"`,
+			},
+		}.check(t)
+	})
+
 	t.Run("the examples of a schema", func(t *testing.T) {
 		fitCase{
 			operation: "parameters: [{name: id, in: path, required: true, schema: {type: string, examples: [a, 7]}}]\n      responses: {\"204\": {description: OK}}",
@@ -214,6 +238,16 @@ func TestLoad_LeavesOutAnExampleNoConversionFits(t *testing.T) {
 			warning: map[string]any{
 				"example": "spec.yaml#/paths/~1orders~1{id}/get/parameters/0/example",
 				"message": "the example breaks its schema's minimum: left out",
+			},
+		},
+		{
+			name:      "a list its schema gives no items for",
+			operation: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: array, maxItems: 1}, example: [1, 2]}}}}",
+			got:       func(doc *openapi.Document) any { return doc.Operations[0].Responses[0].Content[0].Examples },
+			want:      []openapi.Example(nil),
+			warning: map[string]any{
+				"example": "spec.yaml#/paths/~1orders~1{id}/get/responses/200/content/application~1json/example",
+				"message": "the example breaks its schema's maxItems: left out",
 			},
 		},
 		{
