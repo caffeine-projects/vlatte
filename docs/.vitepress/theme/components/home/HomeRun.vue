@@ -13,6 +13,11 @@ const ways = [
     link: '/run/cli',
   },
   {
+    title: 'From an OpenAPI spec',
+    text: 'Generate a mock for every response of an OpenAPI 3 spec, then serve them with the same binary.',
+    link: '/openapi/',
+  },
+  {
     title: 'In Docker Compose',
     text: 'Run the same mock files next to your app locally or in CI.',
     link: '/guides/docker-compose',
