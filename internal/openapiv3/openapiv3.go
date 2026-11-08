@@ -179,8 +179,9 @@ func hasComponent(t *openapi3.T, collection, name string) bool {
 
 // validate validates t as [lenient] does, but for the values of examples, which kin-openapi would reject the
 // document for: the converter checks those the mocks use, as [converter.fit] does. The named examples of media types
-// and parameters are checked otherwise as kin-openapi does. A default r says is null, which kin-openapi reads as no
-// value, is checked as null. The walk meets the parts of t in the same order on every run, which names the same error.
+// and parameters are checked otherwise as kin-openapi does, but for a field OpenAPI doesn't define, which is logged on
+// log. A default r says is null, which kin-openapi reads as no value, is checked as null. The walk meets the parts of
+// t in the same order on every run, which names the same error.
 func validate(ctx context.Context, t *openapi3.T, r raw, where *places, log *zerolog.Logger) error {
 	// A media type of a shared component is reached from each of its users: it is walked once. A callback may lead
 	// back to a path item already walked.
@@ -361,8 +362,16 @@ func validate(ctx context.Context, t *openapi3.T, r raw, where *places, log *zer
 	for _, examples := range named {
 		for _, name := range slices.Sorted(maps.Keys(examples)) {
 			ex := examples[name].Value
-			if err := ex.Validate(ctx); err != nil {
-				return fmt.Errorf("invalid example %s: %w", cmp.Or(where.of(field{object: ex, name: "value"}), name), err)
+			at := cmp.Or(where.of(field{object: ex, name: "value"}), name)
+
+			// kin-openapi checks the fields of an example after its value: one OpenAPI doesn't define is logged, as
+			// lenient logs one elsewhere.
+			switch err := ex.Validate(ctx); {
+			case err == nil:
+			case is[*openapi3.ExtraSiblingFieldsError](err):
+				log.Warn().Str("example", at).Msgf("%v: ignored", err)
+			default:
+				return fmt.Errorf("invalid example %s: %w", at, err)
 			}
 		}
 	}

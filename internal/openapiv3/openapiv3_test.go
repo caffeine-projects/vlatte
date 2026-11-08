@@ -1188,6 +1188,28 @@ func TestLoad_FailsOnANamedExampleTheSpecForbids(t *testing.T) {
 	})
 }
 
+func TestLoad_WarnsOfAFieldOpenAPIDoesNotDefineBesideANamedExample(t *testing.T) {
+	// A named example is checked apart from the rest of the spec: a field OpenAPI doesn't define beside its value is
+	// a slip it warns of, as any other, which leaves no mock wrong.
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      responses:
+        "200":
+          description: OK
+          content: {application/json: {schema: {type: integer}, examples: {a: {value: 1, note: first}}}}
+`})
+
+	require.Equal(t, []openapi.Example{{Name: "a", Value: int64(1)}}, doc.Operations[0].Responses[0].Content[0].Examples)
+	require.Equal(t, []map[string]any{{
+		"level": "warn", "example": "spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/examples/a",
+		"message": "extra sibling fields: [note]: ignored",
+	}}, warnings)
+}
+
 func TestLoad_FailsOnAnInvalidSpec(t *testing.T) {
 	// A contract that contradicts itself makes mocks that mislead.
 	dir := t.TempDir()
