@@ -22,8 +22,9 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
-// _nullValue is the externalValue a null example holds while kin-openapi validates it.
-const _nullValue = "vlatte:null"
+// _standInValue is the externalValue an example holds while kin-openapi validates it, when kin-openapi reads it as
+// having no value: one whose value is null, or one without a value.
+const _standInValue = "vlatte:example"
 
 // _componentsPrefix starts a reference to a shared schema, which the model writes under $defs.
 const _componentsPrefix = "#/components/schemas/"
@@ -179,9 +180,9 @@ func hasComponent(t *openapi3.T, collection, name string) bool {
 
 // validate validates t as [lenient] does, but for the values of examples, which kin-openapi would reject the
 // document for: the converter checks those the mocks use, as [converter.fit] does. The named examples of media types
-// and parameters are checked otherwise as kin-openapi does, but for a field OpenAPI doesn't define, which is logged on
-// log. A default r says is null, which kin-openapi reads as no value, is checked as null. The walk meets the parts of
-// t in the same order on every run, which names the same error.
+// and parameters are checked otherwise as kin-openapi does, but for one without a value, which OpenAPI allows, and a
+// field OpenAPI doesn't define, which is logged on log. A default r says is null, which kin-openapi reads as no value,
+// is checked as null. The walk meets the parts of t in the same order on every run, which names the same error.
 func validate(ctx context.Context, t *openapi3.T, r raw, where *places, log *zerolog.Logger) error {
 	// A media type of a shared component is reached from each of its users: it is walked once. A callback may lead
 	// back to a path item already walked.
@@ -338,19 +339,32 @@ func validate(ctx context.Context, t *openapi3.T, r raw, where *places, log *zer
 		return invalid
 	}
 
-	// kin-openapi rejects an example with neither a value nor an externalValue: a null example stands in as one with
-	// an externalValue.
-	var nulls []*openapi3.Example
+	// kin-openapi rejects an example with neither a value nor an externalValue, as it reads one whose value is null:
+	// OpenAPI doesn't, and a mock leaves out one without a value. Such an example stands in as one with an
+	// externalValue, where kin-openapi checks it: in the components, and where named is.
+	var standIns []*openapi3.Example
 
-	for f, v := range r {
-		if ex, ok := f.object.(*openapi3.Example); ok && v == nil && ex.Value == nil && ex.ExternalValue == "" {
-			ex.ExternalValue = _nullValue
-			nulls = append(nulls, ex)
+	standIn := func(ex *openapi3.Example) {
+		if ex.Value == nil && ex.ExternalValue == "" {
+			ex.ExternalValue = _standInValue
+			standIns = append(standIns, ex)
+		}
+	}
+
+	if t.Components != nil {
+		for _, ex := range t.Components.Examples {
+			standIn(ex.Value)
+		}
+	}
+
+	for _, examples := range named {
+		for _, ex := range examples {
+			standIn(ex.Value)
 		}
 	}
 
 	defer func() {
-		for _, ex := range nulls {
+		for _, ex := range standIns {
 			ex.ExternalValue = ""
 		}
 	}()
