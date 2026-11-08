@@ -73,7 +73,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 	// The model refers to shared schemas by name: a reference to another file becomes one.
 	t.InternalizeRefs(ctx, refNames(location))
 
-	c := converter{v30: t.IsOpenAPI30(), v32: t.IsOpenAPI32OrLater(), raw: r, places: where, log: log, fits: make(map[fitKey]fitted)}
+	c := converter{v30: t.IsOpenAPI30(), v32: t.IsOpenAPI32OrLater(), raw: r, places: where, log: log, fits: make(map[fitKey]fitted), unsent: make(map[string]bool)}
 	doc := &openapi.Document{Defs: make(map[string]any)}
 
 	if t.Info != nil {
@@ -640,8 +640,9 @@ type converter struct {
 	v32    bool              // the document is OpenAPI 3.2, whose examples may give their value as data or as sent
 	raw    raw               // the examples as the spec writes them
 	places *places           // where the fields of raw are, and the text of their scalars
-	log    *zerolog.Logger   // where an example that doesn't fit its schema is logged
+	log    *zerolog.Logger   // where an example the mocks can't use is logged
 	fits   map[fitKey]fitted // what fit returned for each example that didn't fit, at a place the spec gives
+	unsent map[string]bool   // the places of the dataValues left out outside JSON, each logged once
 }
 
 // operation translates op, of the path item with the parameters common.
@@ -658,12 +659,16 @@ func (c converter) operation(path, method string, common openapi3.Parameters, op
 
 	for _, name := range slices.Sorted(maps.Keys(params)) {
 		p := params[name]
-		examples, schema, mediaType := c.examplesOf(p, p.Example, p.Examples, "", p.Schema, false), p.Schema, ""
 
-		// A parameter has a schema or content, of one media type.
+		// A parameter has a schema or content, of one media type, which its own examples are in too.
+		schema, mediaType := p.Schema, ""
 		if len(p.Content) > 0 {
 			mediaType = slices.Min(slices.Collect(maps.Keys(p.Content)))
-			media := p.Content[mediaType]
+		}
+
+		examples := c.examplesOf(p, p.Example, p.Examples, mediaType, p.Schema, false)
+
+		if media := p.Content[mediaType]; media != nil {
 			examples = append(examples, c.examplesOf(media, media.Example, media.Examples, mediaType, media.Schema, false)...)
 			schema = media.Schema
 		}
@@ -743,16 +748,19 @@ func (c converter) response(status string, res *openapi3.Response) openapi.Respo
 
 // examplesOf returns the example of owner, the object whose example field is example, if it has one, then the named
 // examples, in name order, with their values as the spec writes them. Those of mediaType, unless it is JSON, are the
-// body as sent, such as text, which a named example of OpenAPI 3.2 gives as its serializedValue, else its dataValue;
-// those of JSON, a parameter or a header, whose mediaType is "", are data, its dataValue, fitted to schema, as the
-// body of a response when response is set, as fit does. A named example at an externalValue, not inline, is left
-// out, as is one of data with only a serializedValue, which writes it as sent: a parameter with its style's
-// delimiters, JSON as text. Before OpenAPI 3.2, those fields are unknown, and a named example has its value only.
+// body as sent, such as text, which a named example of OpenAPI 3.2 gives as its serializedValue; one with only a
+// dataValue, data the mocks don't serialize in mediaType, is left out, with a warning, logged once. Those of JSON, a
+// parameter or a header, whose mediaType is "", are data, its dataValue, fitted to schema, as the body of a response
+// when response is set, as fit does. A named example at an externalValue, not inline, is left out, as is one of data
+// with only a serializedValue, which writes it as sent: a parameter with its style's delimiters, JSON as text. Before
+// OpenAPI 3.2, those fields are unknown, and a named example has its value only.
 func (c converter) examplesOf(owner, example any, named openapi3.Examples, mediaType string, schema *openapi3.SchemaRef, response bool) []openapi.Example {
 	var out []openapi.Example
 
+	sent := mediaType != "" && !openapi.IsJSON(mediaType)
+
 	values := []string{"value", "dataValue"}
-	if mediaType != "" && !openapi.IsJSON(mediaType) {
+	if sent {
 		values, schema = []string{"value", "serializedValue", "dataValue"}, nil
 	}
 
@@ -771,7 +779,7 @@ func (c converter) examplesOf(owner, example any, named openapi3.Examples, media
 		// kin-openapi resolves every reference it loads, or fails: a reference holds its value.
 		ex := named[name].Value
 
-		// value excludes the others; text that is data is sent as is.
+		// value excludes the others.
 		for _, n := range values {
 			kin := ex.Value
 			if n != "value" {
@@ -779,13 +787,23 @@ func (c converter) examplesOf(owner, example any, named openapi3.Examples, media
 			}
 
 			f := field{object: ex, name: n}
-			if v, ok := c.raw.value(ex, f.name, kin); ok {
-				if v, ok = c.fit(v, schema, response, f, ""); ok {
-					out = append(out, openapi.Example{Name: name, Value: v})
-				}
 
-				break
+			v, ok := c.raw.value(ex, f.name, kin)
+			if !ok {
+				continue
 			}
+
+			if sent && n == "dataValue" {
+				// One at an externalValue is left out as it is, not inline.
+				if place := c.place(f, ""); ex.ExternalValue == "" && !c.unsent[place] {
+					c.unsent[place] = true
+					c.log.Warn().Str("example", place).Msg("the example is data, which the mocks don't serialize outside JSON: left out: give a serializedValue")
+				}
+			} else if v, ok = c.fit(v, schema, response, f, ""); ok {
+				out = append(out, openapi.Example{Name: name, Value: v, Serialized: n == "serializedValue"})
+			}
+
+			break
 		}
 	}
 

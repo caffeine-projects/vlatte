@@ -31,9 +31,11 @@ func openapiCmd(code *int) *cobra.Command {
 		Long: `Writes a mock file for each response of each operation of an OpenAPI 3.0, 3.1 or 3.2 spec, in JSON or YAML,
 from a file or an http(s) URL. Bodies are the spec's examples, or fake values that fit their schemas, the same on
 every run. A body that isn't JSON is written as text, or as bytes when its schema says base64: give such a media type,
-XML included, a string example, as an object has no text and its mock is written disabled. Each media type of a
-response gets a mock, which answers the client whose Accept prefers it, and each operation a 406 for a client that
-takes none. Responses nothing in a request predicts, such as 503, are written disabled: the admin API enables them.
+XML included, a string example, as an object has no text and its mock is written disabled. In OpenAPI 3.2, give it a
+serializedValue, which is sent as is, base64 or not: a dataValue there is data the mocks don't serialize, and is left
+out. Each media type of a response gets a mock, which answers the client whose Accept prefers it, and each operation
+a 406 for a client that takes none. Responses nothing in a request predicts, such as 503, are written disabled: the
+admin API enables them.
 Mocks written by hand win over them. What the spec asks that can't be honored is logged on standard error.
 So is an example that doesn't fit its schema, such as 12345 for a string: converted when its text reads as the type
 the schema asks, else left out.

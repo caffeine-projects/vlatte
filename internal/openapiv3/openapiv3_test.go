@@ -239,7 +239,6 @@ paths:
                 both: {$ref: "#/components/examples/Both"}
             text/plain:
               examples:
-                data: {dataValue: hello}
                 sent: {dataValue: hello, serializedValue: "hello\n"}
 components:
   examples:
@@ -256,10 +255,79 @@ components:
 					{Name: "big", Value: map[string]any{"id": int64(9007199254740993)}}, {Name: "both", Value: map[string]any{"a": int64(1)}},
 				}},
 				{MediaType: "application/problem+json", Examples: []openapi.Example{{Name: "both", Value: map[string]any{"a": int64(1)}}}},
-				{MediaType: "text/plain", Examples: []openapi.Example{{Name: "data", Value: "hello"}, {Name: "sent", Value: "hello\n"}}},
+				{MediaType: "text/plain", Examples: []openapi.Example{{Name: "sent", Value: "hello\n", Serialized: true}}},
 			},
 		}},
 	}}, doc.Operations)
+}
+
+func TestLoad_LeavesOutADataValueOutsideJSON(t *testing.T) {
+	// Outside JSON, a value is its data serialized in the media type, which the mocks don't do: XML wraps text in an
+	// element and escapes it. A dataValue there gives nothing to send, in a body, a header or a parameter: it is left
+	// out, with a warning, once for an example several share, and a serializedValue beside it is what is sent. One at
+	// an externalValue is left out as such: a serializedValue would break it.
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
+openapi: 3.2.0
+info: {title: XML Data, version: "1"}
+paths:
+  /greetings/{id}:
+    get:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          content:
+            text/plain:
+              examples: {data: {dataValue: b2}, sent: {serializedValue: b3}}
+          examples: {own: {dataValue: b1}}
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Note:
+              content:
+                text/plain:
+                  examples: {data: {dataValue: hi}}
+          content:
+            application/xml:
+              schema: {type: string, xml: {name: greeting}}
+              examples:
+                data: {dataValue: 'a & b'}
+                external: {dataValue: 'a & b', externalValue: https://x.example.com/greeting.xml}
+                sent: {dataValue: 'a & b', serializedValue: '<greeting>a &amp; b</greeting>'}
+                shared: {$ref: "#/components/examples/Data"}
+            text/plain:
+              examples:
+                data: {dataValue: hello}
+                shared: {$ref: "#/components/examples/Data"}
+components:
+  examples:
+    Data: {dataValue: hi}
+`})
+
+	op := doc.Operations[0]
+	require.Equal(t, []openapi.Parameter{{
+		Name: "id", Style: "simple", MediaType: "text/plain", Examples: []openapi.Example{{Name: "sent", Value: "b3", Serialized: true}},
+	}}, op.PathParams)
+	require.Equal(t, []openapi.Header{{Name: "X-Note", MediaType: "text/plain"}}, op.Responses[0].Headers)
+	require.Equal(t, []openapi.Content{
+		{
+			MediaType: "application/xml", Schema: map[string]any{"type": "string", "xml": map[string]any{"name": "greeting"}},
+			Examples: []openapi.Example{{Name: "sent", Value: "<greeting>a &amp; b</greeting>", Serialized: true}},
+		},
+		{MediaType: "text/plain"},
+	}, op.Responses[0].Content)
+
+	at := "spec.yaml#/paths/~1greetings~1{id}/get/"
+	message := "the example is data, which the mocks don't serialize outside JSON: left out: give a serializedValue"
+	require.Equal(t, []map[string]any{
+		{"level": "warn", "example": at + "parameters/0/examples/own/dataValue", "message": message},
+		{"level": "warn", "example": at + "parameters/0/content/text~1plain/examples/data/dataValue", "message": message},
+		{"level": "warn", "example": at + "responses/200/headers/X-Note/content/text~1plain/examples/data/dataValue", "message": message},
+		{"level": "warn", "example": at + "responses/200/content/application~1xml/examples/data/dataValue", "message": message},
+		{"level": "warn", "example": "spec.yaml#/components/examples/Data/dataValue", "message": message},
+		{"level": "warn", "example": at + "responses/200/content/text~1plain/examples/data/dataValue", "message": message},
+	}, warnings)
 }
 
 func TestLoad_FailsOnAnExampleOfOpenAPI32TheSpecForbids(t *testing.T) {
