@@ -65,7 +65,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 
 	r, where, serverFiles := readRaw(t, location, files)
 
-	if err := validate(ctx, t, r, where); err != nil {
+	if err := validate(ctx, t, r, where, log); err != nil {
 		return nil, fmt.Errorf("%w: %w", openapi.ErrInvalid, err)
 	}
 
@@ -186,13 +186,13 @@ func hasComponent(t *openapi3.T, collection, name string) bool {
 	return m.Kind() == reflect.Map && m.MapIndex(reflect.ValueOf(name)).IsValid()
 }
 
-// validate validates t as kin-openapi does, but for the values of examples, which kin-openapi would reject the
+// validate validates t as [lenient] does, but for the values of examples, which kin-openapi would reject the
 // document for: the converter checks those the mocks use, as [converter.fit] does. The named examples of media types
-// and parameters are checked otherwise as kin-openapi does. A default r says is null, which kin-openapi reads as no
-// value, is checked as null. In OpenAPI 3.2, the fields it adds that kin-openapi doesn't read are no error, and those
-// of an example that hold its value are checked as OpenAPI 3.2 has them. The walk meets the parts of t in the same
-// order on every run, which names the same error.
-func validate(ctx context.Context, t *openapi3.T, r raw, where *places) error {
+// and parameters are checked otherwise as kin-openapi does, but for a field OpenAPI doesn't define, which is logged on
+// log. A default r says is null, which kin-openapi reads as no value, is checked as null. In OpenAPI 3.2, the fields it
+// adds that kin-openapi doesn't read are no news, and those of an example that hold its value are checked as OpenAPI
+// 3.2 has them. The walk meets the parts of t in the same order on every run, which names the same error.
+func validate(ctx context.Context, t *openapi3.T, r raw, where *places, log *zerolog.Logger) error {
 	opts := []openapi3.ValidationOption{openapi3.DisableExamplesValidation()}
 	if t.IsOpenAPI32OrLater() {
 		opts = append(opts, openapi3.AllowExtraSiblingFields(_openAPI32Fields...))
@@ -389,15 +389,23 @@ func validate(ctx context.Context, t *openapi3.T, r raw, where *places) error {
 		}
 	}()
 
-	if err := t.Validate(ctx, opts...); err != nil {
+	if err := lenient(ctx, t, log); err != nil {
 		return err
 	}
 
 	for _, examples := range named {
 		for _, name := range slices.Sorted(maps.Keys(examples)) {
 			ex := examples[name].Value
-			if err := ex.Validate(ctx, opts...); err != nil {
-				return fmt.Errorf("invalid example %s: %w", cmp.Or(where.of(field{object: ex, name: "value"}), name), err)
+			at := cmp.Or(where.of(field{object: ex, name: "value"}), name)
+
+			// kin-openapi checks the fields of an example after its value: one OpenAPI doesn't define is logged, as
+			// lenient logs one elsewhere.
+			switch err := ex.Validate(ctx, opts...); {
+			case err == nil:
+			case is[*openapi3.ExtraSiblingFieldsError](err):
+				log.Warn().Str("example", at).Msgf("%v: ignored", err)
+			default:
+				return fmt.Errorf("invalid example %s: %w", at, err)
 			}
 		}
 	}
@@ -437,6 +445,91 @@ func inOrder[M ~map[string]V, V any](m M) []V {
 	}
 
 	return out
+}
+
+// lenient validates t as kin-openapi does, but for the values of examples, and returns the first problem that would
+// make a mock wrong. It logs the others on log, at warn level: a field OpenAPI doesn't define, which the mocks ignore,
+// but for those OpenAPI 3.2 adds, in a 3.2 document, and two paths that differ only in the names of their parameters,
+// whose mocks of one method answer the same requests. It doesn't compile patterns: a pattern is an ECMA-262 regular
+// expression, such as a lookahead, which Go's regexp may not compile.
+func lenient(ctx context.Context, t *openapi3.T, log *zerolog.Logger) error {
+	var allowed []string
+	if t.IsOpenAPI32OrLater() {
+		allowed = slices.Clone(_openAPI32Fields)
+	}
+
+	for {
+		opts := []openapi3.ValidationOption{
+			openapi3.EnableMultiError(), openapi3.DisableSchemaPatternValidation(), openapi3.DisableExamplesValidation(),
+			openapi3.AllowExtraSiblingFields(allowed...),
+		}
+
+		if t.IsOpenAPI31OrLater() {
+			opts = append(opts, openapi3.IsOpenAPI31OrLater())
+		}
+
+		if t.IsOpenAPI32OrLater() {
+			opts = append(opts, openapi3.IsOpenAPI32OrLater())
+		}
+
+		problems := flatten(t.Validate(ctx, opts...))
+
+		// kin-openapi skips a path that conflicts with another: it is checked on its own.
+		for i := 0; i < len(problems); i++ {
+			if c, ok := errors.AsType[*openapi3.ConflictingPathsError](problems[i]); ok {
+				skipped := openapi3.NewPaths(openapi3.WithPath(c.Path1, t.Paths.Value(c.Path1)))
+				problems = append(problems, flatten(skipped.Validate(ctx, opts...))...)
+			}
+		}
+
+		// kin-openapi checks no more of a schema past an unknown field: a field allowed, it checks again.
+		more := len(allowed)
+
+		for _, p := range problems {
+			if e, ok := errors.AsType[*openapi3.ExtraSiblingFieldsError](p); ok {
+				log.Warn().Msgf("%v: ignored", p)
+
+				for _, f := range e.Fields {
+					if !slices.Contains(allowed, f) {
+						allowed = append(allowed, f)
+					}
+				}
+			}
+		}
+
+		if len(allowed) > more {
+			continue
+		}
+
+		for _, p := range problems {
+			switch {
+			case p == nil:
+			case is[*openapi3.ConflictingPathsError](p):
+				log.Warn().Msgf("%v: their mocks of one method answer the same requests", p)
+			default:
+				return p
+			}
+		}
+
+		return nil
+	}
+}
+
+// flatten returns the problems of err, the error of a validation in kin-openapi's multi-error mode, or err, which may
+// be nil.
+func flatten(err error) []error {
+	problems := []error{err}
+	if multi, ok := errors.AsType[openapi3.MultiError](err); ok {
+		problems = multi
+	}
+
+	return problems
+}
+
+// is reports whether err, or an error it wraps, is a T.
+func is[T error](err error) bool {
+	_, ok := errors.AsType[T](err)
+	return ok
 }
 
 // validateDefaults checks each default r says is null, which kin-openapi reads as no value, against its schema, as

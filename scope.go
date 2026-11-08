@@ -11,6 +11,10 @@ import (
 
 var _ Inspector[Mock] = (*Scope[Mock])(nil)
 
+// _maxBuildErrors bounds the failing builders an error names, then counts the rest: thousands of mock files that fail
+// alike would bury the reason.
+const _maxBuildErrors = 10
+
 var errNotTracked = errors.New("server: the scope to replace isn't tracked: it was replaced or unmocked, or is another server's")
 
 type entry[B Mock] struct {
@@ -304,7 +308,7 @@ type Scopes[B Mock, A any] struct {
 }
 
 // Add builds every builder, then stores the mocks in one call and returns their scope.
-// It stores nothing when a builder fails, and reports every failing builder by index,
+// It stores nothing when a builder fails, and reports the first ten failing builders by index, and how many more fail,
 // or when the store refuses the mocks, for example over an ID already in use.
 func (s *Scopes[B, A]) Add(builders ...Builder[B, A]) (*Scope[B], error) {
 	return s.Replace(context.Background(), nil, builders...)
@@ -313,8 +317,9 @@ func (s *Scopes[B, A]) Add(builders ...Builder[B, A]) (*Scope[B], error) {
 // Replace builds every builder, then swaps the mocks for those of old in one step, so a reader finds the mocks of
 // old or the new ones, never neither, and returns their scope, which takes the place of old. With a nil old, it adds
 // the mocks, as Add does. A mock stored outside every scope, such as one the admin API added, gives way in the same
-// step to a new mock with its ID. It changes nothing when old isn't tracked, when a builder fails, reporting every
-// failing builder by index, or when the store refuses the mocks, for example over an ID in use in another scope.
+// step to a new mock with its ID. It changes nothing when old isn't tracked, when a builder fails, reporting the first
+// ten failing builders by index, and how many more fail, or when the store refuses the mocks, for example over an ID
+// in use in another scope.
 // Once replaced, old holds no mocks.
 func (s *Scopes[B, A]) Replace(ctx context.Context, old *Scope[B], builders ...Builder[B, A]) (*Scope[B], error) {
 	return s.replace(ctx, old, nil, builders...)
@@ -328,15 +333,26 @@ func (s *Scopes[B, A]) replace(ctx context.Context, old *Scope[B], swap Swap[B],
 
 	built := make([]B, 0, len(builders))
 
-	var errs []error
+	var (
+		errs    []error
+		unnamed int // failures past _maxBuildErrors
+	)
+
 	for i, b := range builders {
 		mock, err := b.Build(s.server)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("server: mock %d: %w", i, err))
-			continue
-		}
 
-		built = append(built, mock)
+		switch {
+		case err == nil:
+			built = append(built, mock)
+		case len(errs) < _maxBuildErrors:
+			errs = append(errs, fmt.Errorf("server: mock %d: %w", i, err))
+		default:
+			unnamed++
+		}
+	}
+
+	if unnamed > 0 {
+		errs = append(errs, fmt.Errorf("server: %d more mocks fail to build", unnamed))
 	}
 
 	// The mocks built never reach the store when another fails, or when the store refuses them: nothing else would

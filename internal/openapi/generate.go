@@ -2,6 +2,7 @@ package openapi
 
 import (
 	"cmp"
+	"context"
 	json "encoding/json/v2"
 	"fmt"
 	"hash/fnv"
@@ -112,8 +113,9 @@ type Reply struct {
 
 // Generate makes the mock files of doc: mocks named by [RouteFirst], each in a file of its own, as [PerMock] lays
 // them out. It logs on log, at warn level, each thing it could not honor, naming its mock, and [zerolog.Nop] silences
-// it: a body no value fits, by its examples or its schema, leaves its mock without one and disabled.
-func Generate(doc *Document, log *zerolog.Logger) []File {
+// it: a body no value fits, by its examples or its schema, leaves its mock without one and disabled. It fails only when
+// ctx is done.
+func Generate(ctx context.Context, doc *Document, log *zerolog.Logger) ([]File, error) {
 	g := generator{doc: doc, defs: make(map[string]any, len(doc.Defs)), copies: make(map[string]string)}
 	// Sorted, so the copies of shared schemas get the same names on every run.
 	for _, name := range slices.Sorted(maps.Keys(doc.Defs)) {
@@ -126,7 +128,16 @@ func Generate(doc *Document, log *zerolog.Logger) []File {
 	})
 
 	for _, op := range ops {
+		if err := stopped(ctx); err != nil {
+			return nil, err
+		}
+
 		g.operation(op)
+	}
+
+	// The last operation's values may take long too.
+	if err := stopped(ctx); err != nil {
+		return nil, err
 	}
 
 	name(g.mocks, RouteFirst)
@@ -146,7 +157,16 @@ func Generate(doc *Document, log *zerolog.Logger) []File {
 		e.Msg(w.message)
 	}
 
-	return PerMock(g.mocks)
+	return PerMock(g.mocks), nil
+}
+
+// stopped returns the error of generating the mocks for ctx, done, or nil.
+func stopped(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("openapi: generating the mocks: %w", err)
+	}
+
+	return nil
 }
 
 // generator holds the mocks and warnings of a document as they are made.
@@ -445,8 +465,9 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 	return h
 }
 
-// root returns schema, without its writeOnly properties, with the document's shared schemas under $defs, for its
-// $ref values to resolve. Its own $defs win over a shared schema of the same name.
+// root returns schema, without its writeOnly properties, with the document's shared schemas its $ref values name, in
+// turn, under $defs, for them to resolve. Its own $defs win over a shared schema of the same name. Leaving out the
+// others keeps fakefy from compiling every schema of a large spec for each value.
 func (g *generator) root(schema any) map[string]any {
 	root := make(map[string]any, 2)
 
@@ -459,12 +480,57 @@ func (g *generator) root(schema any) map[string]any {
 		}
 	}
 
-	defs := maps.Clone(g.defs)
 	own, _ := root["$defs"].(map[string]any)
-	maps.Copy(defs, own)
+	defs := maps.Clone(own)
+	if defs == nil {
+		defs = make(map[string]any)
+	}
+
+	g.named(root, defs)
 	root["$defs"] = defs
 
 	return root
+}
+
+// named adds to defs each shared schema of the generator that a $ref in v names, and those that one names, in turn,
+// but for the names defs holds. It reads every $ref key as one: one in data, such as an example, only adds a schema.
+func (g *generator) named(v any, defs map[string]any) {
+	switch x := v.(type) {
+	case map[string]any:
+		ref, _ := x["$ref"].(string)
+		if name, ok := defName(ref); ok {
+			if def, shared := g.defs[name]; shared {
+				if _, added := defs[name]; !added {
+					defs[name] = def
+					g.named(def, defs)
+				}
+			}
+		}
+
+		for _, val := range x {
+			g.named(val, defs)
+		}
+	case []any:
+		for _, item := range x {
+			g.named(item, defs)
+		}
+	}
+}
+
+// defName returns the name of the schema under $defs that ref, a fragment such as #/$defs/Pet/properties/name, points
+// into, decoded as fakefy decodes it: a URI fragment may percent-encode any character, and a JSON pointer token
+// escapes / and ~.
+func defName(ref string) (string, bool) {
+	frag, _ := url.PathUnescape(ref) // "" for a bad escape, which names no schema
+
+	rest, ok := strings.CutPrefix(frag, DefsPrefix)
+	if !ok {
+		return "", false
+	}
+
+	token, _, _ := strings.Cut(rest, "/")
+
+	return strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~"), true
 }
 
 // seed returns the seed of the fake values of m: the same for the same route, method, status, media type and

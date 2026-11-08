@@ -10,8 +10,8 @@ A gRPC status says how the call ended. The `vlatte-error` trailer identifies an 
 |---|---|---|
 | No mock matched. | `NotFound`, unless `Setup().NoMatchCode` sets another. | `no-match` |
 | No descriptor describes the method. | `Unimplemented` | `no-match` |
-| A matcher or the mock store failed. | `Internal` | `match` |
-| A reply failed, such as a template or a call past the end of a `Seq`. | `Internal` | `reply` |
+| A matcher, the mock store or a [request parser](/grpc/matching#parsed-requests) failed. | `Internal` | `match` |
+| A reply failed, such as a template, a call past the end of a `Seq`, or a request parser on a bidi message. | `Internal` | `reply` |
 | Serving the call panicked. | `Internal` | `panic` |
 
 A mock that answers with a status, as `Status(...)` does, gets no `vlatte-error` trailer: that status is its answer. Check the trailer to distinguish an intentional mock error from a failure to serve the mock.

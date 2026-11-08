@@ -278,10 +278,6 @@ func TestLoad_FailsOnAnExampleOfOpenAPI32TheSpecForbids(t *testing.T) {
 			want: _invalidA + "externalValue and serializedValue are mutually exclusive",
 		},
 		{name: "a serializedValue that isn't text", example: "{serializedValue: 1}", want: _invalidA + "serializedValue: expected a string, not 1"},
-		{
-			name: "a dataValue before OpenAPI 3.2", version: "3.1.0", example: "{dataValue: 1}",
-			want: `openapi: invalid spec: invalid components: example "A": extra sibling fields: [dataValue]`,
-		},
 	}
 
 	nop := zerolog.Nop()
@@ -742,6 +738,109 @@ paths:
 	require.Equal(t, []map[string]any{
 		{"level": "warn", "message": `the servers have different paths: the mocks answer under the first one's, "/v1"`},
 	}, warnings)
+}
+
+func TestLoad_WarnsOfWhatTheSpecGetsWrongButLeavesNoMockWrong(t *testing.T) {
+	// Real specs hold such slips: OpenAI's an unknown keyword, GitHub's two paths that differ only in a parameter's
+	// name. Failing the whole spec over one leaves no mocks at all.
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
+openapi: 3.0.3
+info: {title: Pets, version: "1"}
+paths:
+  /pets/{id}:
+    get:
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Pet"}}}}}
+  /pets/{name}:
+    put:
+      parameters: [{name: name, in: path, required: true, schema: {type: string}}]
+      responses: {"204": {description: Saved}}
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        name: {type: string, optional: true}
+`})
+
+	ops := make([]string, 0, len(doc.Operations))
+	for _, o := range doc.Operations {
+		ops = append(ops, o.Method+" "+o.Path)
+	}
+
+	require.Equal(t, []string{"GET /pets/{id}", "PUT /pets/{name}"}, ops)
+	require.Equal(t, []map[string]any{
+		{"level": "warn", "message": `invalid components: schema "Pet": extra sibling fields: [optional]: ignored`},
+		{"level": "warn", "message": "invalid paths: invalid path /pets/{id}: invalid operation GET: extra sibling fields: [optional]: ignored"},
+		{"level": "warn", "message": `invalid paths: conflicting paths "/pets/{name}" and "/pets/{id}": their mocks of one method answer the same requests`},
+	}, warnings)
+}
+
+func TestLoad_FailsOnWhatAWarningWouldHide(t *testing.T) {
+	// kin-openapi stops checking a schema at its first problem, and skips a path that conflicts with another: what is
+	// wrong past a slip it only warns of must still fail the spec.
+	tests := []struct {
+		name string
+		spec string
+		want string
+	}{
+		{
+			name: "a schema past an unknown keyword",
+			spec: `
+openapi: 3.0.3
+info: {title: Pets, version: "1"}
+paths: {}
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        a: {type: string, optional: true}
+        b: {type: strin}
+`,
+			want: `unsupported 'type' value "strin"`,
+		},
+		{
+			name: "a path that conflicts with another",
+			spec: `
+openapi: 3.0.3
+info: {title: Pets, version: "1"}
+paths:
+  /pets/{id}:
+    get:
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses: {"204": {description: Done}}
+  /pets/{name}:
+    put:
+      parameters: [{name: nme, in: path, required: true, schema: {type: string}}]
+      responses: {"204": {description: Saved}}
+`,
+			want: "must define exactly all path parameters",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log := zerolog.Nop()
+			_, err := loadFiles(t, map[string]string{"spec.yaml": tt.spec}, &log)
+			require.ErrorIs(t, err, openapi.ErrInvalid)
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestLoad_KeepsAPatternGoCannotCompile(t *testing.T) {
+	// JSON Schema patterns are ECMA-262 regular expressions: Go's regexp has no lookahead, which OpenAI's spec uses.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: string, pattern: "^(?!x)"}}}}}
+`})
+
+	require.Equal(t, map[string]any{"type": "string", "pattern": "^(?!x)"}, doc.Operations[0].Responses[0].Content[0].Schema)
 }
 
 func TestLoad_ReadsHowAPathParameterIsWritten(t *testing.T) {
@@ -1245,6 +1344,28 @@ func TestLoad_FailsOnANamedExampleTheSpecForbids(t *testing.T) {
 			require.ErrorContains(t, err, "invalid example spec.yaml#/components/responses/A/content/application~1json/examples/a: ")
 		}
 	})
+}
+
+func TestLoad_WarnsOfAFieldOpenAPIDoesNotDefineBesideANamedExample(t *testing.T) {
+	// A named example is checked apart from the rest of the spec: a field OpenAPI doesn't define beside its value is
+	// a slip it warns of, as any other, which leaves no mock wrong.
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      responses:
+        "200":
+          description: OK
+          content: {application/json: {schema: {type: integer}, examples: {a: {value: 1, note: first}}}}
+`})
+
+	require.Equal(t, []openapi.Example{{Name: "a", Value: int64(1)}}, doc.Operations[0].Responses[0].Content[0].Examples)
+	require.Equal(t, []map[string]any{{
+		"level": "warn", "example": "spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/examples/a",
+		"message": "extra sibling fields: [note]: ignored",
+	}}, warnings)
 }
 
 func TestLoad_FailsOnAnInvalidSpec(t *testing.T) {

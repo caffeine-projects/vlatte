@@ -59,7 +59,8 @@ type echoReplier struct {
 func (e *echoReplier) Reply(_ context.Context, call *Call) error {
 	if call.isClientStream() && call.isServerStream() {
 		for {
-			msg, err := call.Recv()
+			// Echo answers the message as the client sent it: the server's parsers don't read it.
+			msg, _, err := call.recvNext(false)
 			if errors.Is(err, io.EOF) {
 				return nil
 			}

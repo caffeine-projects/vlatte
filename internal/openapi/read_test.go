@@ -107,6 +107,11 @@ func TestDetect_ReadsTheVersionAsWritten(t *testing.T) {
 		{name: "OpenAPI 3.1 in YAML", spec: "openapi: 3.1.0\ninfo: {}\n", want: "3.1.0"},
 		{name: "OpenAPI 3.0 in JSON", spec: `{"openapi": "3.0.3", "paths": {}}`, want: "3.0.3"},
 		{name: "Swagger as a number", spec: "swagger: 2.0\n", want: "2.0"},
+		{name: "Swagger as a number in JSON", spec: `{"swagger": 2.0}`, want: "2.0"},
+		// kin-openapi reads JSON as encoding/json v1 does: the last of duplicate keys wins. YAML rejects them.
+		{name: "JSON with a duplicate key", spec: "{\"openapi\": \"3.0.1\",\n\"info\": {},\n\"info\": {}}", want: "3.0.1"},
+		// JSON escapes an emoji as a surrogate pair, which YAML rejects: Twilio's specs hold some.
+		{name: "JSON with an escaped emoji", spec: "{\"openapi\": \"3.0.1\",\n\"info\": {\"title\": \"\\ud83d\\udc4d\"}}", want: "3.0.1"},
 	}
 
 	for _, tt := range tests {
@@ -121,7 +126,9 @@ func TestDetect_ReadsTheVersionAsWritten(t *testing.T) {
 	require.ErrorIs(t, err, openapi.ErrNotOpenAPI)
 	require.ErrorContains(t, err, "openapi: not an OpenAPI or Swagger document: yaml: ")
 
-	_, err = openapi.Detect([]byte("name: not a spec\n"))
-	require.ErrorIs(t, err, openapi.ErrNotOpenAPI)
-	require.EqualError(t, err, "openapi: not an OpenAPI or Swagger document: expected an openapi or swagger field with its version, such as openapi: 3.1.0")
+	for _, spec := range []string{"name: not a spec\n", `{"name": "not a spec"}`} {
+		_, err = openapi.Detect([]byte(spec))
+		require.ErrorIs(t, err, openapi.ErrNotOpenAPI)
+		require.EqualError(t, err, "openapi: not an OpenAPI or Swagger document: expected an openapi or swagger field with its version, such as openapi: 3.1.0")
+	}
 }
