@@ -2,6 +2,7 @@ package openapi_test
 
 import (
 	"bytes"
+	"context"
 	json "encoding/json/v2"
 	"fmt"
 	"maps"
@@ -571,6 +572,12 @@ func TestGenerate_ResolvesEveryRefOfASchemaHowEverItReachesASharedSchema(t *test
 			want:   `"rex"`,
 		},
 		{
+			// A fragment is a URI's: it may percent-encode any character, as fakefy reads it.
+			name:   "a percent-encoded pointer",
+			schema: map[string]any{"$ref": "#/%24defs/%50et/properties/name"},
+			want:   `"rex"`,
+		},
+		{
 			name: "a shared schema its own $defs name",
 			schema: map[string]any{
 				"$defs": map[string]any{"Wrap": map[string]any{"$ref": "#/$defs/Pet/properties/name"}},
@@ -785,6 +792,21 @@ func TestGenerate_FakesWhatHasNoExample(t *testing.T) {
 	}, m.Reply)
 }
 
+func TestGenerate_StopsWhenCanceledWhileMakingTheLastOperation(t *testing.T) {
+	// Ctrl+C while the last operation's values are made, which can take minutes, must not let the command write the
+	// mocks anyway: the context reports canceled from its second check on, as it does once canceled mid-run.
+	doc := &openapi.Document{Operations: []openapi.Operation{
+		{Method: "GET", Path: "/a", Responses: []openapi.Response{{Status: "204"}}},
+	}}
+
+	log := zerolog.Nop()
+	files, err := openapi.Generate(&canceledLater{Context: t.Context()}, doc, &log)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.EqualError(t, err, "openapi: generating the mocks: context canceled")
+	require.Nil(t, files)
+}
+
 func TestGenerate_WritesTheSameMocksOnEveryRun(t *testing.T) {
 	// A regenerated folder diffs cleanly in git only when a rerun writes the same values, whatever else the spec
 	// holds.
@@ -944,4 +966,20 @@ func enabledIDs(mocks map[string]openapi.Mock, enabled bool) []string {
 	}
 
 	return out
+}
+
+// canceledLater is a context that reports no error the first time it is checked, and canceled from then on.
+type canceledLater struct {
+	context.Context
+
+	checks int
+}
+
+func (c *canceledLater) Err() error {
+	c.checks++
+	if c.checks == 1 {
+		return nil
+	}
+
+	return context.Canceled
 }

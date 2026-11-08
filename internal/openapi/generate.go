@@ -128,11 +128,16 @@ func Generate(ctx context.Context, doc *Document, log *zerolog.Logger) ([]File, 
 	})
 
 	for _, op := range ops {
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("openapi: generating the mocks: %w", err)
+		if err := stopped(ctx); err != nil {
+			return nil, err
 		}
 
 		g.operation(op)
+	}
+
+	// The last operation's values may take long too.
+	if err := stopped(ctx); err != nil {
+		return nil, err
 	}
 
 	name(g.mocks, RouteFirst)
@@ -153,6 +158,15 @@ func Generate(ctx context.Context, doc *Document, log *zerolog.Logger) ([]File, 
 	}
 
 	return PerMock(g.mocks), nil
+}
+
+// stopped returns the error of generating the mocks for ctx, done, or nil.
+func stopped(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("openapi: generating the mocks: %w", err)
+	}
+
+	return nil
 }
 
 // generator holds the mocks and warnings of a document as they are made.
@@ -484,8 +498,7 @@ func (g *generator) named(v any, defs map[string]any) {
 	switch x := v.(type) {
 	case map[string]any:
 		ref, _ := x["$ref"].(string)
-		if rest, ok := strings.CutPrefix(ref, DefsPrefix); ok {
-			name, _, _ := strings.Cut(rest, "/")
+		if name, ok := defName(ref); ok {
 			if def, shared := g.defs[name]; shared {
 				if _, added := defs[name]; !added {
 					defs[name] = def
@@ -502,6 +515,22 @@ func (g *generator) named(v any, defs map[string]any) {
 			g.named(item, defs)
 		}
 	}
+}
+
+// defName returns the name of the schema under $defs that ref, a fragment such as #/$defs/Pet/properties/name, points
+// into, decoded as fakefy decodes it: a URI fragment may percent-encode any character, and a JSON pointer token
+// escapes / and ~.
+func defName(ref string) (string, bool) {
+	frag, _ := url.PathUnescape(ref) // "" for a bad escape, which names no schema
+
+	rest, ok := strings.CutPrefix(frag, DefsPrefix)
+	if !ok {
+		return "", false
+	}
+
+	token, _, _ := strings.Cut(rest, "/")
+
+	return strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~"), true
 }
 
 // seed returns the seed of the fake values of m: the same for the same route, method, status, media type and
