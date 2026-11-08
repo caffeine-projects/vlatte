@@ -248,109 +248,64 @@ func TestLoad_TakesANullExampleWhereverTheSpecPutsIt(t *testing.T) {
 	}
 }
 
-func TestLoad_ChecksANullExampleAgainstItsSchema(t *testing.T) {
-	// null is a value, which its schema checks as any other, wherever the spec writes it: kin-openapi reads it as no
-	// value, which it doesn't check. A default is checked as an example.
-	tests := []struct {
-		name  string
-		place string // where the null is, with %s for the type of its schema
-		error string
-	}{
-		{
-			name:  "a named example",
-			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: %s}, examples: {none: {value: null}}}}}}",
-			error: `example none: validation failed due to: at '': got null, want object`,
-		},
-		{
-			name:  "the example of a media type",
-			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: %s}, example: null}}}}",
-			error: `invalid example of spec.yaml#/paths/~1pets/get/responses/200/content/application~1json: `,
-		},
-		{
-			name:  "the example of a parameter",
-			place: "parameters: [{name: q, in: query, schema: {type: %s}, example: null}]\n      responses: {\"204\": {description: OK}}",
-			error: `invalid example of spec.yaml#/paths/~1pets/get/parameters/0: `,
-		},
-		{
-			name:  "the example of a header",
-			place: "responses: {\"204\": {description: OK, headers: {X-A: {schema: {type: %s}, example: null}}}}",
-			error: `invalid example of spec.yaml#/paths/~1pets/get/responses/204/headers/X-A: `,
-		},
-		{
-			name:  "the example of a schema",
-			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {$ref: \"#/components/schemas/S\"}}}}}\ncomponents: {schemas: {S: {type: %s, example: null}}}",
-			error: `invalid example of spec.yaml#/components/schemas/S: `,
-		},
-		{
-			name:  "the default of a schema",
-			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {properties: {a: {type: %s, default: null}}}}}}}",
-			error: `invalid default of spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/schema/properties/a: `,
-		},
-		{
-			name: "the example of a schema beside a $ref",
-			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {$ref: \"#/components/schemas/Any\", properties: {a: {type: %s, example: null}}}}}}}" +
-				"\ncomponents: {schemas: {Any: {}}}",
-			error: `invalid example of spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/schema/properties/a: `,
-		},
-		// An example outside JSON is the body, which its schema doesn't describe, and examples is a list.
-		{
-			name:  "the example of a media type outside JSON",
-			place: "responses: {\"200\": {description: OK, content: {text/plain: {schema: {type: %s}, example: null}}}}",
-		},
-		{
-			name:  "the examples of a schema",
-			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: %s, examples: null}}}}}",
-		},
+func TestLoad_ChecksANullDefaultAgainstItsSchema(t *testing.T) {
+	// null is a value, which its schema checks as any other: kin-openapi reads it as no value, which it doesn't check.
+	// A default, unlike an example, is what a server takes for a value left out: one its schema rejects is a contract
+	// that contradicts itself.
+	spec := func(types string) map[string]string {
+		return map[string]string{"spec.yaml": "openapi: 3.1.0\ninfo: {title: Pets, version: \"1\"}\npaths:\n  /pets:\n    get:\n      " +
+			"responses: {\"200\": {description: OK, content: {application/json: {schema: {properties: {a: {type: " + types + ", default: null}}}}}}}\n"}
 	}
 
 	nop := zerolog.Nop()
 
-	for _, tt := range tests {
-		spec := func(types string) map[string]string {
-			return map[string]string{"spec.yaml": "openapi: 3.1.0\ninfo: {title: Pets, version: \"1\"}\npaths:\n  /pets:\n    get:\n      " +
-				fmt.Sprintf(tt.place, types) + "\n"}
-		}
+	_, err := loadFiles(t, spec("object"), &nop)
+	require.ErrorIs(t, err, openapi.ErrInvalid)
+	require.ErrorContains(t, err, `invalid default of spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/schema/properties/a: `)
+	require.ErrorContains(t, err, "got null, want object")
 
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := loadFiles(t, spec("object"), &nop)
-			if tt.error == "" {
-				require.NoError(t, err)
-				return
-			}
+	_, err = loadFiles(t, spec(`[object, "null"]`), &nop)
+	require.NoError(t, err)
+}
 
-			require.ErrorIs(t, err, openapi.ErrInvalid)
-			require.ErrorContains(t, err, tt.error)
-			require.ErrorContains(t, err, "got null, want object")
-		})
-
-		t.Run(tt.name+" its schema allows", func(t *testing.T) {
-			_, err := loadFiles(t, spec(`[object, "null"]`), &nop)
-			require.NoError(t, err)
-		})
-	}
+func TestLoad_FailsOnADefaultItsSchemaRejects(t *testing.T) {
+	// Only examples are lenient: a server takes a default for a value left out, so one its schema rejects is a
+	// contract that contradicts itself, however it converts.
+	nop := zerolog.Nop()
+	_, err := loadFiles(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      parameters: [{name: q, in: query, schema: {type: string, default: 5}}]
+      responses: {"204": {description: OK}}
+`}, &nop)
+	require.ErrorIs(t, err, openapi.ErrInvalid)
+	require.ErrorContains(t, err, "invalid default")
 }
 
 func TestLoad_NamesTheFirstNullItsSchemaRejectsOnEveryRun(t *testing.T) {
-	// Of the nulls a spec gets wrong, the one first in it is named, the same on every run.
+	// Of the null defaults a spec gets wrong, the one first in it is named, the same on every run.
 	files := map[string]string{"spec.yaml": `
 openapi: 3.1.0
 info: {title: Pets, version: "1"}
 paths:
   /pets:
     get:
-      parameters: [{name: q, in: query, schema: {type: object}, example: null}]
+      parameters: [{name: q, in: query, schema: {type: object, default: null}}]
       responses:
         "200":
           description: OK
-          headers: {X-A: {schema: {type: object}, example: null}}
-          content: {application/json: {schema: {type: object}, example: null}}
+          headers: {X-A: {schema: {type: object, default: null}}}
+          content: {application/json: {schema: {type: object, default: null}}}
 `}
 
 	nop := zerolog.Nop()
 
 	for range 10 {
 		_, err := loadFiles(t, files, &nop)
-		require.ErrorContains(t, err, `invalid example of spec.yaml#/paths/~1pets/get/parameters/0: `)
+		require.ErrorContains(t, err, `invalid default of spec.yaml#/paths/~1pets/get/parameters/0/schema: `)
 	}
 }
 
@@ -1069,9 +1024,10 @@ paths:
 	}
 }
 
-func TestLoad_FailsOnAJSONExampleItsSchemaRejects(t *testing.T) {
+func TestLoad_LeavesOutAJSONExampleItsSchemaRejects(t *testing.T) {
 	// A JSON example is the data its schema describes: one that breaks it would make a mock that breaks the contract.
-	data := []byte(`
+	// The rest of the spec still makes mocks, and the log names the example to fix.
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
 openapi: 3.1.0
 info: {title: Pets, version: "1"}
 paths:
@@ -1084,12 +1040,49 @@ paths:
             application/json:
               schema: {type: object}
               example: <Pet/>
-`)
+`})
 
-	log := zerolog.Nop()
-	_, err := openapiv3.Load(t.Context(), data, &url.URL{Path: filepath.ToSlash(filepath.Join(t.TempDir(), "spec.yaml"))}, read(t), &log)
-	require.ErrorIs(t, err, openapi.ErrInvalid)
-	require.ErrorContains(t, err, "invalid example")
+	require.Equal(t, []openapi.Content{{MediaType: "application/json", Schema: map[string]any{"type": "object"}}}, doc.Operations[0].Responses[0].Content)
+	require.Equal(t, []map[string]any{{
+		"level":   "warn",
+		"example": "spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/example",
+		"message": "the example breaks its schema's type: left out",
+	}}, warnings)
+}
+
+func TestLoad_FailsOnANamedExampleTheSpecForbids(t *testing.T) {
+	// Only the schema check of an example is lenient: a named example with both a value and an external value says
+	// two things at once, which a mock can't choose between.
+	const forbidden = "examples: {a: {value: 1, externalValue: https://x.example.com/a.json}}"
+
+	tests := []struct {
+		name      string
+		operation string
+	}{
+		{name: "of a media type", operation: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: integer}, " + forbidden + "}}}}"},
+		{name: "of a parameter", operation: "parameters: [{name: q, in: query, schema: {type: integer}, " + forbidden + "}]\n      responses: {\"204\": {description: OK}}"},
+	}
+
+	nop := zerolog.Nop()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadFiles(t, map[string]string{"spec.yaml": "openapi: 3.1.0\ninfo: {title: Pets, version: \"1\"}\npaths:\n  /pets:\n    get:\n      " + tt.operation + "\n"}, &nop)
+			require.ErrorIs(t, err, openapi.ErrInvalid)
+			require.ErrorContains(t, err, "value and externalValue are mutually exclusive")
+		})
+	}
+
+	t.Run("the first of several, on every run", func(t *testing.T) {
+		response := "{description: OK, content: {application/json: {schema: {type: integer}, " + forbidden + "}}}"
+		files := map[string]string{"spec.yaml": "openapi: 3.1.0\ninfo: {title: Pets, version: \"1\"}\npaths: {}\n" +
+			"components: {responses: {A: " + response + ", B: " + response + ", C: " + response + "}}\n"}
+
+		for range 10 {
+			_, err := loadFiles(t, files, &nop)
+			require.ErrorContains(t, err, "invalid example spec.yaml#/components/responses/A/content/application~1json/examples/a: ")
+		}
+	})
 }
 
 func TestLoad_FailsOnAnInvalidSpec(t *testing.T) {
