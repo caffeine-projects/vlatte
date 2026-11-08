@@ -138,7 +138,7 @@ func (f *Faker) Field(name string, schema map[string]any) (any, error) {
 		w.examples = w.examples && try < _maxTries/2
 		w.failures = 0
 
-		v, err := w.value(schema, name, "", 0)
+		v, err := w.value(root, name, "", 0)
 
 		// The examples may be what no value satisfies, such as unique items an example repeats.
 		if errors.Is(err, ErrUnsatisfiable) && w.examples {
