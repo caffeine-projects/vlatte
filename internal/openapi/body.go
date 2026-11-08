@@ -58,7 +58,7 @@ func IsJSON(mediaType string) bool {
 // it, its format byte, itself or the schema its $ref points to.
 func (g *generator) isBase64(schema any) bool {
 	root := g.root(schema)
-	defs, _ := root["$defs"].(map[string]any)
+	own, _ := root["$defs"].(map[string]any)
 
 	var seen []string
 
@@ -75,6 +75,12 @@ func (g *generator) isBase64(schema any) bool {
 		}
 
 		seen = append(seen, name)
-		s, _ = defs[name].(map[string]any)
+
+		def, mine := own[name]
+		if !mine {
+			def = g.defs[name]
+		}
+
+		s, _ = def.(map[string]any)
 	}
 }

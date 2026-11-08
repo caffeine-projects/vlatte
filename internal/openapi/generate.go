@@ -174,6 +174,7 @@ type generator struct {
 	doc      *Document
 	defs     map[string]any    // the document's shared schemas without writeOnly properties, and copyWithout's copies
 	copies   map[string]string // the names in defs of copyWithout's copies, by shared schema and properties left out
+	shared   *fakefy.Defs      // defs, for fakefy, or nil until it is first needed and after defs gains a copy
 	mocks    []Mock
 	pending  []string
 	warnings []warning
@@ -331,7 +332,9 @@ func (g *generator) body(m Mock, r Response, c Content, status int, extras bool)
 	case len(c.Examples) > 0:
 		g.setBody(&m, c, c.Examples[0].Value)
 	case c.Schema != nil:
-		v, err := fakefy.New(fakefy.WithSeed(seed(m))).Schema(g.root(c.Schema))
+		schema := g.root(c.Schema)
+
+		v, err := g.faker(seed(m)).Schema(schema)
 		if err != nil {
 			g.warnf("no body fits: %v: written disabled", err)
 			m.Enabled = false
@@ -438,10 +441,18 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 		return nil
 	}
 
-	f := fakefy.New(fakefy.WithSeed(seed(m) ^ 1))
+	// The schemas first, for the Faker to hold every copy of a shared schema they add.
+	schemas := make([]map[string]any, len(r.Headers))
+	for i, hd := range r.Headers {
+		if len(hd.Examples) == 0 && hd.Schema != nil {
+			schemas[i] = g.root(hd.Schema)
+		}
+	}
+
+	f := g.faker(seed(m) ^ 1)
 	h := make(map[string]string, len(r.Headers))
 
-	for _, hd := range r.Headers {
+	for i, hd := range r.Headers {
 		var v any
 
 		switch {
@@ -451,7 +462,7 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 			continue
 		default:
 			var err error
-			if v, err = f.Field(hd.Name, g.root(hd.Schema)); err != nil {
+			if v, err = f.Field(hd.Name, schemas[i]); err != nil {
 				g.warnf("no value of header %s fits: %v: left out", hd.Name, err)
 				continue
 			}
@@ -465,72 +476,28 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 	return h
 }
 
-// root returns schema, without its writeOnly properties, with the document's shared schemas its $ref values name, in
-// turn, under $defs, for them to resolve. Its own $defs win over a shared schema of the same name. Leaving out the
-// others keeps fakefy from compiling every schema of a large spec for each value.
+// root returns schema without its writeOnly properties, as an object.
 func (g *generator) root(schema any) map[string]any {
-	root := make(map[string]any, 2)
-
 	switch s := g.stripWriteOnly(schema, nil).(type) {
 	case map[string]any:
-		root = s
+		return s
 	case bool:
 		if !s {
-			root["not"] = make(map[string]any)
+			return map[string]any{"not": make(map[string]any)}
 		}
 	}
 
-	own, _ := root["$defs"].(map[string]any)
-	defs := maps.Clone(own)
-	if defs == nil {
-		defs = make(map[string]any)
-	}
-
-	g.named(root, defs)
-	root["$defs"] = defs
-
-	return root
+	return make(map[string]any)
 }
 
-// named adds to defs each shared schema of the generator that a $ref in v names, and those that one names, in turn,
-// but for the names defs holds. It reads every $ref key as one: one in data, such as an example, only adds a schema.
-func (g *generator) named(v any, defs map[string]any) {
-	switch x := v.(type) {
-	case map[string]any:
-		ref, _ := x["$ref"].(string)
-		if name, ok := defName(ref); ok {
-			if def, shared := g.defs[name]; shared {
-				if _, added := defs[name]; !added {
-					defs[name] = def
-					g.named(def, defs)
-				}
-			}
-		}
-
-		for _, val := range x {
-			g.named(val, defs)
-		}
-	case []any:
-		for _, item := range x {
-			g.named(item, defs)
-		}
-	}
-}
-
-// defName returns the name of the schema under $defs that ref, a fragment such as #/$defs/Pet/properties/name, points
-// into, decoded as fakefy decodes it: a URI fragment may percent-encode any character, and a JSON pointer token
-// escapes / and ~.
-func defName(ref string) (string, bool) {
-	frag, _ := url.PathUnescape(ref) // "" for a bad escape, which names no schema
-
-	rest, ok := strings.CutPrefix(frag, DefsPrefix)
-	if !ok {
-		return "", false
+// faker returns a Faker of seed whose $refs resolve to the generator's shared schemas, as they are now: root may
+// have added copies of them.
+func (g *generator) faker(seed uint64) *fakefy.Faker {
+	if g.shared == nil {
+		g.shared = fakefy.NewDefs(maps.Clone(g.defs))
 	}
 
-	token, _, _ := strings.Cut(rest, "/")
-
-	return strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~"), true
+	return fakefy.New(fakefy.WithSeed(seed), fakefy.WithDefs(g.shared))
 }
 
 // seed returns the seed of the fake values of m: the same for the same route, method, status, media type and
@@ -993,6 +960,7 @@ func (g *generator) copyWithout(name string, dropped []string) string {
 
 	// Taken before the copy is made, for the copy to refer to itself.
 	g.copies[key] = copied
+	g.shared = nil
 	g.defs[copied] = nil
 	g.defs[copied] = g.stripWriteOnly(def, without)
 

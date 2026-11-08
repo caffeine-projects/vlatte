@@ -870,6 +870,30 @@ func TestGenerate_LeavesOutAHeaderNoValueFits(t *testing.T) {
 	}}, warnings)
 }
 
+func TestGenerate_AHeaderResolvesASharedSchemaItLeavesAWriteOnlyPropertyOf(t *testing.T) {
+	// Leaving out a writeOnly property of a shared schema makes a copy of it, which the header's value must resolve to
+	// as the headers before it resolve to theirs.
+	mocks, warnings := generateWithWarnings(t, &openapi.Document{
+		Defs: map[string]any{"Session": map[string]any{
+			"type": "object", "required": []any{"id"},
+			"properties": map[string]any{"id": map[string]any{"const": "s1"}, "key": map[string]any{"type": "string"}},
+		}},
+		Operations: []openapi.Operation{{
+			Method: "GET", Path: "/a",
+			Responses: []openapi.Response{{Status: "204", Headers: []openapi.Header{
+				{Name: "X-First", Schema: map[string]any{"const": "a"}},
+				{Name: "X-Session", MediaType: "application/json", Schema: map[string]any{"allOf": []any{
+					map[string]any{"$ref": "#/$defs/Session"},
+					map[string]any{"properties": map[string]any{"key": map[string]any{"writeOnly": true}}},
+				}}},
+			}}},
+		}},
+	})
+
+	require.Empty(t, warnings)
+	require.Equal(t, map[string]string{"X-First": "a", "X-Session": `{"id":"s1"}`}, mocks["a-get-204"].Reply.Header)
+}
+
 func TestGenerate_WritesAHeaderWithContentInItsMediaType(t *testing.T) {
 	// A header with content is its value in that media type: JSON text in JSON, the text itself in any other, where
 	// data has no format the generator could pick.
