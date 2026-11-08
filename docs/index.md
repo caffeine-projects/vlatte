@@ -61,7 +61,7 @@ curl -k https://localhost:8443/payments \
 
 </HomeHero>
 
-<HomeSection title="Run it your way" lead="The same mocks, in a test, from files, or in a container.">
+<HomeSection title="Run it your way" lead="The same mocks, in a test, from files, from an OpenAPI spec, or in a container.">
 <HomeRun>
 
 ::: code-group
