@@ -3,6 +3,7 @@ package matchopenapi_test
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -227,6 +228,14 @@ func TestOpenAPI_LeavesUncheckedWhatItCannotRead(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"age": -1}`, string(body))
 
+	// Nor is one that GetBody fails to give again.
+	req = request(t, "PUT", "/v1/pets/"+_id, "application/json", `{"age": -1}`)
+	req.GetBody = func() (io.ReadCloser, error) { return nil, errors.New("gone") }
+
+	got, messages = match(t, put, req)
+	require.True(t, got)
+	require.Empty(t, messages)
+
 	for _, version := range []string{"3.0.3", "3.1.0"} {
 		t.Run(version, func(t *testing.T) {
 			tags := build(t, writeSpec(t, strings.Replace(_pets, "3.1.0", version, 1)), "GET /tags/{tag}", "request")
@@ -244,6 +253,9 @@ func TestOpenAPI_MatchesARequestWithTheCredentialsOfARequirement(t *testing.T) {
 	put := build(t, writeSpec(t, strings.Replace(_pets, ", {}]", "]", 1)), "PUT /v1/pets/{id}", "security")
 	get := build(t, writeSpec(t, _pets), "getPet", "security")
 	files := build(t, writeSpec(t, _pets), "GET /files/{name}.{ext}", "security")
+	owners := build(t, writeSpec(t, _pets), "POST /owners", "security")
+	// A spec written by hand may name a type of scheme OpenAPI lacks.
+	magic := build(t, writeSpec(t, strings.Replace(_pets, "{type: mutualTLS}", "{type: magic}", 1)), "GET /files/{name}.{ext}", "security")
 
 	missing := []string{"security: expected an Authorization header of scheme basic and the header X-API-Key, or an Authorization header"}
 
@@ -272,6 +284,8 @@ func TestOpenAPI_MatchesARequestWithTheCredentialsOfARequirement(t *testing.T) {
 		{name: "none of them", matcher: files, req: request(t, "GET", "/files/a.txt", "", ""), want: []string{
 			"security: expected the header X-API-Key, or the cookie session, or the query parameter api_key, or a client certificate",
 		}},
+		{name: "an operation that requires none", matcher: owners, req: request(t, "POST", "/owners", "", "")},
+		{name: "a scheme of a type it doesn't know", matcher: magic, req: request(t, "GET", "/files/a.txt", "", "")},
 	}
 
 	for _, tt := range tests {
@@ -344,12 +358,19 @@ func TestOpenAPI_MatchesARequestOfAnotherOperation(t *testing.T) {
 	got, messages = match(t, build(t, writeSpec(t, _pets), "GET /files/{name}.{ext}", "request"), request(t, "GET", "/files/a%20bcd.md", "", ""))
 	require.False(t, got)
 	require.Equal(t, []string{`path parameter "name": maxLength: got 5, want 3`, `path parameter "ext": value must be 'txt'`}, messages)
+
+	// A segment that doesn't fit the template is of another path: /files/a has no extension to check.
+	got, messages = match(t, build(t, writeSpec(t, _pets), "GET /files/{name}.{ext}", "request"), request(t, "GET", "/files/a", "", ""))
+	require.True(t, got)
+	require.Empty(t, messages)
 }
 
 func TestOpenAPI_RefusesArgumentsItCannotUse(t *testing.T) {
 	// A mock file whose matcher can't check anything doesn't load: it would refuse every request, or none.
 	dir := writeSpec(t, _pets)
 	spec := filepath.Join(dir, "pets.openapi.yaml")
+	folder := filepath.Join(dir, "folder")
+	require.NoError(t, os.Mkdir(folder, 0o700))
 
 	tests := []struct {
 		name string
@@ -363,6 +384,7 @@ func TestOpenAPI_RefusesArgumentsItCannotUse(t *testing.T) {
 		{name: "another check", args: []any{"openapi", map[string]any{"spec": "pets.openapi.yaml", "operation": "getPet", "check": "all"}}, want: "openapi: check: expected security, content_type or request, not all"},
 		{name: "an operation the spec lacks", args: []any{"openapi", map[string]any{"spec": "pets.openapi.yaml", "operation": "GET /pets/{id}", "check": "request"}}, want: `openapi: operation: no operation "GET /pets/{id}" in ` + spec + ": expected an operationId, or a method and a path, such as GET /pets"},
 		{name: "a missing spec", args: []any{"openapi", map[string]any{"spec": "none.yaml", "operation": "getPet", "check": "request"}}, want: "openapi: spec: reading " + filepath.Join(dir, "none.yaml") + ": stat " + filepath.Join(dir, "none.yaml") + ": no such file or directory"},
+		{name: "a folder", args: []any{"openapi", map[string]any{"spec": "folder", "operation": "getPet", "check": "request"}}, want: "openapi: spec: reading " + folder + ": read " + folder + ": is a directory"},
 	}
 
 	r := matchbuild.MustNew(matchopenapi.WithMatcher()).InDir(dir)

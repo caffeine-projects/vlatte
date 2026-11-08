@@ -233,6 +233,9 @@ func TestWrite_FailsWithoutWritingWhatItCannot(t *testing.T) {
 	_, err = openapi.Write(dir, "Pets", []openapi.File{{Name: "b.mock.yaml", Mocks: []openapi.Mock{{ID: "b", Reply: openapi.Reply{Status: 200, Body: math.NaN()}}}}})
 	require.ErrorContains(t, err, "openapi: writing b.mock.yaml: ")
 
+	_, err = openapi.Write(dir, "Pets", []openapi.File{{Name: "c.openapi.yaml", Data: 1}})
+	require.EqualError(t, err, "openapi: writing c.openapi.yaml: config: int is not a value of a document")
+
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "a.mock.yaml"), 0o700))
 	_, err = openapi.Write(dir, "Pets", ok)
 	require.ErrorContains(t, err, "openapi: reading a.mock.yaml: ")
