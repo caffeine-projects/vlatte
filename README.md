@@ -55,7 +55,7 @@ VLatte starts real HTTP and gRPC servers that answer the way you tell them to. S
 The library, for Go 1.27 or later:
 
 ```sh
-go get github.com/caffeine-projects/vlatte@v1.1.0
+go get github.com/caffeine-projects/vlatte@v1.2.0
 ```
 
 The CLI, with Homebrew, an archive from [GitHub Releases](https://github.com/caffeine-projects/vlatte/releases), Go, or Docker:
@@ -69,7 +69,7 @@ brew install caffeine-projects/tap/vlatte
 ### Go
 
 ```sh
-go install github.com/caffeine-projects/vlatte/cmd/vlatte@v1.1.0
+go install github.com/caffeine-projects/vlatte/cmd/vlatte@v1.2.0
 ```
 
 ### Docker

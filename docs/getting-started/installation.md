@@ -9,7 +9,7 @@ The Go and archive commands below pin a release version for repeatable builds.
 Requires Go 1.27 or later.
 
 ```sh
-go get github.com/caffeine-projects/vlatte@v1.1.0
+go get github.com/caffeine-projects/vlatte@v1.2.0
 ```
 
 Import the packages you use: `mockhttp` for HTTP, `mockgrpc` for gRPC, and `match` for matchers.
@@ -46,7 +46,7 @@ Homebrew installs the latest stable release. Run `vlatte version` to check the v
 [GitHub Releases](https://github.com/caffeine-projects/vlatte/releases) has an archive for Linux, macOS and Windows, on `amd64` and `arm64`. Each holds the `vlatte` binary, which needs nothing else. This example installs the Linux `amd64` archive into your user's executable directory:
 
 ```sh
-VERSION=v1.1.0
+VERSION=v1.2.0
 curl -fsSL "https://github.com/caffeine-projects/vlatte/releases/download/$VERSION/vlatte_${VERSION#v}_linux_amd64.tar.gz" | tar -xz vlatte
 install -d "$HOME/.local/bin"
 install -m 755 vlatte "$HOME/.local/bin/vlatte"
@@ -61,7 +61,7 @@ Keep that directory on `PATH` in your shell configuration. For macOS, choose `da
 Requires Go 1.27 or later.
 
 ```sh
-go install github.com/caffeine-projects/vlatte/cmd/vlatte@v1.1.0
+go install github.com/caffeine-projects/vlatte/cmd/vlatte@v1.2.0
 vlatte version
 ```
 
@@ -84,7 +84,7 @@ The release workflow of this repository builds every archive and image, and sign
 An archive: check the signature of `checksums.txt`, then the archive against it.
 
 ```sh
-VERSION=v1.1.0
+VERSION=v1.2.0
 ARCHIVE="vlatte_${VERSION#v}_linux_amd64.tar.gz"
 gh release download "$VERSION" -R caffeine-projects/vlatte -p checksums.txt -p checksums.txt.sigstore.json -p "$ARCHIVE"
 
