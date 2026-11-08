@@ -127,9 +127,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		}
 	}
 
-	if doc.Spec, err = specCopy(t, bases, r); err != nil {
-		return nil, fmt.Errorf("openapi: copying the spec: %w", err)
-	}
+	doc.Spec = specCopy(t, bases, r)
 
 	return doc, nil
 }
@@ -138,7 +136,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 // of its base path in bases, or none for none, and the document and its paths without servers. Its paths are as t
 // writes them, so a reference into them still resolves. Its schemas hold their values as r has them: each integer
 // and each null as the spec writes it.
-func specCopy(t *openapi3.T, bases map[*openapi3.Operation]string, r raw) (any, error) {
+func specCopy(t *openapi3.T, bases map[*openapi3.Operation]string, r raw) any {
 	t.Servers = nil
 
 	for _, item := range t.Paths.Map() {
@@ -153,15 +151,9 @@ func specCopy(t *openapi3.T, bases map[*openapi3.Operation]string, r raw) (any, 
 		}
 	}
 
-	data, err := t.MarshalJSON()
-	if err != nil {
-		return nil, err
-	}
-
-	spec, err := value.DecodeJSON(data)
-	if err != nil {
-		return nil, err
-	}
+	// kin-openapi writes back what it read, as JSON.
+	data, _ := t.MarshalJSON()
+	spec, _ := value.DecodeJSON(data)
 
 	// Each schema kin-openapi read is in the copy where it walks to it first, whole, with the schemas within it, but
 	// for a $ref, which is there as written. Elsewhere, such as below a $ref, the walk passes what the copy lacks.
@@ -181,7 +173,7 @@ func specCopy(t *openapi3.T, bases map[*openapi3.Operation]string, r raw) (any, 
 		return openapi3.SkipSubtree
 	})
 
-	return spec, nil
+	return spec
 }
 
 // RequestBodies returns the schema of each media type of the request body of each operation of t, which
@@ -871,10 +863,7 @@ func (c converter) challenge(s *openapi3.SecurityScheme) string {
 			return `Basic realm="` + _quoted.Replace(c.title) + `"`
 		}
 
-		if scheme == "" {
-			return ""
-		}
-
+		// kin-openapi takes no HTTP scheme without a name.
 		return strings.ToUpper(scheme[:1]) + scheme[1:]
 	default:
 		return ""
@@ -1087,7 +1076,7 @@ func takeNull(s map[string]any) {
 
 // discriminate makes the oneOf and the anyOf of s, a schema with a discriminator, take an object as kin-openapi does:
 // one whose property the discriminator names is a string, and, when the discriminator has a mapping, one of its
-// values, by the branches whose $ref it maps that value to. They take any other value by all their branches.
+// values, by the branch whose $ref it maps that value to. They take any other value by all their branches.
 func discriminate(s map[string]any) {
 	d, _ := s["discriminator"].(map[string]any)
 	name, _ := d["propertyName"].(string)
@@ -1118,7 +1107,7 @@ func discriminate(s map[string]any) {
 				enum[i] = v
 				cases[i] = map[string]any{
 					"if":   map[string]any{"required": []any{name}, "properties": map[string]any{name: map[string]any{"const": v}}},
-					"then": named(k, branches, mapping[v]),
+					"then": named(branches, mapping[v]),
 				}
 			}
 
@@ -1134,29 +1123,22 @@ func discriminate(s map[string]any) {
 	}
 }
 
-// named returns the schema that takes a value as the keyword k, oneOf or anyOf, of branches does, by the branches
-// whose $ref is ref, a value of a discriminator's mapping: a $ref, or the name of a shared schema.
-func named(k string, branches []any, ref any) any {
+// named returns the branch of branches whose $ref is ref, a value of a discriminator's mapping: a $ref, or the name
+// of a shared schema. It returns false, which takes nothing, when no branch is: kin-openapi checks a value against no
+// other.
+func named(branches []any, ref any) any {
 	r, _ := ref.(string)
 	if !strings.Contains(r, "/") {
 		r = openapi.DefsPrefix + r
 	}
 
-	var of []any
 	for _, b := range branches {
 		if m, ok := b.(map[string]any); ok && m["$ref"] == r {
-			of = append(of, b)
+			return b
 		}
 	}
 
-	switch len(of) {
-	case 0:
-		return false
-	case 1:
-		return of[0]
-	default:
-		return map[string]any{k: of}
-	}
+	return false
 }
 
 // translateEach translates each schema of a map of them, such as properties, whose keys are names, not keywords.

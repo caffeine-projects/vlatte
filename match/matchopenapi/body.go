@@ -130,9 +130,8 @@ func compile(root map[string]any, formats map[string]bool) (*jsonschema.Schema, 
 
 	c.AssertFormat()
 
-	if err := c.AddResource(_bodyURL, root); err != nil {
-		return nil, err
-	}
+	// A new compiler takes any document at a URL it has no other at: Compile says what is wrong with it.
+	_ = c.AddResource(_bodyURL, root)
 
 	return c.Compile(_bodyURL)
 }

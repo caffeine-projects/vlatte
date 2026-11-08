@@ -4,7 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 func TestOpenAPI_ChecksABodyAgainstTheValuesItsSchemaWrites(t *testing.T) {
@@ -157,12 +160,14 @@ paths:
                 day: {type: string, format: date}
                 count: {type: integer, format: int32}
                 total: {type: integer, format: int64}
+                ratio: {type: number, format: int32}
                 contact: {type: string, format: email}
       responses: {"201": {description: Created}}
 `)
 	post := build(t, dir, "POST /events", "request")
 
-	got, messages := match(t, post, request(t, "POST", "/events", "application/json", `{"day": "2026-11-08", "count": 1, "contact": "x"}`))
+	// A number that isn't whole is of no integer format: kin-openapi checks it by the formats of numbers.
+	got, messages := match(t, post, request(t, "POST", "/events", "application/json", `{"day": "2026-11-08", "count": 1, "ratio": 1.5, "contact": "x"}`))
 	require.True(t, got)
 	require.Empty(t, messages)
 
@@ -242,6 +247,59 @@ components:
 	}
 }
 
+func TestOpenAPI_ReadsADiscriminatorAsKinOpenAPIDoes(t *testing.T) {
+	// A mapping may name a shared schema by its name alone, and one that isn't a branch takes nothing; without a
+	// mapping, the discriminator asks only for its property, a string, and every branch is checked.
+	dir := writeSpec(t, `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /named:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf: [{$ref: "#/components/schemas/Cat"}, {$ref: "#/components/schemas/Dog"}]
+              discriminator: {propertyName: kind, mapping: {cat: Cat, cow: "#/components/schemas/Cow"}}
+      responses: {"201": {description: Created}}
+  /unmapped:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf: [{$ref: "#/components/schemas/Cat"}, {$ref: "#/components/schemas/Dog"}]
+              discriminator: {propertyName: kind}
+      responses: {"201": {description: Created}}
+components:
+  schemas:
+    Cat: {type: object, required: [kind], properties: {kind: {type: string}, lives: {type: integer}}}
+    Dog: {type: object, required: [kind], properties: {kind: {type: string}, bark: {type: string}}}
+    Cow: {type: object}
+`)
+
+	tests := []struct {
+		path string
+		body string
+		want []string
+	}{
+		{path: "/named", body: `{"kind": "cat", "lives": 9}`},
+		{path: "/named", body: `{"kind": "cow"}`, want: []string{"body: false schema"}},
+		{path: "/unmapped", body: `{"kind": 1}`, want: []string{"body at /kind: got number, want string", "body: 'oneOf' failed, none matched"}},
+		{path: "/unmapped", body: `{"lives": 9}`, want: []string{"body: 'oneOf' failed, none matched", "body: missing property 'kind'"}},
+		{path: "/unmapped", body: `{"kind": "cat", "lives": 9}`, want: []string{"body: 'oneOf' failed, subschemas 0, 1 matched"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path+" "+tt.body, func(t *testing.T) {
+			got, messages := match(t, build(t, dir, "POST "+tt.path, "request"), request(t, "POST", tt.path, "application/json", tt.body))
+			require.Equal(t, tt.want == nil, got)
+			require.Equal(t, tt.want, messages)
+		})
+	}
+}
+
 func TestOpenAPI_TakesNullForAnOpenAPI30SchemaThatIsNullable(t *testing.T) {
 	// kin-openapi takes null for a nullable schema of OpenAPI 3.0 before any other keyword: its enum, or the allOf
 	// that nullable references are written with.
@@ -293,17 +351,22 @@ paths:
               properties:
                 count: {type: integer, format: int32}
                 total: {type: number, format: int32}
+                maybe: {type: integer, nullable: true, format: int32}
+                any: {format: int32}
       responses: {"201": {description: Created}}
 `)
 	post := build(t, dir, "POST /events", "request")
 
-	got, messages := match(t, post, request(t, "POST", "/events", "application/json", `{"count": 1, "total": 3000000000}`))
+	got, messages := match(t, post, request(t, "POST", "/events", "application/json", `{"count": 1, "total": 3000000000, "any": 3000000000}`))
 	require.True(t, got)
 	require.Empty(t, messages)
 
-	got, messages = match(t, post, request(t, "POST", "/events", "application/json", `{"count": 3000000000}`))
+	got, messages = match(t, post, request(t, "POST", "/events", "application/json", `{"count": 3000000000, "maybe": 3000000000}`))
 	require.False(t, got)
-	require.Equal(t, []string{"body at /count: 3000000000 is not valid int32: value should be between -2147483648 and 2147483647"}, messages)
+	require.Equal(t, []string{
+		"body at /count: 3000000000 is not valid int32: value should be between -2147483648 and 2147483647",
+		"body at /maybe: 3000000000 is not valid int32: value should be between -2147483648 and 2147483647",
+	}, messages)
 }
 
 func TestOpenAPI_ChecksWithKinOpenAPIABodyWhoseSchemaDoesNotCompile(t *testing.T) {
@@ -323,17 +386,103 @@ paths:
         required: true
         content:
           application/json: {schema: {$ref: "#/paths/~1plain/post/requestBody/content/text~1plain/schema"}}
+          application/xml: {schema: {$ref: "#/paths/~1plain/post/requestBody/content/text~1plain/schema"}}
+      responses: {"204": {description: Saved}}
+  /tags:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {note: {$ref: "#/paths/~1plain/post/requestBody/content/text~1plain/schema"}}}
       responses: {"204": {description: Saved}}
 `)
 	post := build(t, dir, "POST /notes", "request")
+	tags := build(t, dir, "POST /tags", "request")
 
-	got, messages := match(t, post, request(t, "POST", "/notes", "application/json", `"abc"`))
+	tests := []struct {
+		name        string
+		matcher     vlatte.Matcher
+		path        string
+		contentType string
+		body        string
+		want        []string
+	}{
+		{name: "a body that keeps it", matcher: post, path: "/notes", contentType: "application/json", body: `"abc"`},
+		{name: "a body that breaks it", matcher: post, path: "/notes", contentType: "application/json", body: `"abcdef"`, want: []string{"body: maximum string length is 3"}},
+		{name: "a property that breaks it", matcher: tags, path: "/tags", contentType: "application/json", body: `{"note": "abcdef"}`, want: []string{"body at /note: maximum string length is 3"}},
+		{name: "a body that isn't JSON", matcher: post, path: "/notes", contentType: "application/json", body: `"abc`, want: []string{"body: failed to decode request body: unexpected EOF"}},
+		{name: "a body kin-openapi reads nothing of", matcher: post, path: "/notes", contentType: "application/xml", body: "<note/>"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, messages := match(t, tt.matcher, request(t, "POST", tt.path, tt.contentType, tt.body))
+			require.Equal(t, tt.want == nil, got)
+			require.Equal(t, tt.want, messages)
+		})
+	}
+}
+
+func TestOpenAPI_ChecksANumberFormatDefinedForKinOpenAPI(t *testing.T) {
+	// A program that defines a format of numbers for kin-openapi has the mocks check it too.
+	openapi3.DefineNumberFormatValidator("percent", openapi3.NewRangeFormatValidator(0.0, 100.0))
+	t.Cleanup(func() { delete(openapi3.SchemaNumberFormats, "percent") })
+
+	dir := writeSpec(t, `
+openapi: 3.1.0
+info: {title: Scores, version: "1"}
+paths:
+  /scores:
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {type: number, format: percent}}}}
+      responses: {"204": {description: Saved}}
+`)
+	post := build(t, dir, "POST /scores", "request")
+
+	got, messages := match(t, post, request(t, "POST", "/scores", "application/json", "99.5"))
 	require.True(t, got)
 	require.Empty(t, messages)
 
-	got, messages = match(t, post, request(t, "POST", "/notes", "application/json", `"abcdef"`))
+	got, messages = match(t, post, request(t, "POST", "/scores", "application/json", "100.5"))
 	require.False(t, got)
-	require.Equal(t, []string{"body: maximum string length is 3"}, messages)
+	require.Equal(t, []string{"body: 100.5 is not valid percent: value should be between 0 and 100"}, messages)
+}
+
+func TestOpenAPI_WritesTheBoundsAndValuesABodyBreaksAsTheSpecWritesThem(t *testing.T) {
+	// A bound is written exactly, whole or not, and an enum of null as JSON writes it, unless it lists an object,
+	// which a message has no room for.
+	spec := `
+openapi: 3.1.0
+info: {title: Bounds, version: "1"}
+paths:
+  /above: {post: {requestBody: {content: {application/json: {schema: {exclusiveMinimum: 0}}}}, responses: {"204": {description: Saved}}}}
+  /below: {post: {requestBody: {content: {application/json: {schema: {exclusiveMaximum: 1.5}}}}, responses: {"204": {description: Saved}}}}
+  /thirds: {post: {requestBody: {content: {application/json: {schema: {multipleOf: 3}}}}, responses: {"204": {description: Saved}}}}
+  /values: {post: {requestBody: {content: {application/json: {schema: {enum: [null, 1, "a"]}}}}, responses: {"204": {description: Saved}}}}
+  /objects: {post: {requestBody: {content: {application/json: {schema: {enum: [null, {a: 1}]}}}}, responses: {"204": {description: Saved}}}}
+`
+	dir := writeSpec(t, spec)
+
+	tests := []struct {
+		path string
+		body string
+		want string
+	}{
+		{path: "/above", body: "0", want: "body: exclusiveMinimum: got 0, want 0"},
+		{path: "/below", body: "2.5", want: "body: exclusiveMaximum: got 2.5, want 1.5"},
+		{path: "/thirds", body: "4", want: "body: multipleOf: got 4, want 3"},
+		{path: "/values", body: "2", want: "body: value must be one of null, 1, 'a'"},
+		{path: "/objects", body: "2", want: "body: 'enum' failed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got, messages := match(t, build(t, dir, "POST "+tt.path, "request"), request(t, "POST", tt.path, "application/json", tt.body))
+			require.False(t, got)
+			require.Equal(t, []string{tt.want}, messages)
+		})
+	}
 }
 
 func TestOpenAPI_LeavesUncheckedAPatternGoCannotCompile(t *testing.T) {

@@ -611,6 +611,23 @@ func TestOpenAPI_RefusesArgumentsItCannotUse(t *testing.T) {
 	require.ErrorContains(t, err, "openapi: spec: loading "+filepath.Join(dir, "bad.yaml")+": ")
 }
 
+func TestOpenAPI_RefusesASpecOfAWorkingDirectoryThatIsGone(t *testing.T) {
+	// A spec named from the working directory, as a mock built in Go names it, is made absolute from it: without one,
+	// the matcher fails, naming the spec, instead of loading another file.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.Remove(dir))
+
+	if _, err := os.Getwd(); err == nil {
+		t.Skip("the OS still names a working directory that is gone, as macOS does")
+	}
+
+	_, err := matchbuild.MustNew(matchopenapi.WithMatcher()).BuildMatcher([]any{
+		"openapi", map[string]any{"spec": "pets.openapi.yaml", "operation": "getPet", "check": "request"},
+	})
+	require.ErrorContains(t, err, "openapi: spec: resolving pets.openapi.yaml: ")
+}
+
 func TestOpenAPI_DescribesItselfWithItsSpecAbsolute(t *testing.T) {
 	// The admin API lists a mock by its description, which may load back from another folder.
 	dir := writeSpec(t, _pets)

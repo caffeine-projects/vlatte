@@ -139,7 +139,7 @@ func template(path string) *Route {
 		if _wholeParam.MatchString(seg) {
 			rt.segments = append(rt.segments, segment{text: seg[1 : len(seg)-1], param: true})
 		} else {
-			rt.segments = append(rt.segments, segment{text: unescape(seg)})
+			rt.segments = append(rt.segments, segment{text: Decode(seg)})
 		}
 	}
 
@@ -160,7 +160,7 @@ func (rt *Route) Match(u *url.URL) (map[string]string, bool) {
 
 		params := make(map[string]string)
 		for i, part := range parts {
-			part = unescape(part)
+			part = Decode(part)
 
 			switch s := rt.segments[i]; {
 			case !s.param:
@@ -241,14 +241,4 @@ func escapePercent(s string) string {
 // isHex reports whether c is a hexadecimal digit.
 func isHex(c byte) bool {
 	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
-}
-
-// unescape returns s, a segment of a path, decoded, or as it is when it holds an escape that isn't one, as a mock's
-// path_template reads it.
-func unescape(s string) string {
-	if d, err := url.PathUnescape(s); err == nil {
-		return d
-	}
-
-	return s
 }

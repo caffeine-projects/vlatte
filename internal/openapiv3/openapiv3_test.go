@@ -1131,6 +1131,27 @@ components:
 	}, got)
 }
 
+func TestLoad_AsksNoCredentialOfASchemeTheSpecDoesNotDeclare(t *testing.T) {
+	// kin-openapi doesn't check that a requirement of OpenAPI 3.2 names a declared scheme: one that doesn't has no
+	// challenge, and the requirement's other schemes keep theirs.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.2.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      security: [{missing: []}, {bearer: []}]
+      responses: {"200": {description: OK}}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer}
+`})
+
+	require.Len(t, doc.Operations, 1)
+	require.True(t, doc.Operations[0].Secured)
+	require.Equal(t, []string{"Bearer"}, doc.Operations[0].Challenges)
+}
+
 func TestLoad_CopiesTheSpecWithEachOperationUnderItsBasePath(t *testing.T) {
 	// The mocks that refuse a request that breaks the spec check it against this copy, written beside them: one
 	// file, whose operations answer where their mocks do, with the servers of their path and the document gone.

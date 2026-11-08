@@ -98,6 +98,7 @@ func TestNewExample_MatchesOnlyTheRequestsOfItsRoute(t *testing.T) {
 		route  string
 		ok     bool
 	}{
+		{name: "a path without parameters", base: "/v1", path: "/pets", values: map[string]string{"{id}": "1"}, kind: pathtemplate.Literal, route: "/v1/pets", ok: true},
 		{name: "a value", base: "/v 1", path: "/pets/{id}", values: map[string]string{"{id}": "a b"}, kind: pathtemplate.Segments, route: "/v%201/pets/a%20b", ok: true},
 		{name: "a value with a /", path: "/pets/{id}", values: map[string]string{"{id}": "a/b%"}, kind: pathtemplate.Segments, route: "/pets/a%2Fb%25", ok: true},
 		{name: "a value like a parameter", path: "/pets/{id}", values: map[string]string{"{id}": "{x}"}, kind: pathtemplate.Segments, route: "/pets/%7Bx%7D", ok: true},

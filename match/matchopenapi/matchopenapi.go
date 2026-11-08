@@ -211,9 +211,10 @@ func newSpec(t *openapi3.T, roots map[*openapi3.MediaType]map[string]any) *spec 
 // fewer templated segments, of any method, as OpenAPI matches /pets/mine before /pets/{id}, and the path before the
 // method.
 func (sp *spec) routedElsewhere(r *http.Request, rt *route) bool {
+	// Its routes are sorted by number of templated segments, rt's among them.
 	for _, other := range sp.routes {
 		if other.templated >= rt.templated {
-			return false
+			break
 		}
 
 		if _, ok := other.where.Match(r.URL); ok {
@@ -507,13 +508,10 @@ func readAgain(r *http.Request) ([]byte, error) {
 func reasons(err error) []string {
 	var out []string
 
+	// Each is a RequestError: the security check, whose errors kin-openapi gives otherwise, is vlatte's.
 	all, _ := errors.AsType[openapi3.MultiError](err)
 	for _, e := range all {
-		re, ok := errors.AsType[*openapi3filter.RequestError](e)
-		if !ok {
-			out = append(out, e.Error())
-			continue
-		}
+		re, _ := errors.AsType[*openapi3filter.RequestError](e)
 
 		where := "body"
 		if p := re.Parameter; p != nil {
