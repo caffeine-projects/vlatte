@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
@@ -83,8 +84,10 @@ components:
 			},
 			"discriminator": map[string]any{"propertyName": "name", "mapping": map[string]any{"rex": "#/$defs/Pet"}},
 		}},
+		// TestLoad_CopiesTheSpecWithEachOperationUnderItsBasePath checks the copy.
+		Spec: doc.Spec,
 		Operations: []openapi.Operation{{
-			Method: "GET", Path: "/pets/{id}", BasePath: "/v1", Summary: "Get a pet",
+			Method: "GET", Path: "/pets/{id}", BasePath: "/v1", Summary: "Get a pet", HasInput: true,
 			PathParams: []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{{Name: "rex", Value: "1"}, {Value: "9"}}}},
 			Responses: []openapi.Response{
 				{
@@ -195,7 +198,7 @@ Big: {value: {id: 9007199254740999}}
 	})
 
 	require.Equal(t, []openapi.Operation{{
-		Method: "GET", Path: "/ids/{id}",
+		Method: "GET", Path: "/ids/{id}", HasInput: true,
 		PathParams: []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{
 			{Value: int64(9007199254740993)}, {Value: int64(9007199254740995)}, {Value: int64(9007199254740997)},
 		}}},
@@ -207,6 +210,265 @@ Big: {value: {id: 9007199254740999}}
 					{Name: "big", Value: map[string]any{"id": int64(9007199254740999)}}, {Name: "none", Value: nil},
 				}},
 				{MediaType: "text/plain", Examples: []openapi.Example{{Value: nil}}},
+			},
+		}},
+	}}, doc.Operations)
+}
+
+func TestLoad_ReadsTheDataAndTheSerializedValueOfAnExampleOfOpenAPI32(t *testing.T) {
+	// OpenAPI 3.2 gives an example as data, dataValue, which a JSON body, a parameter or a header is, or as sent,
+	// serializedValue, which another body is, such as text: a mock takes the one its body or its path is. Sent, a
+	// parameter has its style's delimiters and a JSON body is text: no mock takes those as data.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.2.0
+info: {title: Trains, version: "1"}
+paths:
+  /trips/{id}:
+    get:
+      parameters:
+        - {name: id, in: path, required: true, style: label, schema: {type: string}, examples: {berlin: {dataValue: b1}, sent: {serializedValue: .b2}}}
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: object}
+              examples:
+                big: {dataValue: {id: 9007199254740993}}
+                both: {$ref: "#/components/examples/Both"}
+                sent: {serializedValue: '{"a": 2}'}
+            application/problem+json:
+              examples:
+                both: {$ref: "#/components/examples/Both"}
+            text/plain:
+              examples:
+                sent: {dataValue: hello, serializedValue: "hello\n"}
+components:
+  examples:
+    Both: {dataValue: {a: 1}, serializedValue: '{"a": 1}'}
+`})
+
+	require.Equal(t, []openapi.Operation{{
+		Method: "GET", Path: "/trips/{id}", HasInput: true,
+		PathParams: []openapi.Parameter{{Name: "id", Style: "label", Examples: []openapi.Example{{Name: "berlin", Value: "b1"}}}},
+		Responses: []openapi.Response{{
+			Status: "200",
+			Content: []openapi.Content{
+				{MediaType: "application/json", Schema: map[string]any{"type": "object"}, Examples: []openapi.Example{
+					{Name: "big", Value: map[string]any{"id": int64(9007199254740993)}}, {Name: "both", Value: map[string]any{"a": int64(1)}},
+				}},
+				{MediaType: "application/problem+json", Examples: []openapi.Example{{Name: "both", Value: map[string]any{"a": int64(1)}}}},
+				{MediaType: "text/plain", Examples: []openapi.Example{{Name: "sent", Value: "hello\n", Serialized: true}}},
+			},
+		}},
+	}}, doc.Operations)
+}
+
+func TestLoad_LeavesOutADataValueOutsideJSON(t *testing.T) {
+	// Outside JSON, a value is its data serialized in the media type, which the mocks don't do: XML wraps text in an
+	// element and escapes it. A dataValue there gives nothing to send, in a body, a header or a parameter: it is left
+	// out, with a warning, once for an example several share, and a serializedValue beside it is what is sent. One at
+	// an externalValue is left out as such: a serializedValue would break it.
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
+openapi: 3.2.0
+info: {title: XML Data, version: "1"}
+paths:
+  /greetings/{id}:
+    get:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          content:
+            text/plain:
+              examples: {data: {dataValue: b2}, sent: {serializedValue: b3}}
+          examples: {own: {dataValue: b1}}
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Note:
+              content:
+                text/plain:
+                  examples: {data: {dataValue: hi}}
+          content:
+            application/xml:
+              schema: {type: string, xml: {name: greeting}}
+              examples:
+                data: {dataValue: 'a & b'}
+                external: {dataValue: 'a & b', externalValue: https://x.example.com/greeting.xml}
+                sent: {dataValue: 'a & b', serializedValue: '<greeting>a &amp; b</greeting>'}
+                shared: {$ref: "#/components/examples/Data"}
+            text/plain:
+              examples:
+                data: {dataValue: hello}
+                shared: {$ref: "#/components/examples/Data"}
+components:
+  examples:
+    Data: {dataValue: hi}
+`})
+
+	op := doc.Operations[0]
+	require.Equal(t, []openapi.Parameter{{
+		Name: "id", Style: "simple", MediaType: "text/plain", Examples: []openapi.Example{{Name: "sent", Value: "b3", Serialized: true}},
+	}}, op.PathParams)
+	require.Equal(t, []openapi.Header{{Name: "X-Note", MediaType: "text/plain"}}, op.Responses[0].Headers)
+	require.Equal(t, []openapi.Content{
+		{
+			MediaType: "application/xml", Schema: map[string]any{"type": "string", "xml": map[string]any{"name": "greeting"}},
+			Examples: []openapi.Example{{Name: "sent", Value: "<greeting>a &amp; b</greeting>", Serialized: true}},
+		},
+		{MediaType: "text/plain"},
+	}, op.Responses[0].Content)
+
+	at := "spec.yaml#/paths/~1greetings~1{id}/get/"
+	message := "the example is data, which the mocks don't serialize outside JSON: left out: give a serializedValue"
+	require.Equal(t, []map[string]any{
+		{"level": "warn", "example": at + "parameters/0/examples/own/dataValue", "message": message},
+		{"level": "warn", "example": at + "parameters/0/content/text~1plain/examples/data/dataValue", "message": message},
+		{"level": "warn", "example": at + "responses/200/headers/X-Note/content/text~1plain/examples/data/dataValue", "message": message},
+		{"level": "warn", "example": at + "responses/200/content/application~1xml/examples/data/dataValue", "message": message},
+		{"level": "warn", "example": "spec.yaml#/components/examples/Data/dataValue", "message": message},
+		{"level": "warn", "example": at + "responses/200/content/text~1plain/examples/data/dataValue", "message": message},
+	}, warnings)
+}
+
+func TestLoad_FailsOnAnExampleOfOpenAPI32TheSpecForbids(t *testing.T) {
+	// An example says its value one way, or the same value as data and as sent: two values would leave a mock
+	// choosing between them.
+	tests := []struct {
+		name    string
+		version string // the spec's OpenAPI version, 3.2.0 when not set
+		example string
+		want    string
+	}{
+		{name: "a value and a dataValue", example: "{value: 1, dataValue: 1}", want: _invalidA + "value and dataValue are mutually exclusive"},
+		{name: "a value and a serializedValue", example: "{value: \"1\", serializedValue: \"1\"}", want: _invalidA + "value and serializedValue are mutually exclusive"},
+		{
+			name: "an externalValue and a serializedValue", example: "{externalValue: https://x.example.com/a.json, serializedValue: \"1\"}",
+			want: _invalidA + "externalValue and serializedValue are mutually exclusive",
+		},
+		{name: "a serializedValue that isn't text", example: "{serializedValue: 1}", want: _invalidA + "serializedValue: expected a string, not 1"},
+	}
+
+	nop := zerolog.Nop()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadFiles(t, map[string]string{"spec.yaml": "openapi: " + cmp.Or(tt.version, "3.2.0") + "\ninfo: {title: Trains, version: \"1\"}\npaths: {}\n" +
+				"components: {examples: {A: " + tt.example + "}}\n"}, &nop)
+			require.ErrorIs(t, err, openapi.ErrInvalid)
+			require.EqualError(t, err, tt.want)
+		})
+	}
+
+	t.Run("the first of several, on every run", func(t *testing.T) {
+		files := map[string]string{"spec.yaml": "openapi: 3.2.0\ninfo: {title: Trains, version: \"1\"}\npaths: {}\n" +
+			"components: {examples: {C: {value: 1, dataValue: 1}, A: {value: 1, dataValue: 1}, B: {value: 1, dataValue: 1}}}\n"}
+
+		for range 10 {
+			_, err := loadFiles(t, files, &nop)
+			require.EqualError(t, err, _invalidA+"value and dataValue are mutually exclusive")
+		}
+	})
+}
+
+func TestLoad_IgnoresTheValuesOfAnExampleOfOpenAPI32BeforeIt(t *testing.T) {
+	// Before OpenAPI 3.2, dataValue and serializedValue are fields OpenAPI doesn't define: the mocks ignore them, as
+	// any such field, and Load says so.
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Trains, version: "1"}
+paths:
+  /trips:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: object}
+              examples: {data: {dataValue: {a: 1}}, value: {value: {a: 2}}}
+            text/plain:
+              schema: {type: string}
+              examples: {sent: {serializedValue: hello}}
+`})
+
+	require.Equal(t, []openapi.Content{
+		{MediaType: "application/json", Schema: map[string]any{"type": "object"}, Examples: []openapi.Example{{Name: "value", Value: map[string]any{"a": int64(2)}}}},
+		{MediaType: "text/plain", Schema: map[string]any{"type": "string"}},
+	}, doc.Operations[0].Responses[0].Content)
+
+	at := "spec.yaml#/paths/~1trips/get/responses/200/content/"
+	require.Equal(t, []map[string]any{
+		{"level": "warn", "example": at + "application~1json/examples/data", "message": "extra sibling fields: [dataValue]: ignored"},
+		{"level": "warn", "example": at + "text~1plain/examples/sent", "message": "extra sibling fields: [serializedValue]: ignored"},
+	}, warnings)
+}
+
+// _invalidA starts the error of a spec whose example A of its components OpenAPI 3.2 forbids.
+const _invalidA = "openapi: invalid spec: invalid example spec.yaml#/components/examples/A: "
+
+func TestLoad_LoadsASpecOfOpenAPI32WithTheFieldsItAdds(t *testing.T) {
+	// kin-openapi reads some of what OpenAPI 3.2 adds, such as the query method, and rejects the rest as unknown
+	// fields: a spec that uses them, such as the name of a server, which no mock needs, still makes its mocks.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.2.0
+$self: https://trains.example.com/openapi.yaml
+info: {title: Trains, version: "1"}
+servers: [{url: https://trains.example.com, name: Production}]
+tags: [{name: trips, summary: Trips, kind: nav}, {name: live, parent: trips}]
+paths:
+  /trips:
+    servers: [{url: https://trains.example.com, name: Trips}]
+    get:
+      servers: [{url: https://trains.example.com, name: Listing}]
+      responses:
+        "200":
+          summary: The trips
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                discriminator: {propertyName: kind, defaultMapping: "#/components/schemas/Trip"}
+                xml: {nodeType: element}
+            multipart/mixed:
+              prefixEncoding: [{contentType: text/plain}]
+              itemEncoding: {contentType: application/json}
+            multipart/form-data:
+              encoding:
+                form: {contentType: multipart/form-data, encoding: {a: {contentType: text/plain}}}
+                mixed: {contentType: multipart/mixed, prefixEncoding: [{contentType: text/plain}], itemEncoding: {contentType: text/plain}}
+components:
+  schemas:
+    Trip: {type: object}
+  mediaTypes:
+    Text: {schema: {type: string}}
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      deprecated: true
+      oauth2MetadataUrl: https://trains.example.com/.well-known/oauth-authorization-server
+      flows:
+        deviceAuthorization:
+          deviceAuthorizationUrl: https://trains.example.com/device
+          tokenUrl: https://trains.example.com/token
+          scopes: {}
+`})
+
+	require.Equal(t, []openapi.Operation{{
+		Method: "GET", Path: "/trips",
+		Responses: []openapi.Response{{
+			Status: "200",
+			Content: []openapi.Content{
+				{MediaType: "application/json", Schema: map[string]any{
+					"type":          "object",
+					"discriminator": map[string]any{"propertyName": "kind", "defaultMapping": "#/components/schemas/Trip"},
+					"xml":           map[string]any{"nodeType": "element"},
+				}},
+				{MediaType: "multipart/form-data"},
+				{MediaType: "multipart/mixed"},
 			},
 		}},
 	}}, doc.Operations)
@@ -328,8 +590,8 @@ paths:
 
 	param := []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{{Value: "7"}}}}
 	require.Equal(t, []openapi.Operation{
-		{Method: "GET", Path: "/a/{id}", PathParams: param, Responses: []openapi.Response{{Status: "204"}}},
-		{Method: "GET", Path: "/b/{id}", PathParams: param, Responses: []openapi.Response{{Status: "204"}}},
+		{Method: "GET", Path: "/a/{id}", HasInput: true, PathParams: param, Responses: []openapi.Response{{Status: "204"}}},
+		{Method: "GET", Path: "/b/{id}", HasInput: true, PathParams: param, Responses: []openapi.Response{{Status: "204"}}},
 	}, sortedOperations(doc))
 }
 
@@ -792,6 +1054,265 @@ paths:
 		{"level": "warn", "path": "/pets", "message": `the servers have different paths: the mocks answer under the first one's, "/v2"`},
 		{"level": "warn", "method": "POST", "path": "/pets", "message": `the servers have different paths: the mocks answer under the first one's, "/v3"`},
 	}, warnings)
+}
+
+func TestLoad_ReadsWhatAnOperationAsksOfARequest(t *testing.T) {
+	// The mocks that refuse a request that breaks the spec are written from these: a 401 for an operation that
+	// takes no request without credentials, with the challenges of its schemes, a 415 for one with a body, and a 400
+	// for one with anything a request can break.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pet "store", version: "1"}
+security: [{bearer: []}]
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters: [{name: limit, in: query, schema: {type: integer}}]
+      responses: {"200": {description: OK}}
+    post:
+      security: [{basic: []}, {key: []}]
+      requestBody:
+        content:
+          application/xml: {schema: {type: string}}
+          application/json: {schema: {type: object}}
+      responses: {"201": {description: Created}}
+  /pets/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    get:
+      security: [{}, {bearer: []}]
+      responses: {"200": {description: OK}}
+    delete:
+      security: [{oauth: [write], key: []}, {oidc: []}, {digest: []}, {bearer: []}]
+      responses: {"204": {description: Deleted}}
+  /health:
+    get:
+      security: []
+      responses: {"200": {description: OK}}
+  /keys:
+    put:
+      security: [{key: []}, {tls: []}]
+      requestBody: {content: {}}
+      responses: {"204": {description: Saved}}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer, bearerFormat: JWT}
+    basic: {type: http, scheme: Basic}
+    digest: {type: http, scheme: digest}
+    key: {type: apiKey, in: header, name: X-API-Key}
+    oauth: {type: oauth2, flows: {implicit: {authorizationUrl: "https://example.com/auth", scopes: {write: Write}}}}
+    oidc: {type: openIdConnect, openIdConnectUrl: "https://example.com/.well-known/openid-configuration"}
+    tls: {type: mutualTLS}
+`})
+
+	type asks struct {
+		ID         string
+		Secured    bool
+		Challenges []string
+		Consumes   []string
+		HasInput   bool
+	}
+
+	got := make(map[string]asks, len(doc.Operations))
+	for _, op := range doc.Operations {
+		got[op.Method+" "+op.Path] = asks{op.ID, op.Secured, op.Challenges, op.Consumes, op.HasInput}
+	}
+
+	require.Equal(t, map[string]asks{
+		"GET /pets":  {ID: "listPets", Secured: true, Challenges: []string{"Bearer"}, HasInput: true},
+		"POST /pets": {Secured: true, Challenges: []string{`Basic realm="Pet \"store\""`}, Consumes: []string{"application/json", "application/xml"}, HasInput: true},
+		// An empty requirement takes a request without credentials.
+		"GET /pets/{id}": {HasInput: true},
+		// Each challenge once, in the order of the requirements.
+		"DELETE /pets/{id}": {Secured: true, Challenges: []string{"Bearer", "Digest"}, HasInput: true},
+		"GET /health":       {},
+		// An API key and a client certificate have no challenge, and a body of no media type no media type to check.
+		"PUT /keys": {Secured: true, HasInput: true},
+	}, got)
+}
+
+func TestLoad_AsksNoCredentialOfASchemeTheSpecDoesNotDeclare(t *testing.T) {
+	// kin-openapi doesn't check that a requirement of OpenAPI 3.2 names a declared scheme: one that doesn't has no
+	// challenge, and the requirement's other schemes keep theirs.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.2.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      security: [{missing: []}, {bearer: []}]
+      responses: {"200": {description: OK}}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer}
+`})
+
+	require.Len(t, doc.Operations, 1)
+	require.True(t, doc.Operations[0].Secured)
+	require.Equal(t, []string{"Bearer"}, doc.Operations[0].Challenges)
+}
+
+func TestLoad_CopiesTheSpecWithEachOperationUnderItsBasePath(t *testing.T) {
+	// The mocks that refuse a request that breaks the spec check it against this copy, written beside them: one
+	// file, whose operations answer where their mocks do, with the servers of their path and the document gone.
+	doc := load(t, map[string]string{
+		"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+servers: [{url: "https://api.example.com/v1/"}]
+paths:
+  /owners:
+    get:
+      parameters: [{name: q, in: query, schema: {$ref: "schemas.yaml#/Name"}}]
+      responses: {"200": {description: OK}}
+  /pets:
+    servers: [{url: /v2}]
+    get:
+      parameters: [{$ref: "#/paths/~1owners/get/parameters/0"}]
+      responses: {"200": {description: OK}}
+    post:
+      servers: [{url: "/my api"}]
+      responses: {"200": {description: OK}}
+  /root:
+    servers: [{url: /}]
+    get: {responses: {"200": {description: OK}}}
+`,
+		"schemas.yaml": "Name: {type: string, maxLength: 3}\n",
+	})
+
+	spec, ok := doc.Spec.(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, spec, "servers")
+
+	paths := spec["paths"].(map[string]any)
+	owners := paths["/owners"].(map[string]any)
+	pets := paths["/pets"].(map[string]any)
+	root := paths["/root"].(map[string]any)
+
+	require.NotContains(t, pets, "servers")
+	require.Equal(t, []any{map[string]any{"url": "/v1"}}, owners["get"].(map[string]any)["servers"])
+	require.Equal(t, []any{map[string]any{"url": "/v2"}}, pets["get"].(map[string]any)["servers"])
+	require.Equal(t, []any{map[string]any{"url": "/my%20api"}}, pets["post"].(map[string]any)["servers"])
+	require.NotContains(t, root["get"], "servers")
+
+	// What another file holds, or a reference into the paths names, is a component of the copy.
+	components := spec["components"].(map[string]any)
+	param := map[string]any{"name": "q", "in": "query", "schema": map[string]any{"$ref": "#/components/schemas/schemas_Name"}}
+
+	require.Equal(t, []any{param}, owners["get"].(map[string]any)["parameters"])
+	require.Equal(t, map[string]any{"type": "string", "maxLength": int64(3)}, components["schemas"].(map[string]any)["schemas_Name"])
+	require.Equal(t, []any{map[string]any{"$ref": "#/components/parameters/paths__1owners_get_parameters_0"}}, pets["get"].(map[string]any)["parameters"])
+	require.Equal(t, param, components["parameters"].(map[string]any)["paths__1owners_get_parameters_0"])
+}
+
+func TestLoad_CopiesTheSchemasOfTheSpecWithTheValuesTheyWrite(t *testing.T) {
+	// The mocks check a request against the copy: an integer past 2^53 read as a float64 is its rounded neighbor, and
+	// a const of null, which kin-openapi reads as none, takes any value. Shared schemas, those of other files and
+	// keywords beside a $ref alike.
+	doc := load(t, map[string]string{
+		"spec.yaml": `
+openapi: 3.1.0
+info: {title: Exact, version: "1"}
+paths:
+  /input:
+    post:
+      parameters: [{name: n, in: query, schema: {maximum: 9007199254740999}}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enum: {enum: [9007199254740999]}
+                none: {const: null}
+                shared: {$ref: "#/components/schemas/Shared"}
+                sibling: {$ref: "#/components/schemas/Shared", maximum: 9007199254740993}
+                other: {$ref: "other.yaml"}
+      responses: {"204": {description: Saved}}
+components:
+  schemas:
+    Shared: {type: integer, minimum: 9007199254740995}
+`,
+		"other.yaml": "{const: 9007199254740997}\n",
+	})
+
+	spec := doc.Spec.(map[string]any)
+	post := spec["paths"].(map[string]any)["/input"].(map[string]any)["post"].(map[string]any)
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+
+	param := post["parameters"].([]any)[0].(map[string]any)
+	require.Equal(t, map[string]any{"maximum": int64(9007199254740999)}, param["schema"])
+
+	body := post["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"]
+	require.Equal(t, map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"enum":    map[string]any{"enum": []any{int64(9007199254740999)}},
+			"none":    map[string]any{"const": nil},
+			"shared":  map[string]any{"$ref": "#/components/schemas/Shared"},
+			"sibling": map[string]any{"$ref": "#/components/schemas/Shared", "maximum": int64(9007199254740993)},
+			"other":   map[string]any{"$ref": "#/components/schemas/other"},
+		},
+	}, body)
+	require.Equal(t, map[string]any{"type": "integer", "minimum": int64(9007199254740995)}, schemas["Shared"])
+	require.Equal(t, map[string]any{"const": int64(9007199254740997)}, schemas["other"])
+}
+
+func TestRequestBodies_GivesTheSchemaOfABodyAsARequestSeesIt(t *testing.T) {
+	// The openapi matcher checks a body against these: the values the spec writes, an integer past 2^53 too, in JSON
+	// Schema 2020-12, as OpenAPI 3.0 means them, and without the requirement of a readOnly property, which a client
+	// needn't send. A request body the operations share is read once. A media type without a schema has none.
+	data := []byte(`
+openapi: 3.0.3
+info: {title: Bodies, version: "1"}
+paths:
+  /pets:
+    post:
+      requestBody: {$ref: "#/components/requestBodies/Pet"}
+      responses: {"201": {description: Created}}
+    put:
+      requestBody: {$ref: "#/components/requestBodies/Pet"}
+      responses: {"204": {description: Saved}}
+  /counts:
+    post:
+      requestBody:
+        content:
+          application/json: {schema: {type: integer, nullable: true, maximum: 9007199254740999, exclusiveMaximum: true}}
+          text/plain: {}
+      responses: {"204": {description: Saved}}
+components:
+  requestBodies:
+    Pet: {content: {application/json: {schema: {$ref: "#/components/schemas/Pet"}}}}
+  schemas:
+    Pet:
+      type: object
+      required: [id, kind]
+      properties:
+        id: {type: integer, readOnly: true}
+        kind: {enum: [9007199254740993]}
+`)
+
+	tt, err := openapi3.NewLoader().LoadFromData(data)
+	require.NoError(t, err)
+
+	bodies := openapiv3.RequestBodies(tt, data, &url.URL{Scheme: "file", Path: "/specs/pets.yaml"})
+	require.Len(t, bodies, 2)
+
+	pet := bodies[tt.Components.RequestBodies["Pet"].Value.Content.Get("application/json")]
+	name, ok := strings.CutPrefix(pet["$ref"].(string), "#/$defs/")
+	require.True(t, ok)
+	require.Equal(t, map[string]any{
+		"type": "object", "required": []any{"kind"},
+		"properties": map[string]any{
+			"id":   map[string]any{"type": "integer", "readOnly": true},
+			"kind": map[string]any{"enum": []any{int64(9007199254740993)}},
+		},
+	}, pet["$defs"].(map[string]any)[name])
+
+	counts := tt.Paths.Value("/counts").Post.RequestBody.Value.Content.Get("application/json")
+	require.Equal(t, map[string]any{
+		"type": []any{"integer", "null"}, "exclusiveMaximum": int64(9007199254740999), "$defs": make(map[string]any),
+	}, bodies[counts])
 }
 
 func TestLoad_ResolvesAServerURLAgainstWhereItsFileIsServed(t *testing.T) {

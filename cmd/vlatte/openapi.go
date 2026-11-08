@@ -32,12 +32,20 @@ func openapiCmd(code *int) *cobra.Command {
 		Long: `Writes a mock file for each response of each operation of an OpenAPI 3.0, 3.1 or 3.2 spec, in JSON or YAML,
 from a file or an http(s) URL. Bodies are the spec's examples, or fake values that fit their schemas, the same on
 every run. A body that isn't JSON is written as text, or as bytes when its schema says base64: give such a media type,
-XML included, a string example, as an object has no text and its mock is written disabled. Each media type of a
-response gets a mock, which answers the client whose Accept prefers it, and each operation a 406 for a client that
-takes none. Responses nothing in a request predicts, such as 503, are written disabled: the admin API enables them.
+XML included, a string example, as an object has no text and its mock is written disabled. In OpenAPI 3.2, give it a
+serializedValue, which is sent as is, base64 or not: a dataValue there is data the mocks don't serialize, and is left
+out. Each media type of a response gets a mock, which answers the client whose Accept prefers it, and each operation
+a 406 for a client that takes none. Responses nothing in a request predicts, such as 503, are written disabled: the
+admin API enables them.
 Mocks written by hand win over them. What the command does, and what the spec asks that can't be honored, is logged
 on standard error. So is an example that doesn't fit its schema, such as 12345 for a string: converted when its text
 reads as the type the schema asks, else left out.
+A request that breaks the spec gets the error its server would answer: 401 when it lacks the credential the
+operation's security asks, 415 when its body is in a media type the operation doesn't take, 400, or the 422 the
+operation declares instead, when its parameters or body don't fit their schemas, and 405 when the path has no
+operation of its method. Each answers the operation's response of its status, or else a problem body, which for a 400
+or 422 lists what the request breaks. Those mocks check the request against a copy of the spec written beside them,
+named after its title and a hash of the copy, such as Pet-Store.1a2b3c4d.openapi.yaml: keep it with them.
 Each file names the title of its spec. A rerun overwrites the files written from a spec of that title, lists those
 it no longer writes, and never touches other files: write specs that share a title to different folders.
 A spec over http(s) refers to http(s) URLs only.`,
@@ -101,9 +109,18 @@ func writeOpenAPIMocks(ctx context.Context, in, out string, level zerolog.Level,
 		return 1
 	}
 
-	mocks := 0
+	var (
+		mocks int
+		spec  string
+	)
+
 	for _, f := range files {
-		mocks += len(f.Mocks)
+		if f.Mocks == nil {
+			spec = f.Name
+			continue
+		}
+
+		mocks++
 	}
 
 	log.Info().Int("mocks", mocks).Int("warnings", warnings).Stringer("took", time.Since(start).Round(time.Millisecond)).
@@ -115,10 +132,10 @@ func writeOpenAPIMocks(ctx context.Context, in, out string, level zerolog.Level,
 		return 1
 	}
 
-	_, _ = fmt.Fprintf(stdout, "Wrote %d mock files to %s.\n", len(report.Written), out)
+	_, _ = fmt.Fprintf(stdout, "Wrote %d mock files, and the spec they check requests against, %s, to %s.\n", mocks, spec, out)
 
 	if len(report.Stale) > 0 {
-		_, _ = fmt.Fprintf(stdout, "These files were generated from this spec, but no longer are, and still load: %s\n",
+		_, _ = fmt.Fprintf(stdout, "These files were generated from this spec, but no longer are, and the mocks among them still load: %s\n",
 			strings.Join(report.Stale, ", "))
 	}
 

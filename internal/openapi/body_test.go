@@ -16,14 +16,15 @@ func TestGenerate_WritesABodyInItsMediaType(t *testing.T) {
 	base64 := map[string]any{"type": "string", "contentEncoding": "base64"}
 
 	tests := []struct {
-		name     string
-		media    string
-		schema   any
-		value    any
-		body     any
-		base64   string
-		disabled bool
-		warning  string
+		name       string
+		media      string
+		schema     any
+		value      any
+		serialized bool
+		body       any
+		base64     string
+		disabled   bool
+		warning    string
 	}{
 		{name: "a JSON object", media: "application/json", value: pet, body: pet},
 		{name: "a JSON list", media: "application/vnd.api+json", value: []any{1}, body: []any{1}},
@@ -52,6 +53,7 @@ func TestGenerate_WritesABodyInItsMediaType(t *testing.T) {
 			warning: "the body isn't base64, as its schema says: written as text",
 		},
 		{name: "empty base64", media: "image/png", schema: base64, value: "", body: ""},
+		{name: "text as sent, which reads as base64", media: "text/plain", schema: base64, value: "aGVsbG8=", serialized: true, body: "aGVsbG8="},
 	}
 
 	for _, tt := range tests {
@@ -61,7 +63,7 @@ func TestGenerate_WritesABodyInItsMediaType(t *testing.T) {
 				Operations: []openapi.Operation{{
 					Method: "GET", Path: "/x",
 					Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{
-						{MediaType: tt.media, Schema: tt.schema, Examples: []openapi.Example{{Value: tt.value}}},
+						{MediaType: tt.media, Schema: tt.schema, Examples: []openapi.Example{{Value: tt.value, Serialized: tt.serialized}}},
 					}}},
 				}},
 			})

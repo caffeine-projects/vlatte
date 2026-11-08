@@ -168,6 +168,19 @@ func TestLoad_ConvertsAnExampleToTheTypeOfItsSchema(t *testing.T) {
 		}
 	}
 
+	t.Run("the dataValue of an example of OpenAPI 3.2", func(t *testing.T) {
+		fitCase{
+			version:   "3.2.0",
+			operation: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: string}, examples: {a: {dataValue: 5}}}}}}",
+			got:       func(doc *openapi.Document) any { return doc.Operations[0].Responses[0].Content[0].Examples },
+			want:      []openapi.Example{{Name: "a", Value: "5"}},
+			warning: map[string]any{
+				"example": "spec.yaml#/paths/~1orders~1{id}/get/responses/200/content/application~1json/examples/a/dataValue",
+				"message": `the example does not fit its schema: converted 5 to "5"`,
+			},
+		}.check(t)
+	})
+
 	t.Run("the examples of a body's schema", func(t *testing.T) {
 		fitCase{
 			operation: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: string, examples: [a, 2.50]}}}}}",

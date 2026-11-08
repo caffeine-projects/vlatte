@@ -2,7 +2,7 @@
 enabled: true
 id: orders-post-201-json
 name: Place an adoption order
-priority: 300
+priority: 600
 request:
     headers:
         Accept:

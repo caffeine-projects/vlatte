@@ -588,9 +588,16 @@ func (r *rawReader) content(c openapi3.Content, n node) {
 	}
 }
 
+// _exampleValues are the fields of an example that hold its value: value, and, in OpenAPI 3.2, dataValue, the value
+// as data, and serializedValue, the value as sent.
+var _exampleValues = []string{"value", "dataValue", "serializedValue"}
+
 func (r *rawReader) examples(es openapi3.Examples, n node) {
 	for name, ref := range es {
-		r.record(ref.Value, r.child(n, name), "value")
+		ex := r.child(n, name)
+		for _, f := range _exampleValues {
+			r.record(ref.Value, ex, f)
+		}
 	}
 }
 

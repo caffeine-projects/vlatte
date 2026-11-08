@@ -9,7 +9,6 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,17 +16,29 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte/fakefy"
+	"github.com/caffeine-projects/vlatte/internal/openapi/pathtemplate"
 )
 
 // The priority bands of generated mocks, which order the mocks of a route. [priority] puts them after the bands of
 // the routes with fewer templated segments.
 const (
-	_bandDisabled      = 100
-	_bandExample       = 200
-	_bandSuccess       = 300
-	_bandNotAcceptable = 400
-	_bandNotFound      = 500
+	_bandDisabled         = 100
+	_bandUnauthorized     = 200
+	_bandUnsupportedMedia = 300
+	_bandBadRequest       = 400
+	_bandExample          = 500
+	_bandSuccess          = 600
+	_bandNotAcceptable    = 700
+	_bandNotFound         = 800
+	_bandNotAllowed       = 900
 )
+
+// _problemJSON is the media type of the bodies the generator writes for a request it refuses: RFC 9457's.
+const _problemJSON = "application/problem+json"
+
+// _problemTemplate is the body of a 400 or 422 the spec gives none for: it lists what the request breaks, as the
+// openapi matcher records it.
+const _problemTemplate = `{"title":"%s","status":%d,"errors":{{ toJSON .Explanation.Messages }}}`
 
 // _routeStep is how far apart [priority] puts the bands of routes whose number of templated segments differs by one:
 // past every band.
@@ -39,7 +50,8 @@ var ValueKeywords = []string{"const", "default", "enum", "example", "examples"}
 // SchemaMapKeywords are the keywords of a schema that hold schemas by name: their keys are names, not keywords.
 var SchemaMapKeywords = []string{"properties", "patternProperties", "$defs", "dependentSchemas"}
 
-// _contractStatuses are the statuses a request's contract decides, which no generated mock answers.
+// _contractStatuses are the statuses a request's contract decides: only the mocks that refuse a request that breaks
+// it answer them.
 var _contractStatuses = []string{"400", "401", "405", "415", "422"}
 
 // Mock is a generated mock: the route and response it answers, and the request it matches.
@@ -50,7 +62,7 @@ type Mock struct {
 	// Route is the path the mock answers, under the document's base path, as the spec writes it.
 	Route string
 
-	// Method is the HTTP method, in upper case.
+	// Method is the HTTP method, in upper case, or "" for a 405, which answers the methods its route lacks.
 	Method string
 
 	// Status is the key of the response the mock answers with, such as 200, 4XX or default.
@@ -81,8 +93,8 @@ type Mock struct {
 
 // Request is what a generated mock matches.
 type Request struct {
-	// Method is the HTTP method.
-	Method string
+	// Method is what the method matches, as a mock file's method key takes it: a method, or a matcher list.
+	Method any
 
 	// Path is what the path matches, as a mock file's path key takes it: an equal matcher list, for a route without
 	// parameters or an example of one; or a regex matcher list, for a route with a parameter inside a segment. It is
@@ -94,6 +106,9 @@ type Request struct {
 
 	// Accept is the matcher spec of the Accept header, or nil for none.
 	Accept []any
+
+	// Custom are the matcher specs of the whole request, as a mock file's custom key takes them, or nil for none.
+	Custom []any
 }
 
 // Reply is what a generated mock answers.
@@ -109,6 +124,9 @@ type Reply struct {
 
 	// BodyBase64 is the body as bytes, in standard base64, in place of Body. "" is none.
 	BodyBase64 string
+
+	// Template tells whether Body is a template, which the server renders for each request.
+	Template bool
 }
 
 // Generate makes the mock files of doc: mocks named by [RouteFirst], each in a file of its own, as [PerMock] lays
@@ -116,11 +134,7 @@ type Reply struct {
 // it: a body no value fits, by its examples or its schema, leaves its mock without one and disabled. It fails only when
 // ctx is done.
 func Generate(ctx context.Context, doc *Document, log *zerolog.Logger) ([]File, error) {
-	g := generator{doc: doc, defs: make(map[string]any, len(doc.Defs)), copies: make(map[string]string)}
-	// Sorted, so the copies of shared schemas get the same names on every run.
-	for _, name := range slices.Sorted(maps.Keys(doc.Defs)) {
-		g.defs[name] = g.stripWriteOnly(doc.Defs[name], nil)
-	}
+	g := generator{doc: doc, responses: newView(doc.Defs, "writeOnly", false), spec: specName(doc), routes: make(map[string]*routeMethods)}
 
 	ops := slices.Clone(doc.Operations)
 	slices.SortFunc(ops, func(a, b Operation) int {
@@ -140,6 +154,10 @@ func Generate(ctx context.Context, doc *Document, log *zerolog.Logger) ([]File, 
 		return nil, err
 	}
 
+	for _, r := range slices.Sorted(maps.Keys(g.routes)) {
+		g.notAllowed(r, g.routes[r])
+	}
+
 	name(g.mocks, RouteFirst)
 
 	for _, w := range g.warnings {
@@ -157,7 +175,18 @@ func Generate(ctx context.Context, doc *Document, log *zerolog.Logger) ([]File, 
 		e.Msg(w.message)
 	}
 
-	return PerMock(g.mocks), nil
+	return append(PerMock(g.mocks), File{Name: g.spec, Data: doc.Spec}), nil
+}
+
+// specName returns the name of the file of the copy of doc's spec: its title, then a hash of the copy. A rerun on a
+// changed spec writes a copy of another name, and leaves the one the mocks it no longer writes check requests against.
+func specName(doc *Document) string {
+	data, _ := json.Marshal(doc.Spec, json.Deterministic(true))
+
+	h := fnv.New32a()
+	h.Write(data)
+
+	return fmt.Sprintf("%s.%08x.openapi.yaml", cmp.Or(part(doc.Title), "spec"), h.Sum32())
 }
 
 // stopped returns the error of generating the mocks for ctx, done, or nil.
@@ -171,13 +200,19 @@ func stopped(ctx context.Context) error {
 
 // generator holds the mocks and warnings of a document as they are made.
 type generator struct {
-	doc      *Document
-	defs     map[string]any    // the document's shared schemas without writeOnly properties, and copyWithout's copies
-	copies   map[string]string // the names in defs of copyWithout's copies, by shared schema and properties left out
-	shared   *fakefy.Defs      // defs, for fakefy, or nil until it is first needed and after defs gains a copy
-	mocks    []Mock
-	pending  []string
-	warnings []warning
+	doc       *Document
+	responses *view                    // how a response sees the document's schemas
+	spec      string                   // the name of the file of the copy of the spec, beside the mocks
+	routes    map[string]*routeMethods // the methods of each route, for its 405
+	mocks     []Mock
+	pending   []string
+	warnings  []warning
+}
+
+// routeMethods are the methods of a route, a path of the spec under its base path, and what its mocks match.
+type routeMethods struct {
+	request Request  // what the mocks of the route match, but for their method
+	methods []string // the methods of its operations
 }
 
 // warning is something the generator could not honor in a mock.
@@ -203,8 +238,8 @@ func (g *generator) warnf(format string, args ...any) {
 
 // operation makes the mocks of op.
 func (g *generator) operation(op Operation) {
-	route := joinPath(op.BasePath, op.Path)
-	request := routeRequest(op.Method, op.BasePath, op.Path)
+	route := pathtemplate.Join(op.BasePath, op.Path)
+	request := routeRequest(op.Method, pathtemplate.NewRoute(op.BasePath, op.Path))
 
 	primary := primaryResponse(op.Responses)
 	notFound := findResponse(op.Responses, "404")
@@ -215,6 +250,13 @@ func (g *generator) operation(op Operation) {
 		examples = g.pathExamples(op)
 	}
 	base := Mock{Route: route, Method: op.Method, Name: cmp.Or(op.Summary, op.Method+" "+route), Request: request}
+
+	if g.routes[route] == nil {
+		g.routes[route] = &routeMethods{request: request}
+	}
+
+	g.routes[route].methods = append(g.routes[route].methods, op.Method)
+	g.contract(op, base)
 
 	for _, r := range op.Responses {
 		if slices.Contains(_contractStatuses, r.Status) || r.Status == "406" || r.Status == "404" && primary != nil {
@@ -244,8 +286,7 @@ func (g *generator) operation(op Operation) {
 			}
 
 			em.Priority = priority(_bandExample, route)
-			// The server compares the path decoded, and a glob would read an example's * or [ as its own.
-			em.Request = Request{Method: op.Method, Path: []any{"equal", joinPath(op.BasePath, ex.path)}}
+			em.Request = routeRequest(op.Method, ex.route)
 			g.contents(em, r, code, false)
 		}
 
@@ -272,6 +313,108 @@ func (g *generator) operation(op Operation) {
 
 		g.fallback(m, g.withoutRanges(m, *notFound), http.StatusNotFound)
 	}
+}
+
+// contract adds the mocks of op that refuse a request that breaks its contract, as base matches it: a 401 for a
+// request without the credentials op asks for, a 415 for a body of a media type it doesn't take, and a 400 for
+// parameters or a body that break their schemas, or a 422 when op declares one and no 400. Each matches what the
+// openapi matcher, under not, says a request breaks.
+func (g *generator) contract(op Operation, base Mock) {
+	operation := cmp.Or(op.ID, op.Method+" "+base.Route)
+
+	refuse := func(status string, band int, check string, header map[string]string) {
+		m := base
+		m.Status = status
+		m.Priority = priority(band, base.Route)
+		m.Enabled = true
+		m.Request.Custom = []any{[]any{"not", []any{"openapi", map[string]any{"spec": g.spec, "operation": operation, "check": check}}}}
+		g.refuse(m, findResponse(op.Responses, status), check == "request", header)
+	}
+
+	if op.Secured {
+		var header map[string]string
+		if len(op.Challenges) > 0 {
+			header = map[string]string{"WWW-Authenticate": strings.Join(op.Challenges, ", ")}
+		}
+
+		refuse("401", _bandUnauthorized, "security", header)
+	}
+
+	if len(op.Consumes) > 0 {
+		refuse("415", _bandUnsupportedMedia, "content_type", map[string]string{"Accept": strings.Join(op.Consumes, ", ")})
+	}
+
+	if op.HasInput {
+		status := "400"
+		if findResponse(op.Responses, "400") == nil && findResponse(op.Responses, "422") != nil {
+			status = "422"
+		}
+
+		refuse(status, _bandBadRequest, "request", nil)
+	}
+}
+
+// refuse adds the mocks m answers a request it refuses with: declared, the operation's response, as [generator.fallback]
+// adds them, or else a problem body, which, when invalid, lists what the request breaks. Each header of header the
+// response doesn't declare is added.
+func (g *generator) refuse(m Mock, declared *Response, invalid bool, header map[string]string) {
+	code := statusCode(m.Status, http.StatusBadRequest)
+
+	var r Response
+	if declared != nil {
+		r = g.withoutRanges(m, *declared)
+	}
+
+	r.Headers = slices.Clone(r.Headers)
+	for _, name := range slices.Sorted(maps.Keys(header)) {
+		if !slices.ContainsFunc(r.Headers, func(h Header) bool { return strings.EqualFold(h.Name, name) }) {
+			r.Headers = append(r.Headers, Header{Name: name, Examples: []Example{{Value: header[name]}}})
+		}
+	}
+
+	if len(r.Content) > 0 {
+		g.fallback(m, r, code)
+		return
+	}
+
+	m.Reply = Reply{Status: code, Header: g.headers(m, r), Body: map[string]any{"title": http.StatusText(code), "status": code}}
+	if invalid {
+		m.Reply.Body, m.Reply.Template = fmt.Sprintf(_problemTemplate, http.StatusText(code), code), true
+	}
+
+	g.add(withContentType(m, _problemJSON))
+}
+
+// notAllowed adds the 405 of path, whose operations' methods and request r holds, which answers a method none of them
+// has, but a HEAD when one has GET, and OPTIONS, which a CORS preflight sends. Its Allow header lists the others.
+func (g *generator) notAllowed(path string, r *routeMethods) {
+	allowed := slices.Clone(r.methods)
+	if slices.Contains(allowed, http.MethodGet) && !slices.Contains(allowed, http.MethodHead) {
+		allowed = append(allowed, http.MethodHead)
+	}
+
+	slices.Sort(allowed)
+
+	taken := slices.Clone(allowed)
+	if !slices.Contains(taken, http.MethodOptions) {
+		taken = append(taken, http.MethodOptions)
+		slices.Sort(taken)
+	}
+
+	methods := make([]any, len(taken))
+	for i, method := range taken {
+		methods[i] = method
+	}
+
+	m := Mock{Route: path, Status: "405", Name: path + ": method not allowed", Priority: priority(_bandNotAllowed, path), Enabled: true, Request: r.request}
+	m.Request.Method = []any{"not", []any{"isin", methods}}
+	m.Reply = Reply{
+		Status: http.StatusMethodNotAllowed,
+		Header: map[string]string{"Allow": strings.Join(allowed, ", ")},
+		Body:   map[string]any{"title": http.StatusText(http.StatusMethodNotAllowed), "status": http.StatusMethodNotAllowed},
+	}
+
+	g.add(withContentType(m, _problemJSON))
 }
 
 // fallback adds the mocks of response r answering with status as [generator.contents] does, for a response that
@@ -330,16 +473,16 @@ func (g *generator) body(m Mock, r Response, c Content, status int, extras bool)
 
 	switch {
 	case len(c.Examples) > 0:
-		g.setBody(&m, c, c.Examples[0].Value)
+		g.setBody(&m, c, c.Examples[0])
 	case c.Schema != nil:
-		schema := g.root(c.Schema)
+		schema := g.responses.object(c.Schema)
 
-		v, err := g.faker(seed(m)).Schema(schema)
+		v, err := g.responses.faker(seed(m)).Schema(schema)
 		if err != nil {
 			g.warnf("no body fits: %v: written disabled", err)
 			m.Enabled = false
 		} else {
-			g.setBody(&m, c, v)
+			g.setBody(&m, c, Example{Value: v})
 		}
 	}
 
@@ -355,7 +498,7 @@ func (g *generator) body(m Mock, r Response, c Content, status int, extras bool)
 		em.Enabled = false
 		em.Priority = priority(_bandDisabled, m.Route)
 		em.Reply = Reply{Status: status, Header: headers}
-		g.setBody(&em, c, ex.Value)
+		g.setBody(&em, c, ex)
 		g.add(withContentType(em, c.MediaType))
 	}
 }
@@ -445,11 +588,11 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 	schemas := make([]map[string]any, len(r.Headers))
 	for i, hd := range r.Headers {
 		if len(hd.Examples) == 0 && hd.Schema != nil {
-			schemas[i] = g.root(hd.Schema)
+			schemas[i] = g.responses.object(hd.Schema)
 		}
 	}
 
-	f := g.faker(seed(m) ^ 1)
+	f := g.responses.faker(seed(m) ^ 1)
 	h := make(map[string]string, len(r.Headers))
 
 	for i, hd := range r.Headers {
@@ -476,9 +619,65 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 	return h
 }
 
-// root returns schema without its writeOnly properties, as an object.
-func (g *generator) root(schema any) map[string]any {
-	switch s := g.stripWriteOnly(schema, nil).(type) {
+// view is how one side of an exchange sees the schemas of a document: a response never holds a property its schema
+// marks writeOnly, and a request needn't send one it marks readOnly, though it may.
+type view struct {
+	marker string            // the annotation of the properties the side leaves out: writeOnly or readOnly
+	keep   bool              // whether the side keeps those properties, and only stops requiring them
+	doc    map[string]any    // the document's shared schemas
+	defs   map[string]any    // the shared schemas as the side sees them, and copyWithout's copies
+	copies map[string]string // the names in defs of copyWithout's copies, by shared schema and properties left out
+	fakes  *fakefy.Defs      // defs, for fakefy, or nil until it is first needed and after defs gains a copy
+}
+
+// newView returns how a side that leaves out the properties marker marks, or with keep, only stops requiring them,
+// sees doc, the shared schemas of a document.
+func newView(doc map[string]any, marker string, keep bool) *view {
+	vw := &view{marker: marker, keep: keep, doc: doc, defs: make(map[string]any, len(doc)), copies: make(map[string]string)}
+
+	// Sorted, so the copies of shared schemas get the same names on every run.
+	for _, name := range slices.Sorted(maps.Keys(doc)) {
+		vw.defs[name] = vw.strip(doc[name], nil)
+	}
+
+	return vw
+}
+
+// RequestRoots returns each of schemas, schemas of a document whose shared schemas are defs, as a request sees it: a
+// property a schema marks readOnly is no longer required, as a request needn't send it, but stays declared, as it
+// may. Each is a root, with the shared schemas its $ref values name under $defs.
+func RequestRoots(defs map[string]any, schemas []any) []map[string]any {
+	vw := newView(defs, "readOnly", true)
+
+	roots := make([]map[string]any, len(schemas))
+	for i, s := range schemas {
+		roots[i] = vw.root(s)
+	}
+
+	return roots
+}
+
+// root returns schema as vw's side sees it, with the document's shared schemas its $ref values name, in turn, under
+// $defs, for them to resolve. Its own $defs win over a shared schema of the same name. Leaving out the others keeps
+// a validator from compiling every schema of a large spec for each schema.
+func (vw *view) root(schema any) map[string]any {
+	root := vw.object(schema)
+
+	own, _ := root["$defs"].(map[string]any)
+	defs := maps.Clone(own)
+	if defs == nil {
+		defs = make(map[string]any)
+	}
+
+	vw.named(root, defs)
+	root["$defs"] = defs
+
+	return root
+}
+
+// object returns schema as vw's side sees it, as an object.
+func (vw *view) object(schema any) map[string]any {
+	switch s := vw.strip(schema, nil).(type) {
 	case map[string]any:
 		return s
 	case bool:
@@ -490,14 +689,72 @@ func (g *generator) root(schema any) map[string]any {
 	return make(map[string]any)
 }
 
-// faker returns a Faker of seed whose $refs resolve to the generator's shared schemas, as they are now: root may
-// have added copies of them.
-func (g *generator) faker(seed uint64) *fakefy.Faker {
-	if g.shared == nil {
-		g.shared = fakefy.NewDefs(maps.Clone(g.defs))
+// faker returns a Faker of seed whose $refs resolve to vw's shared schemas, as they are now: object may have added
+// copies of them.
+func (vw *view) faker(seed uint64) *fakefy.Faker {
+	if vw.fakes == nil {
+		vw.fakes = fakefy.NewDefs(maps.Clone(vw.defs))
 	}
 
-	return fakefy.New(fakefy.WithSeed(seed), fakefy.WithDefs(g.shared))
+	return fakefy.New(fakefy.WithSeed(seed), fakefy.WithDefs(vw.fakes))
+}
+
+// named adds to defs each shared schema of vw that a $ref in v names, and those that one names, in turn, but for the
+// names defs holds. It reads every $ref key as one: one in data, such as an example, only adds a schema.
+func (vw *view) named(v any, defs map[string]any) {
+	switch x := v.(type) {
+	case map[string]any:
+		ref, _ := x["$ref"].(string)
+		if name, ok := defName(ref); ok {
+			if def, shared := vw.defs[name]; shared {
+				if _, added := defs[name]; !added {
+					defs[name] = def
+					vw.named(def, defs)
+				}
+			}
+		}
+
+		for _, val := range x {
+			vw.named(val, defs)
+		}
+	case []any:
+		for _, item := range x {
+			vw.named(item, defs)
+		}
+	}
+}
+
+// defName returns the name of the schema under $defs that ref, a fragment such as #/$defs/Pet/properties/name, points
+// into, decoded as fakefy decodes it: a URI fragment may percent-encode any character, and a JSON pointer token
+// escapes / and ~.
+func defName(ref string) (string, bool) {
+	frag, _ := url.PathUnescape(ref) // "" for a bad escape, which names no schema
+
+	rest, ok := strings.CutPrefix(frag, DefsPrefix)
+	if !ok {
+		return "", false
+	}
+
+	token, _, _ := strings.Cut(rest, "/")
+
+	return strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~"), true
+}
+
+// sharedName returns the name of the schema under $defs that ref names whole, decoded as defName decodes it, and
+// whether it names one: #/$defs/Pet/properties/name names none.
+func sharedName(ref string) (string, bool) {
+	frag, _ := url.PathUnescape(ref)
+	if rest, ok := strings.CutPrefix(frag, DefsPrefix); !ok || strings.Contains(rest, "/") {
+		return "", false
+	}
+
+	return defName(ref)
+}
+
+// sharedRef returns the $ref of the schema named name under $defs, its name escaped as a JSON pointer token and in a
+// URI fragment.
+func sharedRef(name string) string {
+	return DefsPrefix + url.PathEscape(strings.ReplaceAll(strings.ReplaceAll(name, "~", "~0"), "/", "~1"))
 }
 
 // seed returns the seed of the fake values of m: the same for the same route, method, status, media type and
@@ -576,8 +833,9 @@ func statusCode(status string, fallback int) int {
 
 // pathExample is a concrete path of an operation, from examples of its path parameters, and the name of the example.
 type pathExample struct {
-	path string
-	name string
+	path  string // as the client writes it, decoded: the path, or the value of one parameter
+	name  string
+	route *pathtemplate.Route // the route of the path
 }
 
 // pathExamples returns the concrete paths of op that examples of its path parameters give: the nth path takes the
@@ -606,27 +864,38 @@ func (g *generator) pathExamples(op Operation) []pathExample {
 		n = max(n, len(written[i]))
 	}
 
-	out := make([]pathExample, n)
+	out := make([]pathExample, 0, n)
 	for i := range n {
-		values := make(map[string]string, len(op.PathParams))
+		var ex pathExample
 
+		values := make(map[string]string, len(op.PathParams))
 		for j, p := range op.PathParams {
-			ex := written[j][min(i, len(written[j])-1)]
-			values["{"+p.Name+"}"] = ex.path
+			w := written[j][min(i, len(written[j])-1)]
+			values["{"+p.Name+"}"] = w.path
 
 			if len(op.PathParams) == 1 {
-				out[i].name = ex.name
+				ex.name = w.name
 			}
 		}
 
 		// One pass over the template: a value that holds {name} is a value, not a parameter to fill.
-		out[i].path = fillPath(op.Path, decoded, func(param string) string {
+		ex.path = pathtemplate.Fill(op.Path, pathtemplate.Decode, func(param string) string {
 			if v, ok := values[param]; ok {
 				return v
 			}
 
 			return param
 		})
+
+		// A request to a path its operation's route doesn't take would get none of the operation's checks.
+		route, ok := pathtemplate.NewExample(op.BasePath, op.Path, values)
+		if !ok {
+			g.warnf("path %s of the examples of its parameters: left out: a value is empty, or holds a / inside a segment, which the route doesn't take", ex.path)
+			continue
+		}
+
+		ex.route = route
+		out = append(out, ex)
 	}
 
 	return out
@@ -707,111 +976,26 @@ func pathValue(p Parameter, v any) string {
 	return prefix + strings.Join(items, sep)
 }
 
-// _param matches a parameter of a path, such as {id}.
-var _param = regexp.MustCompile(`\{[^{}/]+\}`)
-
 // priority returns the priority of a mock of route in band: every mock of a route answers before those of a route
 // with more templated segments, as OpenAPI matches /pets/mine before /pets/{id}, whatever their bands.
 func priority(band int, route string) int {
-	return templated(route)*_routeStep + band
+	return pathtemplate.Templated(route)*_routeStep + band
 }
 
-// templated returns the number of segments of path that hold a parameter.
-func templated(path string) int {
-	n := 0
-	for seg := range strings.SplitSeq(path, "/") {
-		if _param.MatchString(seg) {
-			n++
-		}
-	}
-
-	return n
-}
-
-// _wholeParam matches a segment that is a parameter, such as {id}.
-var _wholeParam = regexp.MustCompile(`^\{[^{}/]+\}$`)
-
-// routeRequest returns what a mock of path, a path of the spec under base, a base path decoded, matches: its exact
-// path, a path template whose parameters are whole segments, or a regular expression of the path for a parameter
-// inside a segment. The server compares a path decoded, as a path template decodes its literal segments: an escape
-// of the spec, such as %20, matches the request that sends it.
-func routeRequest(method, base, path string) Request {
+// routeRequest returns what a mock of rt, of method, matches. A glob would read a * or [ of the path as its own.
+func routeRequest(method string, rt *pathtemplate.Route) Request {
 	r := Request{Method: method}
 
-	// A glob would read a * or [ of the path as its own.
-	if !_param.MatchString(path) {
-		r.Path = []any{"equal", joinPath(base, decoded(path))}
-		return r
+	switch rt.Kind {
+	case pathtemplate.Literal:
+		r.Path = []any{"equal", rt.Path}
+	case pathtemplate.Segments:
+		r.PathTemplate = rt.Path
+	default:
+		r.Path = []any{"regex", rt.Path}
 	}
-
-	whole := true
-	for seg := range strings.SplitSeq(path, "/") {
-		if strings.ContainsAny(seg, "{}") && !_wholeParam.MatchString(seg) {
-			whole = false
-		}
-	}
-
-	if whole {
-		r.PathTemplate = joinPath((&url.URL{Path: base}).EscapedPath(), escapePercent(path))
-		return r
-	}
-
-	quoted := func(s string) string { return regexp.QuoteMeta(decoded(s)) }
-	r.Path = []any{"regex", "^" + regexp.QuoteMeta(strings.TrimSuffix(base, "/")) + fillPath(path, quoted, func(string) string { return `[^/]+` }) + "$"}
 
 	return r
-}
-
-// fillPath returns path, a path of the spec, with literal applied to each text between its parameters and each
-// parameter, such as {id}, replaced by param of it.
-func fillPath(path string, literal, param func(s string) string) string {
-	var b strings.Builder
-
-	last := 0
-	for _, loc := range _param.FindAllStringIndex(path, -1) {
-		b.WriteString(literal(path[last:loc[0]]))
-		b.WriteString(param(path[loc[0]:loc[1]]))
-
-		last = loc[1]
-	}
-
-	b.WriteString(literal(path[last:]))
-
-	return b.String()
-}
-
-// decoded returns s, text of a path of the spec, decoded, as the server compares a path.
-func decoded(s string) string {
-	// Every % starts an escape once escapePercent is done.
-	d, _ := url.PathUnescape(escapePercent(s))
-
-	return d
-}
-
-// escapePercent returns s, text of a path of the spec, with each % that starts no escape, such as that of 50%, escaped
-// as %25: a percent sign.
-func escapePercent(s string) string {
-	var b strings.Builder
-
-	for i := range len(s) {
-		b.WriteByte(s[i])
-
-		if s[i] == '%' && (i+2 >= len(s) || !isHex(s[i+1]) || !isHex(s[i+2])) {
-			b.WriteString("25")
-		}
-	}
-
-	return b.String()
-}
-
-// isHex reports whether c is a hexadecimal digit.
-func isHex(c byte) bool {
-	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
-}
-
-// joinPath joins a base path and a path of the spec.
-func joinPath(base, path string) string {
-	return strings.TrimSuffix(base, "/") + path
 }
 
 // text returns v, a value of the spec or a fake one, which JSON holds, as text: a string as is, anything else as
@@ -853,15 +1037,15 @@ func (g *generator) mediaValue(what, mediaType string, v any) (string, bool) {
 	return text(v), true
 }
 
-// stripWriteOnly returns a copy of the schema v without its writeOnly properties, which a response never holds, at
-// any depth, nor their names in required. The schemas sameObject has for a schema describe one object: a property any
-// of them makes writeOnly is left out of each, as are dropped, those the schemas v applies with make writeOnly. A
-// shared schema is applied as copyWithout has it. The branches of anyOf and oneOf, which may not apply, and the
-// object a property holds keep their own.
-func (g *generator) stripWriteOnly(v any, dropped []string) any {
+// strip returns a copy of the schema v without the properties vw's side leaves out, at any depth, nor their names in
+// required, or, when it keeps them, only without their names in required. The schemas sameObject has for a schema
+// describe one object: a property any of them marks is left out of each, as are dropped, those the schemas v applies
+// with mark. A shared schema is applied as copyWithout has it. The branches of anyOf and oneOf, which may not apply,
+// and the object a property holds keep their own.
+func (vw *view) strip(v any, dropped []string) any {
 	switch x := v.(type) {
 	case map[string]any:
-		dropped = slices.Concat(dropped, writeOnlyProperties(x, g.doc.Defs))
+		dropped = slices.Concat(dropped, markedProperties(x, vw.doc, vw.marker))
 		out := make(map[string]any, len(x))
 
 		for k, val := range x {
@@ -871,12 +1055,12 @@ func (g *generator) stripWriteOnly(v any, dropped []string) any {
 			case slices.Contains(ValueKeywords, k):
 				// Data, whatever keys it holds.
 				out[k] = val
-			case k == "properties" && isMap:
+			case k == "properties" && isMap && !vw.keep:
 				kept := make(map[string]any, len(named))
 
 				for name, p := range named {
 					if !slices.Contains(dropped, name) {
-						kept[name] = g.stripWriteOnly(p, nil)
+						kept[name] = vw.strip(p, nil)
 					}
 				}
 
@@ -885,14 +1069,14 @@ func (g *generator) stripWriteOnly(v any, dropped []string) any {
 				// Names, not keywords: a schema named const is a schema.
 				each := make(map[string]any, len(named))
 				for name, p := range named {
-					each[name] = g.stripWriteOnly(p, nil)
+					each[name] = vw.strip(p, nil)
 				}
 
 				out[k] = each
 			case k == "allOf":
-				out[k] = g.stripWriteOnly(val, dropped)
+				out[k] = vw.strip(val, dropped)
 			default:
-				out[k] = g.stripWriteOnly(val, nil)
+				out[k] = vw.strip(val, nil)
 			}
 		}
 
@@ -904,15 +1088,17 @@ func (g *generator) stripWriteOnly(v any, dropped []string) any {
 		}
 
 		ref, _ := x["$ref"].(string)
-		if name, ok := strings.CutPrefix(ref, DefsPrefix); ok {
-			out["$ref"] = DefsPrefix + g.copyWithout(name, dropped)
+		if name, ok := sharedName(ref); ok {
+			if copied := vw.copyWithout(name, dropped); copied != name {
+				out["$ref"] = sharedRef(copied)
+			}
 		}
 
 		return out
 	case []any:
 		out := make([]any, len(x))
 		for i, item := range x {
-			out[i] = g.stripWriteOnly(item, dropped)
+			out[i] = vw.strip(item, dropped)
 		}
 
 		return out
@@ -921,17 +1107,17 @@ func (g *generator) stripWriteOnly(v any, dropped []string) any {
 	}
 }
 
-// copyWithout returns the name, in the generator's shared schemas, of the document's shared schema name without the
-// properties of dropped it declares or requires, or name when it has none of them. Each copy is made once, so one
-// that holds itself refers to itself.
-func (g *generator) copyWithout(name string, dropped []string) string {
-	def, _ := g.doc.Defs[name].(map[string]any)
+// copyWithout returns the name, in vw's shared schemas, of the document's shared schema name as strip has it without
+// the properties of dropped, or name when changes finds it the same. Each copy is made once, so one that holds itself
+// refers to itself.
+func (vw *view) copyWithout(name string, dropped []string) string {
+	def, _ := vw.doc[name].(map[string]any)
 
 	var without []string
 
-	for _, s := range sameObject(def, g.doc.Defs) {
+	for _, s := range sameObject(def, vw.doc) {
 		for _, d := range dropped {
-			if declares(s, d) && !slices.Contains(without, d) {
+			if vw.changes(s, d) && !slices.Contains(without, d) {
 				without = append(without, d)
 			}
 		}
@@ -944,7 +1130,7 @@ func (g *generator) copyWithout(name string, dropped []string) string {
 	slices.Sort(without)
 
 	key := name + "\x00" + strings.Join(without, "\x00")
-	if copied, ok := g.copies[key]; ok {
+	if copied, ok := vw.copies[key]; ok {
 		return copied
 	}
 
@@ -952,17 +1138,17 @@ func (g *generator) copyWithout(name string, dropped []string) string {
 	for i := 2; ; i++ {
 		copied = name + "_" + strconv.Itoa(i)
 
-		_, shared := g.doc.Defs[copied]
-		if _, made := g.defs[copied]; !shared && !made {
+		_, shared := vw.doc[copied]
+		if _, made := vw.defs[copied]; !shared && !made {
 			break
 		}
 	}
 
 	// Taken before the copy is made, for the copy to refer to itself.
-	g.copies[key] = copied
-	g.shared = nil
-	g.defs[copied] = nil
-	g.defs[copied] = g.stripWriteOnly(def, without)
+	vw.copies[key] = copied
+	vw.fakes = nil
+	vw.defs[copied] = nil
+	vw.defs[copied] = vw.strip(def, without)
 
 	return copied
 }
@@ -985,7 +1171,7 @@ func sameObject(s, defs map[string]any) []map[string]any {
 		}
 
 		ref, _ := s["$ref"].(string)
-		if name, ok := strings.CutPrefix(ref, DefsPrefix); ok && !followed[name] {
+		if name, ok := sharedName(ref); ok && !followed[name] {
 			followed[name] = true
 
 			def, _ := defs[name].(map[string]any)
@@ -998,15 +1184,15 @@ func sameObject(s, defs map[string]any) []map[string]any {
 	return out
 }
 
-// writeOnlyProperties returns the names of the properties that schema s, or a schema sameObject has for it, makes
-// writeOnly, as writeOnly decides.
-func writeOnlyProperties(s, defs map[string]any) []string {
+// markedProperties returns the names of the properties that schema s, or a schema sameObject has for it, marks with
+// marker, as marked decides.
+func markedProperties(s, defs map[string]any, marker string) []string {
 	var names []string
 
 	for _, o := range sameObject(s, defs) {
 		props, _ := o["properties"].(map[string]any)
 		for name, p := range props {
-			if writeOnly(p, defs, nil) {
+			if marked(p, defs, marker, nil) {
 				names = append(names, name)
 			}
 		}
@@ -1015,34 +1201,36 @@ func writeOnlyProperties(s, defs map[string]any) []string {
 	return names
 }
 
-// declares reports whether schema s declares or requires the property name.
-func declares(s map[string]any, name string) bool {
+// changes reports whether vw's side sees schema s other than it is without the property name: s requires it, or
+// declares it, when the side leaves it out.
+func (vw *view) changes(s map[string]any, name string) bool {
 	props, _ := s["properties"].(map[string]any)
 	required, _ := s["required"].([]any)
-	_, ok := props[name]
+	_, declared := props[name]
 
-	return ok || slices.Contains(required, any(name))
+	return slices.Contains(required, any(name)) || declared && !vw.keep
 }
 
-// writeOnly reports whether schema v is writeOnly, or refers to a schema of defs that is, or allOf applies one to it.
-// seen holds the names of the schemas the references followed so far, which a cycle comes back to.
-func writeOnly(v any, defs map[string]any, seen []string) bool {
+// marked reports whether schema v is marked with marker, such as writeOnly, or refers to a schema of defs that is, or
+// allOf applies one to it. seen holds the names of the schemas the references followed so far, which a cycle comes
+// back to.
+func marked(v any, defs map[string]any, marker string, seen []string) bool {
 	s, _ := v.(map[string]any)
-	if s["writeOnly"] == true {
+	if s[marker] == true {
 		return true
 	}
 
 	all, _ := s["allOf"].([]any)
-	if slices.ContainsFunc(all, func(b any) bool { return writeOnly(b, defs, seen) }) {
+	if slices.ContainsFunc(all, func(b any) bool { return marked(b, defs, marker, seen) }) {
 		return true
 	}
 
 	ref, _ := s["$ref"].(string)
 
-	name, ok := strings.CutPrefix(ref, DefsPrefix)
+	name, ok := sharedName(ref)
 	if !ok || slices.Contains(seen, name) {
 		return false
 	}
 
-	return writeOnly(defs[name], defs, append(seen, name))
+	return marked(defs[name], defs, marker, append(seen, name))
 }
