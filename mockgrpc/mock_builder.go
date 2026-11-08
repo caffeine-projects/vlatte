@@ -114,7 +114,8 @@ func (b *Builder) Header(key string, m vlatte.Matcher) *Builder {
 
 // Field matches the request at path, a JSON path, such as "user_id" or "$.items[0].key", with m. The request is read
 // as protojson writes it, with the field names of the .proto file: enums as names, int64 values as text. A client
-// streaming call is read as the array of its messages, so "$[0].key" reads its first message.
+// streaming call is read as the array of its messages, so "$[0].key" reads its first message. A message the server's
+// [RequestParser] values read is read as what they read.
 func (b *Builder) Field(path string, m vlatte.Matcher) *Builder {
 	b.described.fields = append(b.described.fields, namedMatcher{name: path, matcher: m})
 	b.readsRequest = true
@@ -131,6 +132,7 @@ func (b *Builder) Field(path string, m vlatte.Matcher) *Builder {
 // JSON matches a request equal to the message text holds, by proto.Equal: text is read as protojson reads it, in the
 // type of the method's request, so {"user_id": "u1", "count": 42} and {"userId": "u1", "count": "42"} match the same
 // call. A client streaming call's text is an array of its messages. Build fails on text that holds no such message.
+// It matches the request as the client sent it, not what the server's [RequestParser] values read: see Body.
 func (b *Builder) JSON(text string) *Builder {
 	if !jsontext.Value(text).IsValid() && b.err == nil {
 		b.err = fmt.Errorf("json: not JSON: %q", text)
@@ -144,7 +146,7 @@ func (b *Builder) JSON(text string) *Builder {
 }
 
 // Body matches the request as JSON text, as Field reads it, with m, such as match.Contain("ann") or
-// match.EqualJSON(...).
+// match.EqualJSON(...): what the server's [RequestParser] values read, when they read it.
 func (b *Builder) Body(m vlatte.Matcher) *Builder {
 	b.described.body = m
 	b.readsRequest = true
@@ -158,13 +160,15 @@ func (b *Builder) Body(m vlatte.Matcher) *Builder {
 	return b
 }
 
-// Message matches a request message equal to msg, by proto.Equal: the request of a unary or server streaming call.
+// Message matches a request message equal to msg, by proto.Equal: the request of a unary or server streaming call, as
+// the client sent it, whatever the server's [RequestParser] values read of it.
 func (b *Builder) Message(msg proto.Message) *Builder {
 	b.described.message = msg
 	return b.messages("message", []proto.Message{msg})
 }
 
-// Messages matches the messages of a client streaming call, in order, each equal to its own by proto.Equal.
+// Messages matches the messages of a client streaming call, in order, each equal to its own by proto.Equal, as the
+// client sent them.
 func (b *Builder) Messages(msgs ...proto.Message) *Builder {
 	b.described.messages = msgs
 	return b.messages("messages", msgs)

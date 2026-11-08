@@ -1,6 +1,7 @@
 package mockgrpc
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/caffeine-projects/vlatte"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -127,4 +129,29 @@ func TestTemplateDataProviders(t *testing.T) {
 		require.ErrorIs(t, err, vlatte.ErrTemplateDataKeyExists)
 		require.ErrorContains(t, err, `"user"`)
 	})
+}
+
+func TestTemplate_RequestMessageIsWhatTheParsersRead(t *testing.T) {
+	// .Request.Message is the request as the mocks read it: what the parsers read of it. A field of a value that isn't
+	// an object, such as a parser's nil, fails the reply rather than answering with an empty field.
+	p := &funcParser{parse: func(_ context.Context, _ *Call, msg proto.Message) (any, error) {
+		if envelopeText(msg) == "nothing" {
+			return nil, nil
+		}
+
+		return map[string]string{"user_id": envelopeText(msg) + " parsed"}, nil
+	}}
+	m := parsing(t, p)
+	m.MustMock(Method("Greetings").Reply(Template(`{"message": "{{ .Request.Message.user_id }}"}`)))
+	c := client(t, m)
+
+	got, code := greetWith(t, c, "u1")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "u1 parsed", got)
+
+	var trailer metadata.MD
+	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "nothing"}, grpc.Trailer(&trailer))
+	require.Equal(t, codes.Internal, status.Code(err), "%v", err)
+	require.Contains(t, status.Convert(err).Message(), "nil pointer evaluating interface {}.user_id")
+	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(_failureKey))
 }
