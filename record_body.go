@@ -9,9 +9,10 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/rs/zerolog"
+
+	"github.com/caffeine-projects/vlatte/internal/slug"
 )
 
 const (
@@ -534,33 +535,11 @@ func (f *RecordFiles) discard() {
 // recordSlug turns the name of a mock into the start of its file names: letters, digits, '.', '_' and '-', with one
 // '-' for each run of anything else, at most _slugMax bytes, and never empty or starting with a '.'.
 func recordSlug(name string) string {
-	var b strings.Builder
-
-	dash := false
-	for _, r := range name {
-		if b.Len() >= _slugMax {
-			break
-		}
-
-		if r < utf8.RuneSelf && (isAlnum(byte(r)) || r == '.' || r == '_' || r == '-') {
-			b.WriteRune(r)
-			dash = r == '-'
-
-			continue
-		}
-
-		if !dash {
-			b.WriteByte('-')
-			dash = true
-		}
+	if s := slug.Make(name, _slugMax); s != "" {
+		return s
 	}
 
-	slug := strings.Trim(b.String(), "-.")
-	if slug == "" {
-		return "recording"
-	}
-
-	return slug
+	return "recording"
 }
 
 // cleanExt returns ext when it is a file extension of letters and digits, such as ".json", and ".bin" otherwise.

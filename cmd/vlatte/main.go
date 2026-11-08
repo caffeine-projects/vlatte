@@ -109,7 +109,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	})
 
 	registerCompletions(root)
-	root.AddCommand(versionCmd(), healthCmd(&code), mcpCmd(ctx, &code, stdin, stdout, stderr))
+	root.AddCommand(versionCmd(), healthCmd(&code), mcpCmd(ctx, &code, stdin, stdout, stderr), openapiCmd(&code))
 
 	// cobra reads os.Args when the args are nil.
 	if args == nil {
