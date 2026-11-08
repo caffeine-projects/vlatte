@@ -2,7 +2,7 @@
 enabled: true
 id: orders-post-406
 name: Place an adoption order
-priority: 400
+priority: 700
 request:
     headers:
         Accept:

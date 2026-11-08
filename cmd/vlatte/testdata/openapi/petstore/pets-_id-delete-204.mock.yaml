@@ -2,7 +2,7 @@
 enabled: true
 id: pets-_id-delete-204
 name: Remove a pet from the store
-priority: 1300
+priority: 1600
 request:
     method: DELETE
     path_template: /pets/{id}

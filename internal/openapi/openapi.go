@@ -7,15 +7,22 @@
 //
 //   - 100 + 1000s: the responses nothing in a request predicts, such as 403 or 503, written disabled. Enabled through
 //     the admin API, one answers before the others.
-//   - 200 + 1000s: a mock for each example of the path parameters, on the concrete path.
-//   - 300 + 1000s: the main success response, one mock for each media type it offers.
-//   - 400 + 1000s: a 406 for a request whose Accept takes none of those media types.
-//   - 500 + 1000s: a 404, when the spec declares one and the path parameters have examples, one mock for each media
+//   - 200 + 1000s: a 401 for a request without a credential the operation's security asks.
+//   - 300 + 1000s: a 415 for a body in a media type the operation doesn't take.
+//   - 400 + 1000s: a 400 for parameters or a body that don't fit their schemas, or the 422 the operation declares
+//     instead.
+//   - 500 + 1000s: a mock for each example of the path parameters, on the concrete path, when the path's own mocks
+//     take it: no value is empty, or holds a / inside a segment.
+//   - 600 + 1000s: the main success response, one mock for each media type it offers.
+//   - 700 + 1000s: a 406 for a request whose Accept takes none of those media types.
+//   - 800 + 1000s: a 404, when the spec declares one and the path parameters have examples, one mock for each media
 //     type it offers. A client whose Accept takes none of them gets the first.
+//   - 900 + 1000s: a 405 for a method none of the path's operations has.
 //
 // s is the number of templated segments of the path: every mock of /pets/mine answers before those of /pets/{id},
-// as OpenAPI matches a literal path first. The statuses that a request's contract decides, 400, 401, 405, 415 and
-// 422, get no mock.
+// as OpenAPI matches a literal path first. The 401, 415 and 400 refuse a request that the openapi matcher, under not,
+// finds breaks the copy of the spec Generate writes beside the mocks. Each answers the operation's response of its
+// status, or a problem body, RFC 9457's, which for a 400 or 422 lists what the request breaks.
 //
 // A body is the media type's first example, or a fake value of its schema. In JSON, it is written as JSON. In any
 // other media type, it is written as text, or as bytes when its schema says the string is base64, but for a serialized
@@ -53,6 +60,10 @@ type Document struct {
 
 	// Defs are the schemas the others share, by name.
 	Defs map[string]any
+
+	// Spec is the spec as data, in one document, which the mocks that refuse a request that breaks it check the
+	// request against: its operations answer where their mocks do, under servers of their base path only.
+	Spec any
 }
 
 // Operation is an HTTP method on a path.
@@ -67,8 +78,26 @@ type Operation struct {
 	// path's, else of the document's.
 	BasePath string
 
+	// ID is the operationId of the operation, or "" for none.
+	ID string
+
 	// Summary describes the operation in a line. It may be empty.
 	Summary string
+
+	// Secured tells whether the operation refuses a request without credentials: its security requirements, else
+	// the document's, ask for some, and none of them is empty.
+	Secured bool
+
+	// Challenges are the challenges of the schemes the operation's security requirements name, as a
+	// WWW-Authenticate header gives them, such as Bearer, each once. A scheme without one, such as an API key, adds
+	// none.
+	Challenges []string
+
+	// Consumes are the media types the operation's request body takes, or nil for none.
+	Consumes []string
+
+	// HasInput tells whether the operation has parameters or a request body: what a request can break.
+	HasInput bool
 
 	// PathParams are the parameters of Path.
 	PathParams []Parameter

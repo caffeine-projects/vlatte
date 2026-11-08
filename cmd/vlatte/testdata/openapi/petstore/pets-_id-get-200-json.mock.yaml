@@ -2,7 +2,7 @@
 enabled: true
 id: pets-_id-get-200-json
 name: Get a pet by ID
-priority: 1300
+priority: 1600
 request:
     headers:
         Accept:

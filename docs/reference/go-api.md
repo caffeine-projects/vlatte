@@ -11,6 +11,7 @@ The Go API is documented on pkg.go.dev, from the doc comments of the code. Packa
 | `match/matchbuild` | [pkg.go.dev/github.com/caffeine-projects/vlatte/match/matchbuild](https://pkg.go.dev/github.com/caffeine-projects/vlatte/match/matchbuild) |
 | `match/matchscenario` | [pkg.go.dev/github.com/caffeine-projects/vlatte/match/matchscenario](https://pkg.go.dev/github.com/caffeine-projects/vlatte/match/matchscenario) |
 | `match/matchrepeat` | [pkg.go.dev/github.com/caffeine-projects/vlatte/match/matchrepeat](https://pkg.go.dev/github.com/caffeine-projects/vlatte/match/matchrepeat) |
+| `match/matchopenapi` | [Source](https://github.com/caffeine-projects/vlatte/tree/main/match/matchopenapi) |
 | `fault` | [pkg.go.dev/github.com/caffeine-projects/vlatte/fault](https://pkg.go.dev/github.com/caffeine-projects/vlatte/fault) |
 | `fault/faultbuild` | [pkg.go.dev/github.com/caffeine-projects/vlatte/fault/faultbuild](https://pkg.go.dev/github.com/caffeine-projects/vlatte/fault/faultbuild) |
 | `webhook` | [pkg.go.dev/github.com/caffeine-projects/vlatte/webhook](https://pkg.go.dev/github.com/caffeine-projects/vlatte/webhook) |

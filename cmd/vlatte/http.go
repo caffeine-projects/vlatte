@@ -9,6 +9,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/admin"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
+	"github.com/caffeine-projects/vlatte/match/matchopenapi"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/caffeine-projects/vlatte/webhook"
 )
@@ -24,9 +26,10 @@ const (
 )
 
 // newHTTP creates the HTTP server of args, with the command's settings s, whose mock files name wh as an on_complete
-// listener, whose templates read kv, and which logs to logOutput. The command serves the admin API, which keeps the
-// mocks it adds across restarts, and keeps a journal of the requests it serves, unless settings turn them off: they
-// apply after code. It returns the admin API too, nil when it is off.
+// listener, whose templates read kv, and which logs to logOutput. Its mock files may use the openapi matcher, as the
+// ones vlatte openapi writes do. The command serves the admin API, which keeps the mocks it adds across restarts, and
+// keeps a journal of the requests it serves, unless settings turn them off: they apply after code. It returns the
+// admin API too, nil when it is off.
 func newHTTP(args []string, s settings, wh *webhook.WebHook, kv vlatte.KV, logOutput io.Writer) (*mockhttp.Server, *admin.Admin, error) {
 	cb, api := s.setupHTTP(mockhttp.Setup())
 
@@ -35,7 +38,8 @@ func newHTTP(args []string, s settings, wh *webhook.WebHook, kv vlatte.KV, logOu
 		Journal(_journalDir).
 		LogOutput(logOutput).
 		ConfigSources(mockhttp.DefaultConfigSources(args)...).
-		OnCompleteListener("webhook", wh))
+		OnCompleteListener("webhook", wh).
+		Matchers(matchbuild.MustNew(matchopenapi.WithMatcher())))
 
 	return m, api, err
 }

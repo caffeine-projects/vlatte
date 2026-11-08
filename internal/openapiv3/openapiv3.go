@@ -73,26 +73,31 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 	// The model refers to shared schemas by name: a reference to another file becomes one.
 	t.InternalizeRefs(ctx, refNames(location))
 
-	c := converter{v30: t.IsOpenAPI30(), v32: t.IsOpenAPI32OrLater(), raw: r, places: where, log: log, fits: make(map[fitKey]fitted), unsent: make(map[string]bool)}
 	doc := &openapi.Document{Defs: make(map[string]any)}
 
 	if t.Info != nil {
 		doc.Title = t.Info.Title
 	}
 
+	c := converter{
+		v30: t.IsOpenAPI30(), v32: t.IsOpenAPI32OrLater(), raw: r, places: where, log: log, fits: make(map[fitKey]fitted),
+		unsent: make(map[string]bool), security: t.Security, title: doc.Title,
+	}
+
 	served := servedFrom(location, serverFiles)
 	root := basePath(t.Servers, served, log)
 
 	if t.Components != nil {
+		c.schemes = t.Components.SecuritySchemes
+
 		// Sorted, as the paths are.
 		for _, name := range slices.Sorted(maps.Keys(t.Components.Schemas)) {
 			doc.Defs[name] = c.schema(t.Components.Schemas[name])
 		}
 	}
 
-	if t.Paths == nil {
-		return doc, nil
-	}
+	// The base path of each operation, which the copy of the spec puts it under.
+	bases := make(map[*openapi3.Operation]string)
 
 	// Sorted, so the warnings are logged in the same order on every run.
 	paths := t.Paths.Map()
@@ -117,11 +122,106 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 				o.BasePath = basePath(*op.Servers, served, &opLog)
 			}
 
+			bases[op] = o.BasePath
 			doc.Operations = append(doc.Operations, o)
 		}
 	}
 
+	doc.Spec = specCopy(t, bases, r)
+
 	return doc, nil
+}
+
+// specCopy returns t as data, for the mocks that refuse a request that breaks it: each operation under one server,
+// of its base path in bases, or none for none, and the document and its paths without servers. Its paths are as t
+// writes them, so a reference into them still resolves. Its schemas hold their values as r has them: each integer
+// and each null as the spec writes it.
+func specCopy(t *openapi3.T, bases map[*openapi3.Operation]string, r raw) any {
+	t.Servers = nil
+
+	for _, item := range t.Paths.Map() {
+		item.Servers = nil
+
+		for _, op := range item.Operations() {
+			op.Servers = nil
+
+			if base := bases[op]; base != "" {
+				op.Servers = &openapi3.Servers{{URL: (&url.URL{Path: base}).EscapedPath()}}
+			}
+		}
+	}
+
+	// kin-openapi writes back what it read, as JSON.
+	data, _ := t.MarshalJSON()
+	spec, _ := value.DecodeJSON(data)
+
+	// Each schema kin-openapi read is in the copy where it walks to it first, whole, with the schemas within it, but
+	// for a $ref, which is there as written. Elsewhere, such as below a $ref, the walk passes what the copy lacks.
+	_ = t.WalkSchemas(func(ptr string, ref *openapi3.SchemaRef) error {
+		node := pointer(spec, ptr)
+		if node == nil {
+			return nil
+		}
+
+		key := field{object: ref.Value}
+		if ref.Ref != "" {
+			key = field{object: ref}
+		}
+
+		exact(node, r[key])
+
+		return openapi3.SkipSubtree
+	})
+
+	return spec
+}
+
+// RequestBodies returns the schema of each media type of the request body of each operation of t, which
+// kin-openapi read from data, the spec at location, in one document: in JSON Schema 2020-12, as [Load] gives a
+// document's schemas, each integer and each null as data writes it, and as a request sees it, by
+// [openapi.RequestRoots]. It keeps what kin-openapi checks of a request that JSON Schema doesn't: a oneOf or an anyOf
+// with a discriminator takes an object by the branch the discriminator names, and, in OpenAPI 3.0, a nullable schema
+// takes null whatever its other keywords say. A media type without a schema has none.
+func RequestBodies(t *openapi3.T, data []byte, location *url.URL) map[*openapi3.MediaType]map[string]any {
+	r, _, _ := readRaw(t, location, map[string][]byte{fileKey(location): data})
+	c := converter{v30: t.IsOpenAPI30(), raw: r, request: true}
+
+	defs := make(map[string]any)
+	if t.Components != nil {
+		for name, ref := range t.Components.Schemas {
+			defs[name] = c.schema(ref)
+		}
+	}
+
+	bodies := make(map[*openapi3.MediaType]any)
+
+	for _, item := range t.Paths.Map() {
+		for _, op := range item.Operations() {
+			if op.RequestBody == nil || op.RequestBody.Value == nil {
+				continue
+			}
+
+			for _, mt := range op.RequestBody.Value.Content {
+				if mt != nil && mt.Schema != nil {
+					bodies[mt] = c.schema(mt.Schema)
+				}
+			}
+		}
+	}
+
+	media := slices.Collect(maps.Keys(bodies))
+
+	schemas := make([]any, len(media))
+	for i, mt := range media {
+		schemas[i] = bodies[mt]
+	}
+
+	roots := make(map[*openapi3.MediaType]map[string]any, len(media))
+	for i, root := range openapi.RequestRoots(defs, schemas) {
+		roots[media[i]] = root
+	}
+
+	return roots
 }
 
 // refNames returns how kin-openapi names, as a shared component, what a reference of the spec at location names
@@ -636,18 +736,30 @@ func basePath(servers openapi3.Servers, served func(s *openapi3.Server) *url.URL
 
 // converter translates the parts of a document into the model.
 type converter struct {
-	v30    bool              // the document is OpenAPI 3.0, whose schemas are not JSON Schema 2020-12
-	v32    bool              // the document is OpenAPI 3.2, whose examples may give their value as data or as sent
-	raw    raw               // the examples as the spec writes them
-	places *places           // where the fields of raw are, and the text of their scalars
-	log    *zerolog.Logger   // where an example the mocks can't use is logged
-	fits   map[fitKey]fitted // what fit returned for each example that didn't fit, at a place the spec gives
-	unsent map[string]bool   // the places of the dataValues left out outside JSON, each logged once
+	v30      bool                          // the document is OpenAPI 3.0, whose schemas are not JSON Schema 2020-12
+	v32      bool                          // the document is OpenAPI 3.2, whose examples may give their value as data or as sent
+	raw      raw                           // the examples as the spec writes them
+	places   *places                       // where the fields of raw are, and the text of their scalars
+	log      *zerolog.Logger               // where an example the mocks can't use is logged
+	fits     map[fitKey]fitted             // what fit returned for each example that didn't fit, at a place the spec gives
+	unsent   map[string]bool               // the places of the dataValues left out outside JSON, each logged once
+	security openapi3.SecurityRequirements // the document's, which an operation without its own has
+	schemes  openapi3.SecuritySchemes      // the security schemes of the document, by name
+	title    string                        // the title of the document, which a Basic challenge names as its realm
+
+	// request is whether the schemas are for checking a request as kin-openapi does, by RequestBodies.
+	request bool
 }
 
 // operation translates op, of the path item with the parameters common.
 func (c converter) operation(path, method string, common openapi3.Parameters, op *openapi3.Operation) openapi.Operation {
-	o := openapi.Operation{Method: method, Path: path, Summary: op.Summary}
+	o := openapi.Operation{Method: method, Path: path, ID: op.OperationID, Summary: op.Summary}
+	o.Secured, o.Challenges = c.auth(op.Security)
+	o.HasInput = len(common) > 0 || len(op.Parameters) > 0 || op.RequestBody != nil
+
+	if op.RequestBody != nil && op.RequestBody.Value != nil {
+		o.Consumes = slices.Sorted(maps.Keys(op.RequestBody.Value.Content))
+	}
 
 	// An operation's parameter replaces the path item's of the same name and location.
 	params := make(map[string]*openapi3.Parameter)
@@ -703,6 +815,59 @@ func (c converter) operation(path, method string, common openapi3.Parameters, op
 	}
 
 	return o
+}
+
+// auth returns whether an operation whose security requirements are own, or the document's when nil, refuses a
+// request without credentials, and the challenges of the schemes they name, each once.
+func (c converter) auth(own *openapi3.SecurityRequirements) (bool, []string) {
+	requirements := c.security
+	if own != nil {
+		requirements = *own
+	}
+
+	// An empty requirement takes a request without credentials.
+	if len(requirements) == 0 || slices.ContainsFunc(requirements, func(r openapi3.SecurityRequirement) bool { return len(r) == 0 }) {
+		return false, nil
+	}
+
+	var challenges []string
+
+	for _, r := range requirements {
+		for _, name := range slices.Sorted(maps.Keys(r)) {
+			ref := c.schemes[name]
+			if ref == nil || ref.Value == nil {
+				continue
+			}
+
+			if ch := c.challenge(ref.Value); ch != "" && !slices.Contains(challenges, ch) {
+				challenges = append(challenges, ch)
+			}
+		}
+	}
+
+	return true, challenges
+}
+
+// _quoted escapes text inside an HTTP quoted string.
+var _quoted = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+
+// challenge returns the challenge of scheme s, as a WWW-Authenticate header gives it, or "" for none: Bearer for a
+// token, Basic with the document's title as its realm, or the name of another HTTP scheme, such as Digest.
+func (c converter) challenge(s *openapi3.SecurityScheme) string {
+	switch s.Type {
+	case "oauth2", "openIdConnect":
+		return "Bearer"
+	case "http":
+		scheme := strings.ToLower(s.Scheme)
+		if scheme == "basic" {
+			return `Basic realm="` + _quoted.Replace(c.title) + `"`
+		}
+
+		// kin-openapi takes no HTTP scheme without a name.
+		return strings.ToUpper(scheme[:1]) + scheme[1:]
+	default:
+		return ""
+	}
 }
 
 // response translates the response of status.
@@ -828,14 +993,17 @@ func (c converter) schema(ref *openapi3.SchemaRef) any {
 		v = exact(v, c.raw[field{object: ref.Value}])
 	}
 
-	c.fitSchema(v, ref)
+	// A schema's examples are annotations: a request is checked without them.
+	if !c.request {
+		c.fitSchema(v, ref)
+	}
 
 	return c.translate(v)
 }
 
 // translate rewrites schema v of the document as JSON Schema 2020-12: its references to shared schemas point under
 // $defs, and, in OpenAPI 3.0, nullable adds the null type, and a boolean exclusiveMinimum or exclusiveMaximum takes
-// the value of minimum or maximum.
+// the value of minimum or maximum. For a request, it keeps what kin-openapi checks besides, as RequestBodies says.
 func (c converter) translate(v any) any {
 	switch x := v.(type) {
 	case map[string]any:
@@ -855,8 +1023,18 @@ func (c converter) translate(v any) any {
 			}
 		}
 
+		nullable, _ := x["nullable"].(bool)
+
 		if c.v30 {
 			translate30(out)
+		}
+
+		if c.request {
+			discriminate(out)
+
+			if c.v30 && nullable {
+				takeNull(out)
+			}
 		}
 
 		return out
@@ -870,6 +1048,97 @@ func (c converter) translate(v any) any {
 	default:
 		return v
 	}
+}
+
+// _xOf are the keywords of a schema that take a value by the schemas they list, or the one they hold.
+var _xOf = []string{"allOf", "anyOf", "oneOf", "not"}
+
+// takeNull makes s, a nullable schema of OpenAPI 3.0, take null, as kin-openapi does before it checks any other
+// keyword: its enum, and the schemas of its allOf, anyOf, oneOf or not, which hold a nullable $ref, say.
+func takeNull(s map[string]any) {
+	if enum, ok := s["enum"].([]any); ok && !slices.Contains(enum, nil) {
+		s["enum"] = append(enum, nil)
+	}
+
+	moved := make(map[string]any)
+	for _, k := range append(_xOf, "discriminator") {
+		if v, ok := s[k]; ok {
+			moved[k] = v
+			delete(s, k)
+		}
+	}
+
+	// OpenAPI 3.0 has no if: a schema of it has none of its own.
+	if len(moved) > 0 {
+		s["if"], s["else"] = map[string]any{"type": "null"}, moved
+	}
+}
+
+// discriminate makes the oneOf and the anyOf of s, a schema with a discriminator, take an object as kin-openapi does:
+// one whose property the discriminator names is a string, and, when the discriminator has a mapping, one of its
+// values, by the branch whose $ref it maps that value to. They take any other value by all their branches.
+func discriminate(s map[string]any) {
+	d, _ := s["discriminator"].(map[string]any)
+	name, _ := d["propertyName"].(string)
+	mapping, _ := d["mapping"].(map[string]any)
+
+	if name == "" {
+		return
+	}
+
+	for _, k := range []string{"oneOf", "anyOf"} {
+		branches, ok := s[k].([]any)
+		if !ok {
+			continue
+		}
+
+		delete(s, k)
+
+		property := map[string]any{"type": "string"}
+		then := map[string]any{"required": []any{name}, "properties": map[string]any{name: property}}
+
+		if len(mapping) == 0 {
+			then[k] = branches
+		} else {
+			values := slices.Sorted(maps.Keys(mapping))
+			enum, cases := make([]any, len(values)), make([]any, len(values))
+
+			for i, v := range values {
+				enum[i] = v
+				cases[i] = map[string]any{
+					"if":   map[string]any{"required": []any{name}, "properties": map[string]any{name: map[string]any{"const": v}}},
+					"then": named(branches, mapping[v]),
+				}
+			}
+
+			property["enum"], then["allOf"] = enum, cases
+		}
+
+		all, _ := s["allOf"].([]any)
+		s["allOf"] = append(all, map[string]any{
+			"if":   map[string]any{"type": "object"},
+			"then": then,
+			"else": map[string]any{k: branches},
+		})
+	}
+}
+
+// named returns the branch of branches whose $ref is ref, a value of a discriminator's mapping: a $ref, or the name
+// of a shared schema. It returns false, which takes nothing, when no branch is: kin-openapi checks a value against no
+// other.
+func named(branches []any, ref any) any {
+	r, _ := ref.(string)
+	if !strings.Contains(r, "/") {
+		r = openapi.DefsPrefix + r
+	}
+
+	for _, b := range branches {
+		if m, ok := b.(map[string]any); ok && m["$ref"] == r {
+			return b
+		}
+	}
+
+	return false
 }
 
 // translateEach translates each schema of a map of them, such as properties, whose keys are names, not keywords.

@@ -35,7 +35,7 @@ func TestOpenAPI_WritesTheMocksOfThePetstore(t *testing.T) {
 	code := run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr)
 	require.Equal(t, 0, code, stderr.String())
 	require.Empty(t, stderr.String())
-	require.Equal(t, "Wrote 45 mock files to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
+	require.Equal(t, "Wrote 85 mock files, and the spec they check requests against, Modern-Petstore.6e8fa666.openapi.yaml, to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
 
 	if *_update {
 		require.NoError(t, os.RemoveAll(golden))
@@ -61,7 +61,7 @@ func TestOpenAPI_WritesTheMocksOfThePetstore(t *testing.T) {
 	// A rerun writes the same files, and lists none as stale.
 	stdout.Reset()
 	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr))
-	require.Contains(t, stdout.String(), "Wrote 45 mock files")
+	require.Contains(t, stdout.String(), "Wrote 85 mock files")
 	require.NotContains(t, stdout.String(), "no longer")
 }
 
@@ -200,7 +200,7 @@ paths:
 	write("  /a: {get: {responses: {\"204\": {description: OK}}}}\n")
 	stdout.Reset()
 	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, io.Discard))
-	require.Contains(t, stdout.String(), "These files were generated from this spec, but no longer are, and still load: v1-b-get-204.mock.yaml\n")
+	require.Contains(t, stdout.String(), "These files were generated from this spec, but no longer are, and the mocks among them still load: X.3d394a2f.openapi.yaml, v1-b-405.mock.yaml, v1-b-get-204.mock.yaml\n")
 
 	// A file of the folder that the command didn't write stays as it is.
 	require.NoError(t, os.WriteFile(filepath.Join(out, "v1-a-get-204.mock.yaml"), []byte("id: mine\n"), 0o600))
@@ -224,7 +224,33 @@ paths:
 	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr))
 	require.Regexp(t, `^\S+ WRN the body is data, not text: written disabled: give a string example `+
 		`media_type=text/csv method=GET mock=report-get-200-text-csv route=/report status=200\n$`, stderr.String())
-	require.Equal(t, "Wrote 2 mock files to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
+	require.Equal(t, "Wrote 3 mock files, and the spec they check requests against, X.652cdcff.openapi.yaml, to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
+}
+
+func TestOpenAPI_TheCommandServesTheMocksItWrites(t *testing.T) {
+	// The mocks that refuse a request that breaks the spec check it with the openapi matcher: the command's server must
+	// know it to load what the openapi command writes, and answer such a request with what it breaks.
+	withoutDockerHost(t)
+
+	dir := t.TempDir()
+	spec := filepath.Join(dir, "spec.yaml")
+	out := filepath.Join(dir, "mocks")
+	require.NoError(t, os.WriteFile(spec, []byte(`openapi: 3.1.0
+info: {title: X, version: "1"}
+paths:
+  /pets/{id}:
+    get:
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {"200": {description: OK, content: {application/json: {example: {name: Rex}}}}}
+`), 0o600))
+	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, io.Discard, io.Discard))
+
+	addr := randomAddr(t)
+	start(t, "--addr", addr, "--mock-files", filepath.Join(out, "*.mock.yaml"), "--log-level", "disabled")
+
+	status, body := firstAnswer(t, "http://"+addr+"/pets/rex")
+	require.Equal(t, http.StatusBadRequest, status, body)
+	require.JSONEq(t, `{"title":"Bad Request","status":400,"errors":["path parameter \"id\": value rex: an invalid integer: invalid syntax"]}`, body)
 }
 
 func TestOpenAPI_StopsWhenInterrupted(t *testing.T) {

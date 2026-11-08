@@ -2,7 +2,7 @@
 enabled: true
 id: pets-post-201-json
 name: Add a pet to the store
-priority: 300
+priority: 600
 request:
     headers:
         Accept:

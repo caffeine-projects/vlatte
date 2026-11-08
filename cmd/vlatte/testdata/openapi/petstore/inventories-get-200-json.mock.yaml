@@ -2,7 +2,7 @@
 enabled: true
 id: inventories-get-200-json
 name: Count pets by status
-priority: 300
+priority: 600
 request:
     headers:
         Accept:

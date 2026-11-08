@@ -58,7 +58,7 @@ func IsJSON(mediaType string) bool {
 // isBase64 reports whether schema says its string is base64: its contentEncoding is base64, or, as OpenAPI 3.0 writes
 // it, its format byte, itself or the schema its $ref points to.
 func (g *generator) isBase64(schema any) bool {
-	root := g.root(schema)
+	root := g.responses.root(schema)
 	defs, _ := root["$defs"].(map[string]any)
 
 	var seen []string
