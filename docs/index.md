@@ -82,6 +82,12 @@ m.MustMock(mockhttp.Getf("/health").Reply(mockhttp.OK()))
 vlatte --addr=:8080
 ```
 
+```sh [OpenAPI]
+# Writes a mock for every response of the spec.
+vlatte openapi --in openapi.yaml --out testdata/vlatte/_mocks
+vlatte --addr=:8080
+```
+
 ```yaml [Docker Compose]
 services:
   payments:

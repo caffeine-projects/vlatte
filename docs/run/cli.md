@@ -9,6 +9,8 @@ curl http://127.0.0.1:8080/hello
 
 Without `--addr`, it listens on a random port and prints the URL. Settings can also come from a `.vlatterc` file or `VLATTE_*` environment variables; see [Configuration](/run/configuration). Run `vlatte --help` to list them, and `vlatte completion --help` to set up shell completion.
 
+`vlatte openapi` writes mock files from an OpenAPI spec, which the command then serves: see [Generating mocks](/openapi/generate).
+
 Mock files can send [webhooks](/webhooks/): the CLI registers the `webhook` listener, and `--webhook-timeout` bounds each request that sets no `timeout` of its own.
 
 Templates read the [key-value store](/templating/#key-value-store) as `.KV`: `--kv-file=kv.csv` fills it from a CSV file, for HTTP and gRPC mocks alike.

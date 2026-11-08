@@ -18,6 +18,7 @@ Both modes load the same mock files and share the matching, reply, recording and
 
 - **Go tests:** [Install the library](/getting-started/installation#the-library), then write an [HTTP or gRPC test](/getting-started/quick-start#http).
 - **Web, mobile or another language:** run the [standalone server](/getting-started/quick-start#the-cli), or follow [Testing a frontend client](/guides/testing-a-frontend-client). A binary or Docker image runs without a Go installation.
+- **An API with an OpenAPI spec:** [generate mocks from the spec](/openapi/), and serve them with the CLI.
 
 ## Where to go next
 
