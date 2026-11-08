@@ -311,6 +311,45 @@ components:
 	}
 }
 
+func TestOpenAPI_NeedNotSendAReadOnlyPropertyHoweverItsReferenceIsEscaped(t *testing.T) {
+	// A reference may escape any character of the name of the schema it points to: it is readOnly all the same.
+	spec := `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, name]
+              properties:
+                id: {$ref: "REF"}
+                name: {type: string}
+      responses: {"201": {description: Created}}
+components:
+  schemas:
+    ServerId: {type: string, readOnly: true}
+`
+
+	for _, ref := range []string{"#/components/schemas/ServerId", "#/components/schemas/%53erverId", "#/components/schemas/Server%49d"} {
+		t.Run(ref, func(t *testing.T) {
+			post := build(t, writeSpec(t, strings.Replace(spec, "REF", ref, 1)), "POST /pets", "request")
+
+			got, messages := match(t, post, request(t, "POST", "/pets", "application/json", `{"name": "Rex"}`))
+			require.True(t, got)
+			require.Empty(t, messages)
+
+			got, messages = match(t, post, request(t, "POST", "/pets", "application/json", `{"id": 1}`))
+			require.False(t, got)
+			require.Equal(t, []string{"body at /id: got number, want string", "body: missing property 'name'"}, messages)
+		})
+	}
+}
+
 func TestOpenAPI_LeavesUncheckedWhatItCannotRead(t *testing.T) {
 	// A body the server didn't keep to read again, such as one past its parsing limit, can't be read without taking
 	// it from the reply, and a pattern Go can't compile can't be checked: neither refuses a request.
@@ -374,6 +413,13 @@ func TestOpenAPI_MatchesARequestWithTheCredentialsOfARequirement(t *testing.T) {
 		{name: "another requirement", matcher: put, req: withHeader(request(t, "PUT", "/v1/pets/"+_id, "", ""), "Authorization", "Bearer t")},
 		{name: "none", matcher: put, req: request(t, "PUT", "/v1/pets/"+_id, "", ""), want: missing},
 		{name: "the spec's requirement", matcher: get, req: withHeader(request(t, "GET", "/v1/pets/"+_id, "", ""), "Authorization", "Bearer t")},
+		{name: "the spec's scheme without a credential", matcher: get, req: withHeader(request(t, "GET", "/v1/pets/"+_id, "", ""), "Authorization", "Bearer"), want: []string{
+			"security: expected an Authorization header of scheme bearer",
+		}},
+		{name: "the spec's scheme with a blank credential", matcher: get, req: withHeader(request(t, "GET", "/v1/pets/"+_id, "", ""), "Authorization", "Bearer    "), want: []string{
+			"security: expected an Authorization header of scheme bearer",
+		}},
+		{name: "a scheme without a credential where any scheme will do", matcher: put, req: withHeader(request(t, "PUT", "/v1/pets/"+_id, "", ""), "Authorization", "Bearer "), want: missing},
 		{name: "another scheme than the spec's", matcher: get, req: withHeader(request(t, "GET", "/v1/pets/"+_id, "", ""), "Authorization", "Basic YTpi"), want: []string{
 			"security: expected an Authorization header of scheme bearer",
 		}},

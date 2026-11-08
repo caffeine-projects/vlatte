@@ -156,6 +156,7 @@ paths:
               properties:
                 day: {type: string, format: date}
                 count: {type: integer, format: int32}
+                total: {type: integer, format: int64}
                 contact: {type: string, format: email}
       responses: {"201": {description: Created}}
 `)
@@ -171,6 +172,26 @@ paths:
 		`body at /count: 2147483648 is not valid int32: value should be between -2147483648 and 2147483647`,
 		`body at /day: 'tomorrow' is not valid date: string doesn't match pattern "^[0-9]{4}-(0[1-9]|10|11|12)-(0[1-9]|[12][0-9]|3[01])$"`,
 	}, messages)
+	// A number past an int64 is past any integer format, exactly as JSON writes it, however large.
+	tests := []struct {
+		body string
+		want string
+	}{
+		{body: `{"count": 9223372036854775808}`, want: "body at /count: 9223372036854775808 is not valid int32: value should be between -2147483648 and 2147483647"},
+		{body: `{"count": 1e309}`, want: "body at /count: 1e309 is not valid int32: value should be between -2147483648 and 2147483647"},
+		{body: `{"total": 9223372036854775808}`, want: "body at /total: 9223372036854775808 is not valid int64: value should be between -9223372036854775808 and 9223372036854775807"},
+		{body: `{"total": -9223372036854775809}`, want: "body at /total: -9223372036854775809 is not valid int64: value should be between -9223372036854775808 and 9223372036854775807"},
+	}
+
+	for _, tt := range tests {
+		got, messages = match(t, post, request(t, "POST", "/events", "application/json", tt.body))
+		require.False(t, got, tt.body)
+		require.Equal(t, []string{tt.want}, messages)
+	}
+
+	got, messages = match(t, post, request(t, "POST", "/events", "application/json", `{"count": 2147483647, "total": 9223372036854775807}`))
+	require.True(t, got)
+	require.Empty(t, messages)
 }
 
 func TestOpenAPI_ChecksABodyAgainstTheBranchItsDiscriminatorNames(t *testing.T) {

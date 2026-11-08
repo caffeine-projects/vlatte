@@ -375,9 +375,13 @@ func (rt *route) missingCredentials(r *http.Request) []string {
 	return []string{"security: expected " + strings.Join(expected, ", or ")}
 }
 
-// credential returns what r must hold for scheme s, and whether it does. A scheme of a type it doesn't know is kept.
+// credential returns what r must hold for scheme s, and whether it does: an Authorization header holds a scheme and,
+// after it, a credential, whatever it is. A scheme of a type it doesn't know is kept.
 func credential(r *http.Request, s *openapi3.SecurityScheme) (string, bool) {
-	scheme, _, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+	if strings.TrimSpace(token) == "" {
+		scheme = ""
+	}
 
 	switch s.Type {
 	case "apiKey":

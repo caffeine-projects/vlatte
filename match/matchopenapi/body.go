@@ -137,6 +137,9 @@ func compile(root map[string]any, formats map[string]bool) (*jsonschema.Schema, 
 	return c.Compile(_bodyURL)
 }
 
+// errPastInt64 is why a whole number past an int64 is of no integer format: kin-openapi checks those as int64 values.
+var errPastInt64 = errors.New("value should be between -9223372036854775808 and 9223372036854775807")
+
 // kinFormat returns how kin-openapi checks a value of the format name: a string by its formats of strings, and a
 // number by its formats of integers when it is whole, else of numbers. A value of a format it doesn't know is valid.
 func kinFormat(name string) func(v any) error {
@@ -147,36 +150,44 @@ func kinFormat(name string) func(v any) error {
 				return f.Validate(x)
 			}
 		case interface{ Int64() (int64, error) }:
-			// A json.Number, as JSON writes it.
-			if i, err := x.Int64(); err == nil {
-				return kinNumberFormat(name, float64(i), &i)
-			}
-
-			if f, err := strconv.ParseFloat(fmt.Sprint(x), 64); err == nil {
-				return kinNumberFormat(name, f, nil)
+			// A json.Number, as JSON writes it, however large.
+			if r, ok := new(big.Rat).SetString(fmt.Sprint(x)); ok {
+				return kinNumberFormat(name, r)
 			}
 		case float64:
 			// A number of a form, as kin-openapi reads it.
-			return kinNumberFormat(name, x, nil)
+			if r := new(big.Rat).SetFloat64(x); r != nil {
+				return kinNumberFormat(name, r)
+			}
 		}
 
 		return nil
 	}
 }
 
-// kinNumberFormat checks f, a number of the format name, or i, the same one exactly, when it is an integer an int64
-// holds, as kin-openapi does.
-func kinNumberFormat(name string, f float64, i *int64) error {
-	if i == nil && f == math.Trunc(f) && f >= math.MinInt64 && f < math.MaxInt64 {
-		n := int64(f)
-		i = &n
-	}
+// kinNumberFormat checks r, an exact number of the format name, as kin-openapi does: a whole one past an int64 is of
+// no integer format, and one past a float64 is the infinity of its sign.
+func kinNumberFormat(name string, r *big.Rat) error {
+	if check, ok := openapi3.SchemaIntegerFormats[name]; ok && r.IsInt() {
+		if r.Num().IsInt64() {
+			return check.Validate(r.Num().Int64())
+		}
 
-	if check, ok := openapi3.SchemaIntegerFormats[name]; ok && i != nil {
-		return check.Validate(*i)
+		// The bound of its sign, for the format's own message when its range is narrower, as int32's is.
+		bound := int64(math.MaxInt64)
+		if r.Sign() < 0 {
+			bound = math.MinInt64
+		}
+
+		if err := check.Validate(bound); err != nil {
+			return err
+		}
+
+		return errPastInt64
 	}
 
 	if check, ok := openapi3.SchemaNumberFormats[name]; ok {
+		f, _ := r.Float64()
 		return check.Validate(f)
 	}
 

@@ -714,6 +714,23 @@ func defName(ref string) (string, bool) {
 	return strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~"), true
 }
 
+// sharedName returns the name of the schema under $defs that ref names whole, decoded as defName decodes it, and
+// whether it names one: #/$defs/Pet/properties/name names none.
+func sharedName(ref string) (string, bool) {
+	frag, _ := url.PathUnescape(ref)
+	if rest, ok := strings.CutPrefix(frag, DefsPrefix); !ok || strings.Contains(rest, "/") {
+		return "", false
+	}
+
+	return defName(ref)
+}
+
+// sharedRef returns the $ref of the schema named name under $defs, its name escaped as a JSON pointer token and in a
+// URI fragment.
+func sharedRef(name string) string {
+	return DefsPrefix + url.PathEscape(strings.ReplaceAll(strings.ReplaceAll(name, "~", "~0"), "/", "~1"))
+}
+
 // seed returns the seed of the fake values of m: the same for the same route, method, status, media type and
 // variant, whatever the mock's ID or the other operations.
 func seed(m Mock) uint64 {
@@ -1045,8 +1062,10 @@ func (vw *view) strip(v any, dropped []string) any {
 		}
 
 		ref, _ := x["$ref"].(string)
-		if name, ok := strings.CutPrefix(ref, DefsPrefix); ok {
-			out["$ref"] = DefsPrefix + vw.copyWithout(name, dropped)
+		if name, ok := sharedName(ref); ok {
+			if copied := vw.copyWithout(name, dropped); copied != name {
+				out["$ref"] = sharedRef(copied)
+			}
 		}
 
 		return out
@@ -1125,7 +1144,7 @@ func sameObject(s, defs map[string]any) []map[string]any {
 		}
 
 		ref, _ := s["$ref"].(string)
-		if name, ok := strings.CutPrefix(ref, DefsPrefix); ok && !followed[name] {
+		if name, ok := sharedName(ref); ok && !followed[name] {
 			followed[name] = true
 
 			def, _ := defs[name].(map[string]any)
@@ -1181,7 +1200,7 @@ func marked(v any, defs map[string]any, marker string, seen []string) bool {
 
 	ref, _ := s["$ref"].(string)
 
-	name, ok := strings.CutPrefix(ref, DefsPrefix)
+	name, ok := sharedName(ref)
 	if !ok || slices.Contains(seen, name) {
 		return false
 	}

@@ -954,6 +954,23 @@ func TestRequestRoots_ARequestNeedNotSendWhatAnySchemaOfTheObjectMarksReadOnly(t
 	}, roots)
 }
 
+func TestRequestRoots_FollowsAReferenceHoweverItEscapesTheNameOfItsSchema(t *testing.T) {
+	// A reference is a URI fragment and a JSON pointer: it may percent-encode any character, and escapes / and ~.
+	defs := map[string]any{
+		"ServerId": map[string]any{"type": "string", "readOnly": true},
+		"a/b~c":    map[string]any{"type": "object", "required": []any{"id"}, "properties": map[string]any{"id": map[string]any{"$ref": "#/$defs/%53erverId"}}},
+	}
+
+	roots := openapi.RequestRoots(defs, []any{
+		map[string]any{"type": "object", "required": []any{"id"}, "properties": map[string]any{"id": map[string]any{"$ref": "#/$defs/Server%49d"}}},
+		map[string]any{"$ref": "#/$defs/a~1b~0c"},
+	})
+
+	require.Equal(t, []any{}, roots[0]["required"])
+	require.Equal(t, "#/$defs/a~1b~0c_2", roots[1]["$ref"])
+	require.Equal(t, []any{}, roots[1]["$defs"].(map[string]any)["a/b~c_2"].(map[string]any)["required"])
+}
+
 func TestGenerate_FinishesOnASharedSchemaThatAppliesToItself(t *testing.T) {
 	// A shared schema copied without a writeOnly property may hold itself, in a property or in an allOf: the
 	// generator copies it once, and the copy holds the copy, at any depth. No value fits an allOf that applies itself,
