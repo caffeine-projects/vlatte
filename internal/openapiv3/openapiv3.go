@@ -22,16 +22,19 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
-// _nullValue is the externalValue a null example holds while kin-openapi validates it.
-const _nullValue = "vlatte:null"
+// _standInValue is the externalValue an example holds while kin-openapi validates it, when kin-openapi reads it as
+// having no value: one whose value is null, or one without a value.
+const _standInValue = "vlatte:example"
 
 // _componentsPrefix starts a reference to a shared schema, which the model writes under $defs.
 const _componentsPrefix = "#/components/schemas/"
 
 // Load reads data, the OpenAPI 3 document at location, and the files its references name, which read returns. It
-// logs on log, at warn level, what it reads but cannot honor, such as servers with different paths: [zerolog.Nop]
-// silences it. It fails with
-// [openapi.ErrInvalid] for a document kin-openapi finds invalid, or with a null where an object belongs.
+// logs on log, at warn level, what it reads but cannot honor, such as servers with different paths, and each example
+// that doesn't fit its schema: [zerolog.Nop] silences it. Such an example is converted when the text of each value
+// that breaks it reads as the type its schema asks, such as 12345 for a string, else left out. It fails with
+// [openapi.ErrInvalid] for a document kin-openapi finds invalid but for its examples, or with a null where an object
+// belongs.
 func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.URL) ([]byte, error), log *zerolog.Logger) (*openapi.Document, error) {
 	loader := openapi3.NewLoader()
 	loader.Context = ctx
@@ -52,16 +55,16 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		return nil, fmt.Errorf("%w: %w", openapi.ErrInvalid, err)
 	}
 
-	r, nullAt, serverFiles := readRaw(t, location, files)
+	r, where, serverFiles := readRaw(t, location, files)
 
-	if err := validate(ctx, t, r, nullAt, log); err != nil {
+	if err := validate(ctx, t, r, where, log); err != nil {
 		return nil, fmt.Errorf("%w: %w", openapi.ErrInvalid, err)
 	}
 
 	// The model refers to shared schemas by name: a reference to another file becomes one.
 	t.InternalizeRefs(ctx, refNames(location))
 
-	c := converter{v30: t.IsOpenAPI30(), raw: r}
+	c := converter{v30: t.IsOpenAPI30(), raw: r, places: where, log: log, fits: make(map[fitKey]fitted)}
 	doc := &openapi.Document{Defs: make(map[string]any)}
 
 	if t.Info != nil {
@@ -72,8 +75,9 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 	root := basePath(t.Servers, served, log)
 
 	if t.Components != nil {
-		for name, ref := range t.Components.Schemas {
-			doc.Defs[name] = c.schema(ref)
+		// Sorted, as the paths are.
+		for _, name := range slices.Sorted(maps.Keys(t.Components.Schemas)) {
+			doc.Defs[name] = c.schema(t.Components.Schemas[name])
 		}
 	}
 
@@ -174,24 +178,19 @@ func hasComponent(t *openapi3.T, collection, name string) bool {
 	return m.Kind() == reflect.Map && m.MapIndex(reflect.ValueOf(name)).IsValid()
 }
 
-// validate validates t as kin-openapi does, but for the examples of media types that aren't JSON: OpenAPI writes
-// those as the body itself, such as XML text, which their schema, describing the data, rejects. An example or a
-// default r says is null, which kin-openapi reads as no value, is checked as null: nullAt says where each is. What
-// leaves no mock wrong, [lenient] logs on log instead.
-func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string, log *zerolog.Logger) error {
-	type stashed struct {
-		media    *openapi3.MediaType
-		example  any
-		examples openapi3.Examples
-	}
-
-	// A media type of a shared component is reached from each of its users: it is stashed once. A callback may lead
+// validate validates t as [lenient] does, but for the values of examples, which kin-openapi would reject the
+// document for: the converter checks those the mocks use, as [converter.fit] does. The named examples of media types
+// and parameters are checked otherwise as kin-openapi does, but for one without a value, which OpenAPI allows, and a
+// field OpenAPI doesn't define, which is logged on log. A default r says is null, which kin-openapi reads as no value,
+// is checked as null. The walk meets the parts of t in the same order on every run, which names the same error.
+func validate(ctx context.Context, t *openapi3.T, r raw, where *places, log *zerolog.Logger) error {
+	// A media type of a shared component is reached from each of its users: it is walked once. A callback may lead
 	// back to a path item already walked.
 	seen := make(map[*openapi3.MediaType]bool)
 	walked := make(map[*openapi3.PathItem]bool)
 
 	var (
-		stash   []stashed
+		named   []openapi3.Examples // the named examples kin-openapi checks with their values, as the walk meets them
 		content func(c openapi3.Content)
 		invalid error
 	)
@@ -224,27 +223,29 @@ func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string
 					continue
 				}
 
-				for _, h := range e.Headers {
+				for _, h := range inOrder(e.Headers) {
 					header(h)
 				}
 			}
 
-			// kin-openapi rejects an example and examples together: they stay for it to.
-			if openapi.IsJSON(name) || mt.Example != nil && mt.Examples != nil {
-				continue
+			if mt.Schema != nil {
+				named = append(named, mt.Examples)
 			}
-
-			stash = append(stash, stashed{media: mt, example: mt.Example, examples: mt.Examples})
-			mt.Example, mt.Examples = nil, nil
 		}
 	}
 
-	parameter := func(p *openapi3.ParameterRef) { content(p.Value.Content) }
+	parameter := func(p *openapi3.ParameterRef) {
+		content(p.Value.Content)
+
+		if p.Value.Schema != nil {
+			named = append(named, p.Value.Examples)
+		}
+	}
 
 	response := func(r *openapi3.ResponseRef) {
 		content(r.Value.Content)
 
-		for _, h := range r.Value.Headers {
+		for _, h := range inOrder(r.Value.Headers) {
 			header(h)
 		}
 	}
@@ -259,7 +260,7 @@ func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string
 	var item func(name string, p *openapi3.PathItem)
 
 	callbacks := func(cs openapi3.Callbacks) {
-		for _, c := range cs {
+		for _, c := range inOrder(cs) {
 			for _, name := range slices.Sorted(maps.Keys(c.Value.Map())) {
 				item("callback "+name, c.Value.Value(name))
 			}
@@ -295,7 +296,7 @@ func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string
 			}
 
 			if op.Responses != nil {
-				for _, r := range op.Responses.Map() {
+				for _, r := range inOrder(op.Responses.Map()) {
 					response(r)
 				}
 			}
@@ -315,19 +316,19 @@ func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string
 	}
 
 	if c := t.Components; c != nil {
-		for _, p := range c.Parameters {
+		for _, p := range inOrder(c.Parameters) {
 			parameter(p)
 		}
 
-		for _, h := range c.Headers {
+		for _, h := range inOrder(c.Headers) {
 			header(h)
 		}
 
-		for _, b := range c.RequestBodies {
+		for _, b := range inOrder(c.RequestBodies) {
 			content(b.Value.Content)
 		}
 
-		for _, r := range c.Responses {
+		for _, r := range inOrder(c.Responses) {
 			response(r)
 		}
 
@@ -338,23 +339,32 @@ func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string
 		return invalid
 	}
 
-	// kin-openapi rejects an example with neither a value nor an externalValue, but checks the value of one with an
-	// externalValue, nil here, against its schema: a null example stands in as one.
-	var nulls []*openapi3.Example
+	// kin-openapi rejects an example with neither a value nor an externalValue, as it reads one whose value is null:
+	// OpenAPI doesn't, and a mock leaves out one without a value. Such an example stands in as one with an
+	// externalValue, where kin-openapi checks it: in the components, and where named is.
+	var standIns []*openapi3.Example
 
-	for f, v := range r {
-		if ex, ok := f.object.(*openapi3.Example); ok && v == nil && ex.Value == nil && ex.ExternalValue == "" {
-			ex.ExternalValue = _nullValue
-			nulls = append(nulls, ex)
+	standIn := func(ex *openapi3.Example) {
+		if ex.Value == nil && ex.ExternalValue == "" {
+			ex.ExternalValue = _standInValue
+			standIns = append(standIns, ex)
+		}
+	}
+
+	if t.Components != nil {
+		for _, ex := range t.Components.Examples {
+			standIn(ex.Value)
+		}
+	}
+
+	for _, examples := range named {
+		for _, ex := range examples {
+			standIn(ex.Value)
 		}
 	}
 
 	defer func() {
-		for _, st := range stash {
-			st.media.Example, st.media.Examples = st.example, st.examples
-		}
-
-		for _, ex := range nulls {
+		for _, ex := range standIns {
 			ex.ExternalValue = ""
 		}
 	}()
@@ -363,30 +373,48 @@ func validate(ctx context.Context, t *openapi3.T, r raw, nullAt map[field]string
 		return err
 	}
 
-	// What the examples left out must be, but for their schema.
-	for _, st := range stash {
-		for _, ex := range st.examples {
-			if err := ex.Validate(ctx); err != nil {
-				return err
+	for _, examples := range named {
+		for _, name := range slices.Sorted(maps.Keys(examples)) {
+			ex := examples[name].Value
+			at := cmp.Or(where.of(field{object: ex, name: "value"}), name)
+
+			// kin-openapi checks the fields of an example after its value: one OpenAPI doesn't define is logged, as
+			// lenient logs one elsewhere.
+			switch err := ex.Validate(ctx); {
+			case err == nil:
+			case is[*openapi3.ExtraSiblingFieldsError](err):
+				log.Warn().Str("example", at).Msgf("%v: ignored", err)
+			default:
+				return fmt.Errorf("invalid example %s: %w", at, err)
 			}
 		}
 	}
 
-	return validateNulls(t, nullAt, func(mt *openapi3.MediaType) bool {
-		return slices.ContainsFunc(stash, func(st stashed) bool { return st.media == mt })
-	})
+	return validateDefaults(t, r, where)
 }
 
-// lenient validates t as kin-openapi does, and returns the first problem that would make a mock wrong. It logs the
-// others on log, at warn level: a field OpenAPI doesn't define, which the mocks ignore, and two paths that differ only
-// in the names of their parameters, whose mocks of one method answer the same requests. It doesn't compile patterns:
-// a pattern is an ECMA-262 regular expression, such as a lookahead, which Go's regexp may not compile.
+// inOrder returns the values of m in the order of their keys.
+func inOrder[M ~map[string]V, V any](m M) []V {
+	out := make([]V, 0, len(m))
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		out = append(out, m[k])
+	}
+
+	return out
+}
+
+// lenient validates t as kin-openapi does, but for the values of examples, and returns the first problem that would
+// make a mock wrong. It logs the others on log, at warn level: a field OpenAPI doesn't define, which the mocks ignore,
+// and two paths that differ only in the names of their parameters, whose mocks of one method answer the same
+// requests. It doesn't compile patterns: a pattern is an ECMA-262 regular expression, such as a lookahead, which Go's
+// regexp may not compile.
 func lenient(ctx context.Context, t *openapi3.T, log *zerolog.Logger) error {
 	var allowed []string
 
 	for {
 		opts := []openapi3.ValidationOption{
-			openapi3.EnableMultiError(), openapi3.DisableSchemaPatternValidation(), openapi3.AllowExtraSiblingFields(allowed...),
+			openapi3.EnableMultiError(), openapi3.DisableSchemaPatternValidation(), openapi3.DisableExamplesValidation(),
+			openapi3.AllowExtraSiblingFields(allowed...),
 		}
 
 		if t.IsOpenAPI31OrLater() {
@@ -457,41 +485,28 @@ func is[T error](err error) bool {
 	return ok
 }
 
-// validateNulls checks each example and default of nullAt, which is null, as kin-openapi checks one that isn't,
-// against its schema, in the order of where they are, but those of the media types outside, as validate leaves them.
-func validateNulls(t *openapi3.T, nullAt map[field]string, outside func(mt *openapi3.MediaType) bool) error {
+// validateDefaults checks each default r says is null, which kin-openapi reads as no value, against its schema, as
+// kin-openapi checks one that isn't, in the order of where they are.
+func validateDefaults(t *openapi3.T, r raw, where *places) error {
 	opts := []openapi3.SchemaValidationOption{openapi3.MultiErrors()}
 	if t.IsOpenAPI31OrLater() {
 		opts = append(opts, openapi3.EnableJSONSchema2020())
 	}
 
-	byPlace := func(a, b field) int { return cmp.Or(cmp.Compare(nullAt[a], nullAt[b]), cmp.Compare(a.name, b.name)) }
+	var nulls []field
 
-	for _, f := range slices.SortedFunc(maps.Keys(nullAt), byPlace) {
-		var schema *openapi3.SchemaRef
-
-		// A named example is checked by kin-openapi, as validate has it, and the examples of a schema are a list.
-		switch o := f.object.(type) {
-		case *openapi3.MediaType:
-			if !outside(o) {
-				schema = o.Schema
-			}
-		case *openapi3.Parameter:
-			schema = o.Schema
-		case *openapi3.Header:
-			schema = o.Schema
-		case *openapi3.Schema:
-			if f.name != "examples" {
-				schema = &openapi3.SchemaRef{Value: o}
-			}
+	for f, v := range r {
+		if _, ok := f.object.(*openapi3.Schema); ok && f.name == "default" && v == nil {
+			nulls = append(nulls, f)
 		}
+	}
 
-		if schema == nil || schema.Value == nil {
-			continue
-		}
+	slices.SortFunc(nulls, func(a, b field) int { return cmp.Compare(where.of(a), where.of(b)) })
 
-		if err := t.ValidateSchemaJSON(schema.Value, nil, opts...); err != nil {
-			return fmt.Errorf("invalid %s of %s: %w", f.name, nullAt[f], err)
+	for _, f := range nulls {
+		s, _ := f.object.(*openapi3.Schema)
+		if err := t.ValidateSchemaJSON(s, nil, opts...); err != nil {
+			return fmt.Errorf("invalid default of %s: %w", where.of(f), err)
 		}
 	}
 
@@ -559,8 +574,11 @@ func basePath(servers openapi3.Servers, served func(s *openapi3.Server) *url.URL
 
 // converter translates the parts of a document into the model.
 type converter struct {
-	v30 bool // the document is OpenAPI 3.0, whose schemas are not JSON Schema 2020-12
-	raw raw  // the examples as the spec writes them
+	v30    bool              // the document is OpenAPI 3.0, whose schemas are not JSON Schema 2020-12
+	raw    raw               // the examples as the spec writes them
+	places *places           // where the fields of raw are, and the text of their scalars
+	log    *zerolog.Logger   // where an example that doesn't fit its schema is logged
+	fits   map[fitKey]fitted // what fit returned for each example that didn't fit, at a place the spec gives
 }
 
 // operation translates op, of the path item with the parameters common.
@@ -577,17 +595,18 @@ func (c converter) operation(path, method string, common openapi3.Parameters, op
 
 	for _, name := range slices.Sorted(maps.Keys(params)) {
 		p := params[name]
-		examples, schema, mediaType := c.examplesOf(p, p.Example, p.Examples), p.Schema, ""
+		examples, schema, mediaType := c.examplesOf(p, p.Example, p.Examples, p.Schema, false), p.Schema, ""
 
 		// A parameter has a schema or content, of one media type.
 		if len(p.Content) > 0 {
 			mediaType = slices.Min(slices.Collect(maps.Keys(p.Content)))
 			media := p.Content[mediaType]
-			examples, schema = append(examples, c.examplesOf(media, media.Example, media.Examples)...), media.Schema
+			examples = append(examples, c.examplesOf(media, media.Example, media.Examples, dataOf(mediaType, media.Schema), false)...)
+			schema = media.Schema
 		}
 
 		if s := schema; s != nil && s.Value != nil {
-			examples = append(examples, c.examplesOf(s.Value, s.Value.Example, nil)...)
+			examples = append(examples, c.examplesOf(s.Value, s.Value.Example, nil, s, false)...)
 
 			var kin any
 			if s.Value.Examples != nil {
@@ -597,8 +616,10 @@ func (c converter) operation(path, method string, common openapi3.Parameters, op
 			v, _ := c.raw.value(s.Value, "examples", kin)
 			list, _ := v.([]any)
 
-			for _, v := range list {
-				examples = append(examples, openapi.Example{Value: v})
+			for i, v := range list {
+				if v, ok := c.fit(v, s, false, field{object: s.Value, name: "examples"}, "/"+strconv.Itoa(i)); ok {
+					examples = append(examples, openapi.Example{Value: v})
+				}
 			}
 		}
 
@@ -633,14 +654,15 @@ func (c converter) response(status string, res *openapi3.Response) openapi.Respo
 			Name:     name,
 			Explode:  ref.Value.Explode != nil && *ref.Value.Explode,
 			Schema:   c.schema(ref.Value.Schema),
-			Examples: c.examplesOf(ref.Value, ref.Value.Example, ref.Value.Examples),
+			Examples: c.examplesOf(ref.Value, ref.Value.Example, ref.Value.Examples, ref.Value.Schema, true),
 		}
 
 		// A header has a schema or content, of one media type.
 		if len(ref.Value.Content) > 0 {
 			mt := slices.Min(slices.Collect(maps.Keys(ref.Value.Content)))
 			media := ref.Value.Content[mt]
-			h.MediaType, h.Schema, h.Examples = mt, c.schema(media.Schema), c.examplesOf(media, media.Example, media.Examples)
+			h.MediaType, h.Schema = mt, c.schema(media.Schema)
+			h.Examples = c.examplesOf(media, media.Example, media.Examples, dataOf(mt, media.Schema), true)
 		}
 
 		r.Headers = append(r.Headers, h)
@@ -648,35 +670,55 @@ func (c converter) response(status string, res *openapi3.Response) openapi.Respo
 
 	for _, mt := range slices.Sorted(maps.Keys(res.Content)) {
 		media := res.Content[mt]
-		r.Content = append(r.Content, openapi.Content{MediaType: mt, Schema: c.schema(media.Schema), Examples: c.examplesOf(media, media.Example, media.Examples)})
+		r.Content = append(r.Content, openapi.Content{
+			MediaType: mt, Schema: c.schema(media.Schema), Examples: c.examplesOf(media, media.Example, media.Examples, dataOf(mt, media.Schema), true),
+		})
 	}
 
 	return r
 }
 
 // examplesOf returns the example of owner, the object whose example field is example, if it has one, then the named
-// examples, in name order, with their values as the spec writes them. A named example at an externalValue, not
-// inline, is left out.
-func (c converter) examplesOf(owner, example any, named openapi3.Examples) []openapi.Example {
+// examples, in name order, with their values as the spec writes them, fitted to schema, as the body of a response
+// when response is set, as fit does. A named example at an externalValue, not inline, is left out.
+func (c converter) examplesOf(owner, example any, named openapi3.Examples, schema *openapi3.SchemaRef, response bool) []openapi.Example {
 	var out []openapi.Example
-	if v, ok := c.raw.value(owner, "example", example); ok {
-		out = append(out, openapi.Example{Value: v})
+
+	f := field{object: owner, name: "example"}
+	if v, ok := c.raw.value(owner, f.name, example); ok {
+		if v, ok = c.fit(v, schema, response, f, ""); ok {
+			out = append(out, openapi.Example{Value: v})
+		}
 	}
 
 	for _, name := range slices.Sorted(maps.Keys(named)) {
 		// kin-openapi resolves every reference it loads, or fails: a reference holds its value.
 		ex := named[name].Value
-		if v, ok := c.raw.value(ex, "value", ex.Value); ok {
-			out = append(out, openapi.Example{Name: name, Value: v})
+
+		f := field{object: ex, name: "value"}
+		if v, ok := c.raw.value(ex, f.name, ex.Value); ok {
+			if v, ok = c.fit(v, schema, response, f, ""); ok {
+				out = append(out, openapi.Example{Name: name, Value: v})
+			}
 		}
 	}
 
 	return out
 }
 
+// dataOf returns schema, of a media type, when the examples of the media type are the data it describes: those of
+// JSON. Those of another media type, such as XML, are the body as sent, which no schema describes.
+func dataOf(mediaType string, schema *openapi3.SchemaRef) *openapi3.SchemaRef {
+	if openapi.IsJSON(mediaType) {
+		return schema
+	}
+
+	return nil
+}
+
 // schema translates the schema of ref into JSON Schema 2020-12, or returns nil for no schema. kin-openapi read the
 // schema from JSON, which it writes back, with each integer as the spec writes it: a $ref as written, with the
-// keywords beside it.
+// keywords beside it. Its examples are fitted to their schemas, as fitSchema does.
 func (c converter) schema(ref *openapi3.SchemaRef) any {
 	if ref == nil {
 		return nil
@@ -691,6 +733,8 @@ func (c converter) schema(ref *openapi3.SchemaRef) any {
 	case ref.Value != nil:
 		v = exact(v, c.raw[field{object: ref.Value}])
 	}
+
+	c.fitSchema(v, ref)
 
 	return c.translate(v)
 }
