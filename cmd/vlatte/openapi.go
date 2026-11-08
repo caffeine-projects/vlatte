@@ -35,6 +35,8 @@ XML included, a string example, as an object has no text and its mock is written
 response gets a mock, which answers the client whose Accept prefers it, and each operation a 406 for a client that
 takes none. Responses nothing in a request predicts, such as 503, are written disabled: the admin API enables them.
 Mocks written by hand win over them. What the spec asks that can't be honored is logged on standard error.
+So is an example that doesn't fit its schema, such as 12345 for a string: converted when its text reads as the type
+the schema asks, else left out.
 Each file names the title of its spec. A rerun overwrites the files written from a spec of that title, lists those
 it no longer writes, and never touches other files: write specs that share a title to different folders.
 A spec over http(s) refers to http(s) URLs only.`,
