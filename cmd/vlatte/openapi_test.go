@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"testing"
 
@@ -35,7 +34,7 @@ func TestOpenAPI_WritesTheMocksOfThePetstore(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr)
 	require.Equal(t, 0, code, stderr.String())
-	require.Regexp(t, `^\S+ INF reading the spec in=`+regexp.QuoteMeta(spec)+`\n`+
+	require.Regexp(t, `^\S+ INF reading the spec\n`+
 		`\S+ INF generating the mocks openapi=3\.2\.0 operations=15 schemas=8 title="Modern Petstore"\n`+
 		`\S+ INF generated the mocks mocks=45 took=\S+ warnings=0\n$`, stderr.String())
 	require.Equal(t, "Wrote 45 mock files to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
@@ -151,6 +150,24 @@ func TestOpenAPI_FailsOnASpecItCannotUse(t *testing.T) {
 	}
 }
 
+func TestOpenAPI_LogsNoCredentialOfTheSpecsURL(t *testing.T) {
+	// A spec's URL may carry a password or a token, and standard error often ends up in a CI log that others read.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "openapi: 3.1.0\ninfo: {title: X, version: \"1\"}\npaths: {/a: {get: {responses: {\"204\": {description: OK}}}}}\n")
+	}))
+	t.Cleanup(srv.Close)
+
+	u, err := url.Parse(srv.URL + "/spec.yaml?token=DUMMY_TOKEN")
+	require.NoError(t, err)
+	u.User = url.UserPassword("user", "DUMMY_PASSWORD")
+
+	var stderr bytes.Buffer
+	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", u.String(), "--out", t.TempDir()}, nil, io.Discard, &stderr))
+	require.Contains(t, stderr.String(), "INF generated the mocks")
+	require.NotContains(t, stderr.String(), "DUMMY_PASSWORD")
+	require.NotContains(t, stderr.String(), "DUMMY_TOKEN")
+}
+
 func TestOpenAPI_ASpecOverHTTPReadsNoLocalFile(t *testing.T) {
 	// Whoever serves a spec decides what it refers to: a remote one must not copy a local file into the mocks.
 	local := filepath.Join(t.TempDir(), "secret.yaml")
@@ -261,7 +278,7 @@ func TestOpenAPI_SaysWhichStepFailed(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	require.Equal(t, 1, run(t.Context(), []string{"openapi", "--in", spec, "--out", t.TempDir()}, nil, &stdout, &stderr))
-	require.Regexp(t, `^\S+ INF reading the spec in=`+regexp.QuoteMeta(spec)+`\n`+
+	require.Regexp(t, `^\S+ INF reading the spec\n`+
 		`openapi: not an OpenAPI or Swagger document: expected an openapi or swagger field with its version, such as openapi: 3\.1\.0\n$`, stderr.String())
 	require.Empty(t, stdout.String())
 }

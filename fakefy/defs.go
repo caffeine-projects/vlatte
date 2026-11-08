@@ -14,8 +14,12 @@ const (
 	// _defsPrefix starts a $ref to a schema under $defs.
 	_defsPrefix = "#/$defs/"
 
+	// _base is where a [Defs] compiles its resources: an absolute URL, so that none resolves against the working
+	// directory, which may change after [NewDefs].
+	_base = "fakefy:///"
+
 	// _defsURL is where the validator of a [Defs] reads its schemas.
-	_defsURL = "defs.json"
+	_defsURL = _base + "defs.json"
 )
 
 // Defs holds schemas that the schemas of many values name under $defs, such as the shared schemas of an OpenAPI
@@ -84,8 +88,8 @@ func (d *Defs) reach(v any, defs map[string]any) {
 
 // validator returns the validator of schema, its $refs resolving as [Defs.root] has them, as [validator] does, but
 // compiling each schema of d once: schema refers to them in the document of d. A schema whose $refs might resolve
-// otherwise there, such as one with a $id, a $schema or a $defs name d holds too, or one that doesn't compile so, is
-// compiled with the schemas it reaches, as [validator] does.
+// otherwise there, such as one with a $id, a $schema, a $ref out of it or a $defs name d holds too, or one that doesn't
+// compile so, is compiled with the schemas it reaches, as [validator] does.
 func (d *Defs) validator(schema, root map[string]any) *jsonschema.Schema {
 	if sch := d.shared(schema); sch != nil {
 		return sch
@@ -101,8 +105,12 @@ func (d *Defs) shared(schema map[string]any) *jsonschema.Schema {
 		return nil
 	}
 
-	// A $id or a $schema at any depth moves where its $refs resolve, or how.
-	if anyObject(schema, func(o map[string]any) bool { return has(o, "$id") || has(o, "$schema") }) {
+	// A $id or a $schema at any depth moves where its $refs resolve, or how, and a reference out of the schema
+	// resolves against where it compiles.
+	moved := anyObject(schema, func(o map[string]any) bool {
+		return has(o, "$id") || has(o, "$schema") || external(o["$ref"]) || external(o["$dynamicRef"])
+	})
+	if moved {
 		return nil
 	}
 
@@ -145,7 +153,7 @@ func (d *Defs) shared(schema map[string]any) *jsonschema.Schema {
 
 	// AddResource fails only for a URL added before, and loc is new.
 	d.values++
-	loc := "value" + strconv.Itoa(d.values) + ".json"
+	loc := _base + "value" + strconv.Itoa(d.values) + ".json"
 	_ = d.compiler.AddResource(loc, inst)
 
 	sch, err := d.compiler.Compile(loc)
@@ -197,6 +205,12 @@ func refs(v any, yield func(name string)) {
 
 		return false
 	})
+}
+
+// external reports whether ref is a reference out of the document it is in, one that is not a fragment.
+func external(ref any) bool {
+	s, ok := ref.(string)
+	return ok && !strings.HasPrefix(s, "#")
 }
 
 // anyObject reports whether found holds for an object of v, at any depth, calling it on each until it does.

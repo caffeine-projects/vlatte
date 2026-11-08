@@ -109,6 +109,43 @@ func TestWithDefs_ASchemaWithAnIDReadsNoFile(t *testing.T) {
 	require.Equal(t, int64(5), v)
 }
 
+func TestWithDefs_AnExternalRefReadsTheFileItNamesAsWithout(t *testing.T) {
+	// A $ref out of the schema resolves where it would without Defs: in the file it names, never in the shared schemas.
+	// The file's X is false, so not X holds and the example 1 is the value; Defs' X is {}, so not X never would.
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "defs.json"), []byte(`{"$defs": {"X": false}}`), 0o600))
+	t.Chdir(dir)
+
+	shared := map[string]any{"N": map[string]any{"type": "integer"}, "X": make(map[string]any)}
+
+	for _, ref := range []string{"$ref", "$dynamicRef"} {
+		t.Run(ref, func(t *testing.T) {
+			schema := map[string]any{"$ref": "#/$defs/N", "not": map[string]any{ref: "defs.json#/$defs/X"}, "example": 1}
+
+			v, err := fakefy.New(fakefy.WithSeed(1), fakefy.WithDefs(fakefy.NewDefs(shared))).Schema(schema)
+			require.NoError(t, err)
+			require.Equal(t, int64(1), v)
+		})
+	}
+}
+
+func TestWithDefs_ChecksAgainstTheSharedSchemasAfterTheDirectoryChanges(t *testing.T) {
+	// Defs holds its schemas wherever the process goes: a defs.json in the new directory never stands in for them.
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	defs := fakefy.NewDefs(map[string]any{"N": map[string]any{"type": "integer", "minimum": 1, "example": 0, "enum": []any{5}}})
+
+	sub := filepath.Join(dir, "sub")
+	require.NoError(t, os.Mkdir(sub, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "defs.json"), []byte(`{"$defs": {"N": {}}}`), 0o600))
+	t.Chdir(sub)
+
+	v, err := fakefy.New(fakefy.WithSeed(1), fakefy.WithDefs(defs)).Schema(map[string]any{"$ref": "#/$defs/N"})
+	require.NoError(t, err)
+	require.Equal(t, int64(5), v)
+}
+
 func TestWithDefs_MakesTheValuesOfTheSchemaWithTheSchemasItReachesUnderItsDefs(t *testing.T) {
 	// Defs only saves time: a Faker of a seed makes the same values with it as with the schemas in each schema.
 	pet := map[string]any{

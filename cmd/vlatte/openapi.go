@@ -81,7 +81,7 @@ func writeOpenAPIMocks(ctx context.Context, in, out string, level zerolog.Level,
 	})
 	log := zerolog.New(console).Level(level).With().Timestamp().Logger().Hook(count)
 
-	log.Info().Str("in", in).Msg("reading the spec")
+	log.Info().Msg("reading the spec")
 
 	doc, version, err := loadOpenAPI(ctx, in, &log)
 	if err != nil {
