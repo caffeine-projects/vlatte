@@ -84,11 +84,22 @@ func Write(dir, title string, files []File) (*Report, error) {
 	return report, nil
 }
 
-// encodeFile returns the content of f: header, then a YAML document for each of its mocks.
+// encodeFile returns the content of f: header, then a YAML document for each of its mocks, or its data.
 func encodeFile(header string, f File) ([]byte, error) {
 	var b bytes.Buffer
 
 	b.WriteString(header)
+
+	if f.Mocks == nil {
+		data, err := config.Encode(f.Data, "yaml")
+		if err != nil {
+			return nil, err
+		}
+
+		b.Write(data)
+
+		return b.Bytes(), nil
+	}
 
 	for i, m := range f.Mocks {
 		if i > 0 {
@@ -122,6 +133,10 @@ func mockDoc(m Mock) map[string]any {
 		req["headers"] = map[string]any{"Accept": m.Request.Accept}
 	}
 
+	if m.Request.Custom != nil {
+		req["custom"] = m.Request.Custom
+	}
+
 	res := map[string]any{"status": m.Reply.Status}
 	if len(m.Reply.Header) > 0 {
 		res["header"] = m.Reply.Header
@@ -133,6 +148,10 @@ func mockDoc(m Mock) map[string]any {
 
 	if m.Reply.BodyBase64 != "" {
 		res["body_base64"] = m.Reply.BodyBase64
+	}
+
+	if m.Reply.Template {
+		res["template"] = map[string]any{"enabled": true}
 	}
 
 	return map[string]any{

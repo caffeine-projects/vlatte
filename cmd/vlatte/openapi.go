@@ -35,6 +35,12 @@ XML included, a string example, as an object has no text and its mock is written
 response gets a mock, which answers the client whose Accept prefers it, and each operation a 406 for a client that
 takes none. Responses nothing in a request predicts, such as 503, are written disabled: the admin API enables them.
 Mocks written by hand win over them. What the spec asks that can't be honored is logged on standard error.
+A request that breaks the spec gets the error its server would answer: 401 when it lacks the credential the
+operation's security asks, 415 when its body is in a media type the operation doesn't take, 400, or the 422 the
+operation declares instead, when its parameters or body don't fit their schemas, and 405 when the path has no
+operation of its method. Each answers the operation's response of its status, or else a problem body, which for a 400
+or 422 lists what the request breaks. Those mocks check the request against a copy of the spec written beside them,
+named after its title, such as Pet-Store.openapi.yaml: keep it with them.
 Each file names the title of its spec. A rerun overwrites the files written from a spec of that title, lists those
 it no longer writes, and never touches other files: write specs that share a title to different folders.
 A spec over http(s) refers to http(s) URLs only.`,
@@ -69,13 +75,29 @@ func writeOpenAPIMocks(ctx context.Context, in, out string, stdout, stderr io.Wr
 		return 1
 	}
 
-	report, err := openapi.Write(out, doc.Title, openapi.Generate(doc, &log))
+	files := openapi.Generate(doc, &log)
+
+	report, err := openapi.Write(out, doc.Title, files)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 
-	_, _ = fmt.Fprintf(stdout, "Wrote %d mock files to %s.\n", len(report.Written), out)
+	var (
+		mocks int
+		spec  string
+	)
+
+	for _, f := range files {
+		if f.Mocks == nil {
+			spec = f.Name
+			continue
+		}
+
+		mocks++
+	}
+
+	_, _ = fmt.Fprintf(stdout, "Wrote %d mock files, and the spec they check requests against, %s, to %s.\n", mocks, spec, out)
 
 	if len(report.Stale) > 0 {
 		_, _ = fmt.Fprintf(stdout, "These files were generated from this spec, but no longer are, and still load: %s\n",

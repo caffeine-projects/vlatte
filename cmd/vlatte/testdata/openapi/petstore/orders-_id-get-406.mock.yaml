@@ -2,7 +2,7 @@
 enabled: true
 id: orders-_id-get-406
 name: Get an order by ID
-priority: 1400
+priority: 1700
 request:
     headers:
         Accept:

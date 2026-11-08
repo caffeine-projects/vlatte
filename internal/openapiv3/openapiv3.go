@@ -60,25 +60,27 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 	// The model refers to shared schemas by name: a reference to another file becomes one.
 	t.InternalizeRefs(ctx, refNames(location))
 
-	c := converter{v30: t.IsOpenAPI30(), raw: r}
 	doc := &openapi.Document{Defs: make(map[string]any)}
 
 	if t.Info != nil {
 		doc.Title = t.Info.Title
 	}
 
+	c := converter{v30: t.IsOpenAPI30(), raw: r, security: t.Security, title: doc.Title}
+
 	served := servedFrom(location, serverFiles)
 	root := basePath(t.Servers, served, log)
 
 	if t.Components != nil {
+		c.schemes = t.Components.SecuritySchemes
+
 		for name, ref := range t.Components.Schemas {
 			doc.Defs[name] = c.schema(ref)
 		}
 	}
 
-	if t.Paths == nil {
-		return doc, nil
-	}
+	// The base path of each operation, which the copy of the spec puts it under.
+	bases := make(map[*openapi3.Operation]string)
 
 	// Sorted, so the warnings are logged in the same order on every run.
 	paths := t.Paths.Map()
@@ -103,11 +105,42 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 				o.BasePath = basePath(*op.Servers, served, &opLog)
 			}
 
+			bases[op] = o.BasePath
 			doc.Operations = append(doc.Operations, o)
 		}
 	}
 
+	if doc.Spec, err = specCopy(t, bases); err != nil {
+		return nil, fmt.Errorf("openapi: copying the spec: %w", err)
+	}
+
 	return doc, nil
+}
+
+// specCopy returns t as data, for the mocks that refuse a request that breaks it: each operation under one server,
+// of its base path in bases, or none for none, and the document and its paths without servers. Its paths are as t
+// writes them, so a reference into them still resolves.
+func specCopy(t *openapi3.T, bases map[*openapi3.Operation]string) (any, error) {
+	t.Servers = nil
+
+	for _, item := range t.Paths.Map() {
+		item.Servers = nil
+
+		for _, op := range item.Operations() {
+			op.Servers = nil
+
+			if base := bases[op]; base != "" {
+				op.Servers = &openapi3.Servers{{URL: (&url.URL{Path: base}).EscapedPath()}}
+			}
+		}
+	}
+
+	data, err := t.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+
+	return value.DecodeJSON(data)
 }
 
 // refNames returns how kin-openapi names, as a shared component, what a reference of the spec at location names
@@ -477,13 +510,22 @@ func basePath(servers openapi3.Servers, served func(s *openapi3.Server) *url.URL
 
 // converter translates the parts of a document into the model.
 type converter struct {
-	v30 bool // the document is OpenAPI 3.0, whose schemas are not JSON Schema 2020-12
-	raw raw  // the examples as the spec writes them
+	v30      bool                          // the document is OpenAPI 3.0, whose schemas are not JSON Schema 2020-12
+	raw      raw                           // the examples as the spec writes them
+	security openapi3.SecurityRequirements // the document's, which an operation without its own has
+	schemes  openapi3.SecuritySchemes      // the security schemes of the document, by name
+	title    string                        // the title of the document, which a Basic challenge names as its realm
 }
 
 // operation translates op, of the path item with the parameters common.
 func (c converter) operation(path, method string, common openapi3.Parameters, op *openapi3.Operation) openapi.Operation {
-	o := openapi.Operation{Method: method, Path: path, Summary: op.Summary}
+	o := openapi.Operation{Method: method, Path: path, ID: op.OperationID, Summary: op.Summary}
+	o.Secured, o.Challenges = c.auth(op.Security)
+	o.HasInput = len(common) > 0 || len(op.Parameters) > 0 || op.RequestBody != nil
+
+	if op.RequestBody != nil && op.RequestBody.Value != nil {
+		o.Consumes = slices.Sorted(maps.Keys(op.RequestBody.Value.Content))
+	}
 
 	// An operation's parameter replaces the path item's of the same name and location.
 	params := make(map[string]*openapi3.Parameter)
@@ -532,6 +574,62 @@ func (c converter) operation(path, method string, common openapi3.Parameters, op
 	}
 
 	return o
+}
+
+// auth returns whether an operation whose security requirements are own, or the document's when nil, refuses a
+// request without credentials, and the challenges of the schemes they name, each once.
+func (c converter) auth(own *openapi3.SecurityRequirements) (bool, []string) {
+	requirements := c.security
+	if own != nil {
+		requirements = *own
+	}
+
+	// An empty requirement takes a request without credentials.
+	if len(requirements) == 0 || slices.ContainsFunc(requirements, func(r openapi3.SecurityRequirement) bool { return len(r) == 0 }) {
+		return false, nil
+	}
+
+	var challenges []string
+
+	for _, r := range requirements {
+		for _, name := range slices.Sorted(maps.Keys(r)) {
+			ref := c.schemes[name]
+			if ref == nil || ref.Value == nil {
+				continue
+			}
+
+			if ch := c.challenge(ref.Value); ch != "" && !slices.Contains(challenges, ch) {
+				challenges = append(challenges, ch)
+			}
+		}
+	}
+
+	return true, challenges
+}
+
+// _quoted escapes text inside an HTTP quoted string.
+var _quoted = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+
+// challenge returns the challenge of scheme s, as a WWW-Authenticate header gives it, or "" for none: Bearer for a
+// token, Basic with the document's title as its realm, or the name of another HTTP scheme, such as Digest.
+func (c converter) challenge(s *openapi3.SecurityScheme) string {
+	switch s.Type {
+	case "oauth2", "openIdConnect":
+		return "Bearer"
+	case "http":
+		scheme := strings.ToLower(s.Scheme)
+		if scheme == "basic" {
+			return `Basic realm="` + _quoted.Replace(c.title) + `"`
+		}
+
+		if scheme == "" {
+			return ""
+		}
+
+		return strings.ToUpper(scheme[:1]) + scheme[1:]
+	default:
+		return ""
+	}
 }
 
 // response translates the response of status.

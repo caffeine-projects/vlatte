@@ -53,10 +53,18 @@ func TestGenerate_GivesEveryMockAUniqueIDEveryFileSystemTakes(t *testing.T) {
 	got := make([]string, 0, len(routes))
 
 	for _, f := range openapi.Generate(&openapi.Document{Operations: ops}, &log) {
+		// The copy of the spec has no mocks.
+		if f.Mocks == nil {
+			continue
+		}
+
 		require.NoError(t, mockid.Check(f.Mocks[0].ID))
 		got = append(got, f.Mocks[0].ID)
 	}
 
-	cut := strings.Repeat("a", 191) + "-8995a87b"
-	require.Equal(t, []string{"PETS-get-200", "Pets-get-200-2", cut[:198] + "-2", cut, "con-get-200", "pets-get-200-3"}, got)
+	cut, cut405 := strings.Repeat("a", 191)+"-8995a87b", strings.Repeat("a", 191)+"-1c07ada3"
+	require.Equal(t, []string{
+		"PETS-405", "PETS-get-200", "Pets-405-2", "Pets-get-200-2", cut405[:198] + "-2", cut405, cut[:198] + "-2", cut,
+		"con-405", "con-get-200", "pets-405-3", "pets-get-200-3",
+	}, got)
 }

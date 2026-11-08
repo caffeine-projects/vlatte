@@ -2,7 +2,7 @@
 enabled: true
 id: pets-get-200-json
 name: List pets matching the given filters
-priority: 300
+priority: 600
 request:
     headers:
         Accept:

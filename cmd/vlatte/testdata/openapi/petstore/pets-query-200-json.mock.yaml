@@ -2,7 +2,7 @@
 enabled: true
 id: pets-query-200-json
 name: Search pets by structured criteria
-priority: 300
+priority: 600
 request:
     headers:
         Accept:

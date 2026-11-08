@@ -16,17 +16,29 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte/fakefy"
+	"github.com/caffeine-projects/vlatte/internal/openapi/pathtemplate"
 )
 
 // The priority bands of generated mocks, which order the mocks of a route. [priority] puts them after the bands of
 // the routes with fewer templated segments.
 const (
-	_bandDisabled      = 100
-	_bandExample       = 200
-	_bandSuccess       = 300
-	_bandNotAcceptable = 400
-	_bandNotFound      = 500
+	_bandDisabled         = 100
+	_bandUnauthorized     = 200
+	_bandUnsupportedMedia = 300
+	_bandBadRequest       = 400
+	_bandExample          = 500
+	_bandSuccess          = 600
+	_bandNotAcceptable    = 700
+	_bandNotFound         = 800
+	_bandNotAllowed       = 900
 )
+
+// _problemJSON is the media type of the bodies the generator writes for a request it refuses: RFC 9457's.
+const _problemJSON = "application/problem+json"
+
+// _problemTemplate is the body of a 400 or 422 the spec gives none for: it lists what the request breaks, as the
+// openapi matcher records it.
+const _problemTemplate = `{"title":"%s","status":%d,"errors":{{ toJSON .Explanation.Messages }}}`
 
 // _routeStep is how far apart [priority] puts the bands of routes whose number of templated segments differs by one:
 // past every band.
@@ -38,7 +50,8 @@ var ValueKeywords = []string{"const", "default", "enum", "example", "examples"}
 // SchemaMapKeywords are the keywords of a schema that hold schemas by name: their keys are names, not keywords.
 var SchemaMapKeywords = []string{"properties", "patternProperties", "$defs", "dependentSchemas"}
 
-// _contractStatuses are the statuses a request's contract decides, which no generated mock answers.
+// _contractStatuses are the statuses a request's contract decides: only the mocks that refuse a request that breaks
+// it answer them.
 var _contractStatuses = []string{"400", "401", "405", "415", "422"}
 
 // Mock is a generated mock: the route and response it answers, and the request it matches.
@@ -49,7 +62,7 @@ type Mock struct {
 	// Route is the path the mock answers, under the document's base path, as the spec writes it.
 	Route string
 
-	// Method is the HTTP method, in upper case.
+	// Method is the HTTP method, in upper case, or "" for a 405, which answers the methods its route lacks.
 	Method string
 
 	// Status is the key of the response the mock answers with, such as 200, 4XX or default.
@@ -80,8 +93,8 @@ type Mock struct {
 
 // Request is what a generated mock matches.
 type Request struct {
-	// Method is the HTTP method.
-	Method string
+	// Method is what the method matches, as a mock file's method key takes it: a method, or a matcher list.
+	Method any
 
 	// Path is what the path matches, as a mock file's path key takes it: an equal matcher list, for a route without
 	// parameters or an example of one; or a regex matcher list, for a route with a parameter inside a segment. It is
@@ -93,6 +106,9 @@ type Request struct {
 
 	// Accept is the matcher spec of the Accept header, or nil for none.
 	Accept []any
+
+	// Custom are the matcher specs of the whole request, as a mock file's custom key takes them, or nil for none.
+	Custom []any
 }
 
 // Reply is what a generated mock answers.
@@ -108,13 +124,19 @@ type Reply struct {
 
 	// BodyBase64 is the body as bytes, in standard base64, in place of Body. "" is none.
 	BodyBase64 string
+
+	// Template tells whether Body is a template, which the server renders for each request.
+	Template bool
 }
 
 // Generate makes the mock files of doc: mocks named by [RouteFirst], each in a file of its own, as [PerMock] lays
 // them out. It logs on log, at warn level, each thing it could not honor, naming its mock, and [zerolog.Nop] silences
 // it: a body no value fits, by its examples or its schema, leaves its mock without one and disabled.
 func Generate(doc *Document, log *zerolog.Logger) []File {
-	g := generator{doc: doc, defs: make(map[string]any, len(doc.Defs)), copies: make(map[string]string)}
+	g := generator{
+		doc: doc, defs: make(map[string]any, len(doc.Defs)), copies: make(map[string]string),
+		spec: cmp.Or(part(doc.Title), "spec") + ".openapi.yaml", routes: make(map[string]*routeMethods),
+	}
 	// Sorted, so the copies of shared schemas get the same names on every run.
 	for _, name := range slices.Sorted(maps.Keys(doc.Defs)) {
 		g.defs[name] = g.stripWriteOnly(doc.Defs[name], nil)
@@ -127,6 +149,10 @@ func Generate(doc *Document, log *zerolog.Logger) []File {
 
 	for _, op := range ops {
 		g.operation(op)
+	}
+
+	for _, r := range slices.Sorted(maps.Keys(g.routes)) {
+		g.notAllowed(r, g.routes[r])
 	}
 
 	name(g.mocks, RouteFirst)
@@ -146,17 +172,25 @@ func Generate(doc *Document, log *zerolog.Logger) []File {
 		e.Msg(w.message)
 	}
 
-	return PerMock(g.mocks)
+	return append(PerMock(g.mocks), File{Name: g.spec, Data: doc.Spec})
 }
 
 // generator holds the mocks and warnings of a document as they are made.
 type generator struct {
 	doc      *Document
-	defs     map[string]any    // the document's shared schemas without writeOnly properties, and copyWithout's copies
-	copies   map[string]string // the names in defs of copyWithout's copies, by shared schema and properties left out
+	defs     map[string]any           // the document's shared schemas without writeOnly properties, and copyWithout's copies
+	copies   map[string]string        // the names in defs of copyWithout's copies, by shared schema and properties left out
+	spec     string                   // the name of the file of the copy of the spec, beside the mocks
+	routes   map[string]*routeMethods // the methods of each route, for its 405
 	mocks    []Mock
 	pending  []string
 	warnings []warning
+}
+
+// routeMethods are the methods of a route, a path of the spec under its base path, and what its mocks match.
+type routeMethods struct {
+	request Request  // what the mocks of the route match, but for their method
+	methods []string // the methods of its operations
 }
 
 // warning is something the generator could not honor in a mock.
@@ -194,6 +228,13 @@ func (g *generator) operation(op Operation) {
 		examples = g.pathExamples(op)
 	}
 	base := Mock{Route: route, Method: op.Method, Name: cmp.Or(op.Summary, op.Method+" "+route), Request: request}
+
+	if g.routes[route] == nil {
+		g.routes[route] = &routeMethods{request: request}
+	}
+
+	g.routes[route].methods = append(g.routes[route].methods, op.Method)
+	g.contract(op, base)
 
 	for _, r := range op.Responses {
 		if slices.Contains(_contractStatuses, r.Status) || r.Status == "406" || r.Status == "404" && primary != nil {
@@ -251,6 +292,108 @@ func (g *generator) operation(op Operation) {
 
 		g.fallback(m, g.withoutRanges(m, *notFound), http.StatusNotFound)
 	}
+}
+
+// contract adds the mocks of op that refuse a request that breaks its contract, as base matches it: a 401 for a
+// request without the credentials op asks for, a 415 for a body of a media type it doesn't take, and a 400 for
+// parameters or a body that break their schemas, or a 422 when op declares one and no 400. Each matches what the
+// openapi matcher, under not, says a request breaks.
+func (g *generator) contract(op Operation, base Mock) {
+	operation := cmp.Or(op.ID, op.Method+" "+base.Route)
+
+	refuse := func(status string, band int, check string, header map[string]string) {
+		m := base
+		m.Status = status
+		m.Priority = priority(band, base.Route)
+		m.Enabled = true
+		m.Request.Custom = []any{[]any{"not", []any{"openapi", map[string]any{"spec": g.spec, "operation": operation, "check": check}}}}
+		g.refuse(m, findResponse(op.Responses, status), check == "request", header)
+	}
+
+	if op.Secured {
+		var header map[string]string
+		if len(op.Challenges) > 0 {
+			header = map[string]string{"WWW-Authenticate": strings.Join(op.Challenges, ", ")}
+		}
+
+		refuse("401", _bandUnauthorized, "security", header)
+	}
+
+	if len(op.Consumes) > 0 {
+		refuse("415", _bandUnsupportedMedia, "content_type", map[string]string{"Accept": strings.Join(op.Consumes, ", ")})
+	}
+
+	if op.HasInput {
+		status := "400"
+		if findResponse(op.Responses, "400") == nil && findResponse(op.Responses, "422") != nil {
+			status = "422"
+		}
+
+		refuse(status, _bandBadRequest, "request", nil)
+	}
+}
+
+// refuse adds the mocks m answers a request it refuses with: declared, the operation's response, as [generator.fallback]
+// adds them, or else a problem body, which, when invalid, lists what the request breaks. Each header of header the
+// response doesn't declare is added.
+func (g *generator) refuse(m Mock, declared *Response, invalid bool, header map[string]string) {
+	code := statusCode(m.Status, http.StatusBadRequest)
+
+	var r Response
+	if declared != nil {
+		r = g.withoutRanges(m, *declared)
+	}
+
+	r.Headers = slices.Clone(r.Headers)
+	for _, name := range slices.Sorted(maps.Keys(header)) {
+		if !slices.ContainsFunc(r.Headers, func(h Header) bool { return strings.EqualFold(h.Name, name) }) {
+			r.Headers = append(r.Headers, Header{Name: name, Examples: []Example{{Value: header[name]}}})
+		}
+	}
+
+	if len(r.Content) > 0 {
+		g.fallback(m, r, code)
+		return
+	}
+
+	m.Reply = Reply{Status: code, Header: g.headers(m, r), Body: map[string]any{"title": http.StatusText(code), "status": code}}
+	if invalid {
+		m.Reply.Body, m.Reply.Template = fmt.Sprintf(_problemTemplate, http.StatusText(code), code), true
+	}
+
+	g.add(withContentType(m, _problemJSON))
+}
+
+// notAllowed adds the 405 of path, whose operations' methods and request r holds, which answers a method none of them
+// has, but a HEAD when one has GET, and OPTIONS, which a CORS preflight sends. Its Allow header lists the others.
+func (g *generator) notAllowed(path string, r *routeMethods) {
+	allowed := slices.Clone(r.methods)
+	if slices.Contains(allowed, http.MethodGet) && !slices.Contains(allowed, http.MethodHead) {
+		allowed = append(allowed, http.MethodHead)
+	}
+
+	slices.Sort(allowed)
+
+	taken := slices.Clone(allowed)
+	if !slices.Contains(taken, http.MethodOptions) {
+		taken = append(taken, http.MethodOptions)
+		slices.Sort(taken)
+	}
+
+	methods := make([]any, len(taken))
+	for i, method := range taken {
+		methods[i] = method
+	}
+
+	m := Mock{Route: path, Status: "405", Name: path + ": method not allowed", Priority: priority(_bandNotAllowed, path), Enabled: true, Request: r.request}
+	m.Request.Method = []any{"not", []any{"isin", methods}}
+	m.Reply = Reply{
+		Status: http.StatusMethodNotAllowed,
+		Header: map[string]string{"Allow": strings.Join(allowed, ", ")},
+		Body:   map[string]any{"title": http.StatusText(http.StatusMethodNotAllowed), "status": http.StatusMethodNotAllowed},
+	}
+
+	g.add(withContentType(m, _problemJSON))
 }
 
 // fallback adds the mocks of response r answering with status as [generator.contents] does, for a response that
@@ -674,25 +817,10 @@ func pathValue(p Parameter, v any) string {
 	return prefix + strings.Join(items, sep)
 }
 
-// _param matches a parameter of a path, such as {id}.
-var _param = regexp.MustCompile(`\{[^{}/]+\}`)
-
 // priority returns the priority of a mock of route in band: every mock of a route answers before those of a route
 // with more templated segments, as OpenAPI matches /pets/mine before /pets/{id}, whatever their bands.
 func priority(band int, route string) int {
-	return templated(route)*_routeStep + band
-}
-
-// templated returns the number of segments of path that hold a parameter.
-func templated(path string) int {
-	n := 0
-	for seg := range strings.SplitSeq(path, "/") {
-		if _param.MatchString(seg) {
-			n++
-		}
-	}
-
-	return n
+	return pathtemplate.Templated(route)*_routeStep + band
 }
 
 // _wholeParam matches a segment that is a parameter, such as {id}.
@@ -706,7 +834,7 @@ func routeRequest(method, base, path string) Request {
 	r := Request{Method: method}
 
 	// A glob would read a * or [ of the path as its own.
-	if !_param.MatchString(path) {
+	if !pathtemplate.Param.MatchString(path) {
 		r.Path = []any{"equal", joinPath(base, decoded(path))}
 		return r
 	}
@@ -735,7 +863,7 @@ func fillPath(path string, literal, param func(s string) string) string {
 	var b strings.Builder
 
 	last := 0
-	for _, loc := range _param.FindAllStringIndex(path, -1) {
+	for _, loc := range pathtemplate.Param.FindAllStringIndex(path, -1) {
 		b.WriteString(literal(path[last:loc[0]]))
 		b.WriteString(param(path[loc[0]:loc[1]]))
 

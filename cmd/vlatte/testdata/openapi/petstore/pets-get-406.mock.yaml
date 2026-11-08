@@ -2,7 +2,7 @@
 enabled: true
 id: pets-get-406
 name: List pets matching the given filters
-priority: 400
+priority: 700
 request:
     headers:
         Accept:

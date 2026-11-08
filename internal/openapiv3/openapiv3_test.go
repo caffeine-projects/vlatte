@@ -83,8 +83,10 @@ components:
 			},
 			"discriminator": map[string]any{"propertyName": "name", "mapping": map[string]any{"rex": "#/$defs/Pet"}},
 		}},
+		// TestLoad_CopiesTheSpecWithEachOperationUnderItsBasePath checks the copy.
+		Spec: doc.Spec,
 		Operations: []openapi.Operation{{
-			Method: "GET", Path: "/pets/{id}", BasePath: "/v1", Summary: "Get a pet",
+			Method: "GET", Path: "/pets/{id}", BasePath: "/v1", Summary: "Get a pet", HasInput: true,
 			PathParams: []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{{Name: "rex", Value: "1"}, {Value: "9"}}}},
 			Responses: []openapi.Response{
 				{
@@ -195,7 +197,7 @@ Big: {value: {id: 9007199254740999}}
 	})
 
 	require.Equal(t, []openapi.Operation{{
-		Method: "GET", Path: "/ids/{id}",
+		Method: "GET", Path: "/ids/{id}", HasInput: true,
 		PathParams: []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{
 			{Value: int64(9007199254740993)}, {Value: int64(9007199254740995)}, {Value: int64(9007199254740997)},
 		}}},
@@ -373,8 +375,8 @@ paths:
 
 	param := []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{{Value: "7"}}}}
 	require.Equal(t, []openapi.Operation{
-		{Method: "GET", Path: "/a/{id}", PathParams: param, Responses: []openapi.Response{{Status: "204"}}},
-		{Method: "GET", Path: "/b/{id}", PathParams: param, Responses: []openapi.Response{{Status: "204"}}},
+		{Method: "GET", Path: "/a/{id}", HasInput: true, PathParams: param, Responses: []openapi.Response{{Status: "204"}}},
+		{Method: "GET", Path: "/b/{id}", HasInput: true, PathParams: param, Responses: []openapi.Response{{Status: "204"}}},
 	}, sortedOperations(doc))
 }
 
@@ -734,6 +736,134 @@ paths:
 		{"level": "warn", "path": "/pets", "message": `the servers have different paths: the mocks answer under the first one's, "/v2"`},
 		{"level": "warn", "method": "POST", "path": "/pets", "message": `the servers have different paths: the mocks answer under the first one's, "/v3"`},
 	}, warnings)
+}
+
+func TestLoad_ReadsWhatAnOperationAsksOfARequest(t *testing.T) {
+	// The mocks that refuse a request that breaks the spec are written from these: a 401 for an operation that
+	// takes no request without credentials, with the challenges of its schemes, a 415 for one with a body, and a 400
+	// for one with anything a request can break.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pet "store", version: "1"}
+security: [{bearer: []}]
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters: [{name: limit, in: query, schema: {type: integer}}]
+      responses: {"200": {description: OK}}
+    post:
+      security: [{basic: []}, {key: []}]
+      requestBody:
+        content:
+          application/xml: {schema: {type: string}}
+          application/json: {schema: {type: object}}
+      responses: {"201": {description: Created}}
+  /pets/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    get:
+      security: [{}, {bearer: []}]
+      responses: {"200": {description: OK}}
+    delete:
+      security: [{oauth: [write], key: []}, {oidc: []}, {digest: []}, {bearer: []}]
+      responses: {"204": {description: Deleted}}
+  /health:
+    get:
+      security: []
+      responses: {"200": {description: OK}}
+  /keys:
+    put:
+      security: [{key: []}, {tls: []}]
+      requestBody: {content: {}}
+      responses: {"204": {description: Saved}}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer, bearerFormat: JWT}
+    basic: {type: http, scheme: Basic}
+    digest: {type: http, scheme: digest}
+    key: {type: apiKey, in: header, name: X-API-Key}
+    oauth: {type: oauth2, flows: {implicit: {authorizationUrl: "https://example.com/auth", scopes: {write: Write}}}}
+    oidc: {type: openIdConnect, openIdConnectUrl: "https://example.com/.well-known/openid-configuration"}
+    tls: {type: mutualTLS}
+`})
+
+	type asks struct {
+		ID         string
+		Secured    bool
+		Challenges []string
+		Consumes   []string
+		HasInput   bool
+	}
+
+	got := make(map[string]asks, len(doc.Operations))
+	for _, op := range doc.Operations {
+		got[op.Method+" "+op.Path] = asks{op.ID, op.Secured, op.Challenges, op.Consumes, op.HasInput}
+	}
+
+	require.Equal(t, map[string]asks{
+		"GET /pets":  {ID: "listPets", Secured: true, Challenges: []string{"Bearer"}, HasInput: true},
+		"POST /pets": {Secured: true, Challenges: []string{`Basic realm="Pet \"store\""`}, Consumes: []string{"application/json", "application/xml"}, HasInput: true},
+		// An empty requirement takes a request without credentials.
+		"GET /pets/{id}": {HasInput: true},
+		// Each challenge once, in the order of the requirements.
+		"DELETE /pets/{id}": {Secured: true, Challenges: []string{"Bearer", "Digest"}, HasInput: true},
+		"GET /health":       {},
+		// An API key and a client certificate have no challenge, and a body of no media type no media type to check.
+		"PUT /keys": {Secured: true, HasInput: true},
+	}, got)
+}
+
+func TestLoad_CopiesTheSpecWithEachOperationUnderItsBasePath(t *testing.T) {
+	// The mocks that refuse a request that breaks the spec check it against this copy, written beside them: one
+	// file, whose operations answer where their mocks do, with the servers of their path and the document gone.
+	doc := load(t, map[string]string{
+		"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+servers: [{url: "https://api.example.com/v1/"}]
+paths:
+  /owners:
+    get:
+      parameters: [{name: q, in: query, schema: {$ref: "schemas.yaml#/Name"}}]
+      responses: {"200": {description: OK}}
+  /pets:
+    servers: [{url: /v2}]
+    get:
+      parameters: [{$ref: "#/paths/~1owners/get/parameters/0"}]
+      responses: {"200": {description: OK}}
+    post:
+      servers: [{url: "/my api"}]
+      responses: {"200": {description: OK}}
+  /root:
+    servers: [{url: /}]
+    get: {responses: {"200": {description: OK}}}
+`,
+		"schemas.yaml": "Name: {type: string, maxLength: 3}\n",
+	})
+
+	spec, ok := doc.Spec.(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, spec, "servers")
+
+	paths := spec["paths"].(map[string]any)
+	owners := paths["/owners"].(map[string]any)
+	pets := paths["/pets"].(map[string]any)
+	root := paths["/root"].(map[string]any)
+
+	require.NotContains(t, pets, "servers")
+	require.Equal(t, []any{map[string]any{"url": "/v1"}}, owners["get"].(map[string]any)["servers"])
+	require.Equal(t, []any{map[string]any{"url": "/v2"}}, pets["get"].(map[string]any)["servers"])
+	require.Equal(t, []any{map[string]any{"url": "/my%20api"}}, pets["post"].(map[string]any)["servers"])
+	require.NotContains(t, root["get"], "servers")
+
+	// What another file holds, or a reference into the paths names, is a component of the copy.
+	components := spec["components"].(map[string]any)
+	param := map[string]any{"name": "q", "in": "query", "schema": map[string]any{"$ref": "#/components/schemas/schemas_Name"}}
+
+	require.Equal(t, []any{param}, owners["get"].(map[string]any)["parameters"])
+	require.Equal(t, map[string]any{"type": "string", "maxLength": int64(3)}, components["schemas"].(map[string]any)["schemas_Name"])
+	require.Equal(t, []any{map[string]any{"$ref": "#/components/parameters/paths__1owners_get_parameters_0"}}, pets["get"].(map[string]any)["parameters"])
+	require.Equal(t, param, components["parameters"].(map[string]any)["paths__1owners_get_parameters_0"])
 }
 
 func TestLoad_ResolvesAServerURLAgainstWhereItsFileIsServed(t *testing.T) {

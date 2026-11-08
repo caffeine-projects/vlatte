@@ -2,7 +2,7 @@
 enabled: true
 id: inventories-get-406
 name: Count pets by status
-priority: 400
+priority: 700
 request:
     headers:
         Accept:

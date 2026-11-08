@@ -2,7 +2,7 @@
 enabled: true
 id: pets-post-406
 name: Add a pet to the store
-priority: 400
+priority: 700
 request:
     headers:
         Accept:

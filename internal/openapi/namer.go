@@ -30,7 +30,8 @@ var _mediaNames = map[string]string{
 type Namer func(m *Mock) string
 
 // RouteFirst names a mock route first, so a folder lists the mocks of a route together:
-// <route>-<method>-<status>[-<media>][-<variant>], such as pets-_id-get-200-json. The segments of the route are
+// <route>[-<method>]-<status>[-<media>][-<variant>], such as pets-_id-get-200-json, or pets-_id-405 for a mock of any
+// method. The segments of the route are
 // joined by '-', a parameter {id} is written _id, and a dot inside a part is written '-'. The route / is root.
 func RouteFirst(m *Mock) string {
 	var parts []string
@@ -46,7 +47,11 @@ func RouteFirst(m *Mock) string {
 		parts = append(parts, "root")
 	}
 
-	parts = append(parts, part(strings.ToLower(m.Method)), strings.ToLower(m.Status))
+	if m.Method != "" {
+		parts = append(parts, part(strings.ToLower(m.Method)))
+	}
+
+	parts = append(parts, strings.ToLower(m.Status))
 
 	if m.MediaType != "" {
 		parts = append(parts, part(mediaName(m.MediaType)))

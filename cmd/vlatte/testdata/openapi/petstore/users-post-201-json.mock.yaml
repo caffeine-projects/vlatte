@@ -2,7 +2,7 @@
 enabled: true
 id: users-post-201-json
 name: Register a user account
-priority: 300
+priority: 600
 request:
     headers:
         Accept:

@@ -19,6 +19,8 @@ import (
 	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/openapi"
 	"github.com/caffeine-projects/vlatte/internal/openapiv3"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
+	"github.com/caffeine-projects/vlatte/match/matchopenapi"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
@@ -46,7 +48,8 @@ func TestOpenAPI_TheGeneratedMocksServeTheSpec(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, logs.String())
 
-	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(admin.MustNew()).MockFilePatterns(filepath.Join(dir, "*.mock.yaml")))
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(admin.MustNew()).MockFilePatterns(filepath.Join(dir, "*.mock.yaml")).
+		Matchers(matchbuild.MustNew(matchopenapi.WithMatcher())))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -155,7 +158,8 @@ paths:
 }
 
 func TestOpenAPI_PathAndOperationServersOverrideTheRootServers(t *testing.T) {
-	// An operation's servers replace its path's, which replace the root's: each operation answers under its own.
+	// An operation's servers replace its path's, which replace the root's: each operation answers under its own, and
+	// a path refuses there a method it has only under another.
 	spec := `
 openapi: 3.1.0
 info: {title: Server overrides, version: "1"}
@@ -196,7 +200,7 @@ paths:
 		{method: http.MethodPost, path: "/v3/pets", status: http.StatusOK, body: "operation-level"},
 		{method: http.MethodGet, path: "/v1/owners", status: http.StatusOK, body: "root-level"},
 		{method: http.MethodGet, path: "/v1/pets", status: http.StatusTeapot},
-		{method: http.MethodPost, path: "/v2/pets", status: http.StatusTeapot},
+		{method: http.MethodPost, path: "/v2/pets", status: http.StatusMethodNotAllowed},
 	}
 
 	for _, tt := range tests {
@@ -344,8 +348,8 @@ components:
 }
 
 func TestOpenAPI_APathExampleIsSerializedInTheStyleOfItsParameter(t *testing.T) {
-	// A client sends a matrix parameter as ;id=7: that is the request the example answers, and 7 alone is another
-	// value, which the 404 answers.
+	// A client sends a matrix parameter as ;id=7: that is the request the example answers, ;id=8 is another value,
+	// which the 404 answers, and 7 alone breaks the spec.
 	spec := `
 openapi: 3.1.0
 info: {title: Path serialization, version: "1"}
@@ -368,9 +372,13 @@ paths:
 	require.Equal(t, http.StatusOK, status, body)
 	require.Equal(t, "found", body)
 
-	status, mock, body := call(t, m, http.MethodGet, "/pets/7", "text/plain")
+	status, mock, body := call(t, m, http.MethodGet, "/pets/;id=8", "text/plain")
 	require.Equal(t, http.StatusNotFound, status, body)
 	require.Equal(t, "pets-_id-get-404", mock)
+
+	status, mock, body = call(t, m, http.MethodGet, "/pets/7", "text/plain")
+	require.Equal(t, http.StatusBadRequest, status, body)
+	require.Equal(t, "pets-_id-get-400", mock)
 }
 
 func TestOpenAPI_A404AnswersInTheMediaTypeTheClientPrefers(t *testing.T) {
@@ -851,6 +859,154 @@ paths:
 	require.Equal(t, `{"R":100}`, res.Header.Get("X-Content"))
 }
 
+func TestOpenAPI_ARequestThatBreaksTheSpecGetsTheErrorItsServerWouldAnswer(t *testing.T) {
+	// A client tested against the mocks must meet the errors of the real server: a request without the credential the
+	// operation asks gets a 401, a body in a media type it doesn't take a 415, parameters or a body that don't fit
+	// their schemas a 400, or the 422 the operation declares, saying what broke, and a method the path lacks a 405.
+	// A request of another operation isn't refused by this one's mocks, and a refusal disabled lets the request on.
+	spec := `
+openapi: 3.1.0
+info: {title: Contract, version: "1"}
+security: [{bearer: []}]
+paths:
+  /pets/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, maximum: 100}}
+    get:
+      responses:
+        "200": {description: OK, content: {application/json: {example: {name: Rex}}}}
+    put:
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {type: object, required: [name], properties: {name: {type: string}}}}
+      responses:
+        "204": {description: Saved}
+        "422": {description: Invalid, content: {application/json: {example: {message: a pet needs a name}}}}
+  /pets/mine:
+    get:
+      responses:
+        "200": {description: OK, content: {application/json: {example: {name: Mine}}}}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer}
+`
+	file := filepath.Join(t.TempDir(), "spec.yaml")
+	require.NoError(t, os.WriteFile(file, []byte(spec), 0o600))
+
+	loc, err := openapi.Location(file)
+	require.NoError(t, err)
+
+	doc, err := openapiv3.Load(t.Context(), []byte(spec), loc, nil, new(zerolog.Nop()))
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	_, err = openapi.Write(dir, doc.Title, openapi.Generate(doc, new(zerolog.Nop())))
+	require.NoError(t, err)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(admin.MustNew()).MockFilePatterns(filepath.Join(dir, "*.mock.yaml")).
+		Matchers(matchbuild.MustNew(matchopenapi.WithMatcher())))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	send := func(method, path, auth, contentType, body string) (*http.Response, string) {
+		req, err := http.NewRequestWithContext(t.Context(), method, m.URL()+path, strings.NewReader(body))
+		require.NoError(t, err)
+
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+
+		data, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		return res, string(data)
+	}
+
+	tests := []struct {
+		name        string
+		method      string
+		path        string
+		auth        string
+		contentType string
+		body        string
+		status      int
+		mock        string
+		header      map[string]string
+		want        string
+	}{
+		{
+			name: "a request that keeps it", method: http.MethodGet, path: "/pets/7", auth: "Bearer t",
+			status: http.StatusOK, mock: "pets-_id-get-200-json", want: `{"name":"Rex"}`,
+		},
+		{
+			name: "no credential", method: http.MethodGet, path: "/pets/7",
+			status: http.StatusUnauthorized, mock: "pets-_id-get-401",
+			header: map[string]string{"WWW-Authenticate": "Bearer", "Content-Type": "application/problem+json"},
+			want:   `{"title":"Unauthorized","status":401}`,
+		},
+		{
+			name: "a parameter that breaks it", method: http.MethodGet, path: "/pets/500", auth: "Bearer t",
+			status: http.StatusBadRequest, mock: "pets-_id-get-400", header: map[string]string{"Content-Type": "application/problem+json"},
+			want: `{"title":"Bad Request","status":400,"errors":["path parameter \"id\": maximum: got 500, want 100"]}`,
+		},
+		{
+			name: "a path of another operation", method: http.MethodGet, path: "/pets/mine", auth: "Bearer t",
+			status: http.StatusOK, mock: "pets-mine-get-200-json", want: `{"name":"Mine"}`,
+		},
+		{
+			name: "a body in a media type it doesn't take", method: http.MethodPut, path: "/pets/7", auth: "Bearer t",
+			contentType: "text/plain", body: "Rex",
+			status: http.StatusUnsupportedMediaType, mock: "pets-_id-put-415", header: map[string]string{"Accept": "application/json"},
+			want: `{"title":"Unsupported Media Type","status":415}`,
+		},
+		{
+			name: "a body that breaks it, where the operation declares a 422", method: http.MethodPut, path: "/pets/7",
+			auth: "Bearer t", contentType: "application/json", body: `{}`,
+			status: http.StatusUnprocessableEntity, mock: "pets-_id-put-422-json", want: `{"message":"a pet needs a name"}`,
+		},
+		{
+			name: "a method the path lacks", method: http.MethodDelete, path: "/pets/7", auth: "Bearer t",
+			status: http.StatusMethodNotAllowed, mock: "pets-_id-405", header: map[string]string{"Allow": "GET, HEAD, PUT"},
+			want: `{"title":"Method Not Allowed","status":405}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, body := send(tt.method, tt.path, tt.auth, tt.contentType, tt.body)
+			require.Equal(t, tt.status, res.StatusCode, body)
+			require.Equal(t, tt.mock, res.Header.Get(vlatte.HeaderMatchedMockID))
+			require.JSONEq(t, tt.want, body)
+
+			for name, value := range tt.header {
+				require.Equal(t, value, res.Header.Get(name), name)
+			}
+		})
+	}
+
+	// A refusal is a mock like any other: once disabled, the request it refused reaches the success.
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPatch, m.AdminURL()+"/mocks/pets-_id-get-400", strings.NewReader(`{"enabled": false}`))
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	res, body := send(http.MethodGet, "/pets/500", "Bearer t", "", "")
+	require.Equal(t, http.StatusOK, res.StatusCode, body)
+	require.Equal(t, "pets-_id-get-200-json", res.Header.Get(vlatte.HeaderMatchedMockID))
+}
+
 // serveSpec serves the mocks the generator writes of spec, an OpenAPI document, and fails on a warning.
 func serveSpec(t *testing.T, spec string) *mockhttp.Server {
 	t.Helper()
@@ -895,7 +1051,8 @@ func serveSpecAt(t *testing.T, loc *url.URL) (*mockhttp.Server, string) {
 	_, err = openapi.Write(mocksDir, doc.Title, openapi.Generate(doc, &log))
 	require.NoError(t, err)
 
-	m := mockhttp.MustNew(mockhttp.Setup().Silent().MockFilePatterns(filepath.Join(mocksDir, "*.mock.yaml")))
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().MockFilePatterns(filepath.Join(mocksDir, "*.mock.yaml")).
+		Matchers(matchbuild.MustNew(matchopenapi.WithMatcher())))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
