@@ -428,7 +428,7 @@ func lenient(ctx context.Context, t *openapi3.T, log *zerolog.Logger) error {
 
 		for _, p := range problems {
 			switch {
-			case is[*openapi3.ExtraSiblingFieldsError](p):
+			case p == nil:
 			case is[*openapi3.ConflictingPathsError](p):
 				log.Warn().Msgf("%v: their mocks of one method answer the same requests", p)
 			default:
@@ -440,17 +440,15 @@ func lenient(ctx context.Context, t *openapi3.T, log *zerolog.Logger) error {
 	}
 }
 
-// flatten returns the problems of err, the error of a validation in kin-openapi's multi-error mode.
+// flatten returns the problems of err, the error of a validation in kin-openapi's multi-error mode, or err, which may
+// be nil.
 func flatten(err error) []error {
+	problems := []error{err}
 	if multi, ok := errors.AsType[openapi3.MultiError](err); ok {
-		return multi
+		problems = multi
 	}
 
-	if err != nil {
-		return []error{err}
-	}
-
-	return nil
+	return problems
 }
 
 // is reports whether err, or an error it wraps, is a T.
