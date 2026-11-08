@@ -329,16 +329,21 @@ func (r *resolver) encode(msg proto.Message) ([]byte, error) {
 
 // encodeArray returns msgs as a compact JSON array, each as encode writes it.
 func (r *resolver) encodeArray(msgs []proto.Message) ([]byte, error) {
+	return jsonArray(len(msgs), func(i int) ([]byte, error) { return r.encode(msgs[i]) })
+}
+
+// jsonArray returns the JSON array of n messages, the i-th as encode writes it.
+func jsonArray(n int, encode func(i int) ([]byte, error)) ([]byte, error) {
 	var buf bytes.Buffer
 
 	buf.WriteByte('[')
 
-	for i, msg := range msgs {
+	for i := range n {
 		if i > 0 {
 			buf.WriteByte(',')
 		}
 
-		b, err := r.encode(msg)
+		b, err := encode(i)
 		if err != nil {
 			return nil, fmt.Errorf("message %d: %w", i, err)
 		}

@@ -314,22 +314,25 @@ func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (verify.Patt
 	p := &callPattern{app: app, evals: evals, readsRequest: builder.readsRequest}
 
 	// A pattern that reads the request can't tell whether a request the journal cut matched: the method and the
-	// header go first, as a miss there is a miss.
+	// header go first, as a miss there is a miss. The server's parsers read only the requests they pass.
 	for _, ev := range evals {
 		if s := scope(ev.Target); s == _scopeMethod || s == _scopeHeader {
 			p.rest = append(p.rest, ev)
+		} else {
+			p.reads = append(p.reads, ev)
 		}
 	}
 
 	return p, nil
 }
 
-// callPattern is the pattern of the request part of a mock: evals, and rest, those of them that read no request
-// message, which readsRequest says some do.
+// callPattern is the pattern of the request part of a mock: evals, rest, those of them that read no request
+// message, and reads, the others, which readsRequest says there are.
 type callPattern struct {
 	app          *Server
 	evals        vlatte.Evaluators[*Mock, *Call]
 	rest         vlatte.Evaluators[*Mock, *Call]
+	reads        vlatte.Evaluators[*Mock, *Call]
 	readsRequest bool
 }
 
@@ -362,7 +365,16 @@ func (p *callPattern) Match(ctx context.Context, e *journal.Entry) (bool, error)
 		return false, fmt.Errorf("grpc: %w: entry %d: %w", vlatte.ErrMatching, e.Seq, err)
 	}
 
-	ok, err = p.evals.Eval(ctx, vlatte.NewExplanation(), call)
+	explanation := vlatte.NewExplanation()
+
+	if !p.parses() {
+		ok, err = p.evals.Eval(ctx, explanation, call)
+	} else if ok, err = p.rest.Eval(ctx, explanation, call); err == nil && ok {
+		if ok, err = p.parse(ctx, call); err == nil && ok {
+			ok, err = p.reads.Eval(ctx, explanation, call)
+		}
+	}
+
 	if err != nil {
 		return false, fmt.Errorf("grpc: %w: entry %d: %w", vlatte.ErrMatching, e.Seq, err)
 	}
@@ -372,7 +384,9 @@ func (p *callPattern) Match(ctx context.Context, e *journal.Entry) (bool, error)
 
 // Explain tells which parts of the pattern the call of e passes, by the names a near miss gives them, such as
 // "field message". A part that reads a request the journal cut is neither passed nor failed, and a call of a method
-// the server doesn't know, or whose request doesn't decode, misses by that.
+// the server doesn't know, or whose request doesn't decode, misses by that. The server's parsers read only a request
+// whose method and header pass: the parts that read another are neither passed nor failed, and a request they fail to
+// read misses by "request".
 func (p *callPattern) Explain(ctx context.Context, e *journal.Entry) (verify.Miss, error) {
 	if e.Kind != Kind {
 		return verify.Miss{Total: 1, Failed: []string{"kind"}}, nil
@@ -385,6 +399,9 @@ func (p *callPattern) Explain(ctx context.Context, e *journal.Entry) (verify.Mis
 
 	evals, call := p.rest, entryCall(p.app, e, md, nil)
 
+	// A request the server's parsers fail to read misses by it, after the parts that read no request.
+	var unparsed bool
+
 	if !e.BodyTruncated {
 		decoded, err := decodeEntry(p.app, e, md)
 		if err != nil {
@@ -392,6 +409,17 @@ func (p *callPattern) Explain(ctx context.Context, e *journal.Entry) (verify.Mis
 		}
 
 		evals, call = p.evals, decoded
+
+		if p.parses() {
+			passed, err := p.rest.Eval(ctx, vlatte.NewExplanation(), decoded)
+			if err != nil || !passed {
+				evals = p.rest
+			} else if read, err := p.parse(ctx, decoded); err != nil {
+				return verify.Miss{}, err
+			} else if !read {
+				evals, unparsed = p.rest, true
+			}
+		}
 	}
 
 	var miss verify.Miss
@@ -406,7 +434,29 @@ func (p *callPattern) Explain(ctx context.Context, e *journal.Entry) (verify.Mis
 		}
 	}
 
+	if unparsed {
+		miss.Total++
+		miss.Failed = append(miss.Failed, "request")
+	}
+
 	return miss, nil
+}
+
+// parses reports whether the server's parsers read the requests the pattern matches: it reads them, and the server has
+// parsers. They read a request once its method and header pass.
+func (p *callPattern) parses() bool {
+	return p.readsRequest && len(p.app.config.RequestParsers) > 0
+}
+
+// parse has the server's parsers read the request of call, the call of a journal entry, as they read it as it came.
+// It reports false when they fail to read it: the call missed every mock as it came, and misses the pattern. A parser
+// whose context ends returns its error.
+func (p *callPattern) parse(ctx context.Context, call *Call) (bool, error) {
+	if err := p.app.parseRequest(ctx, call); err != nil {
+		return false, ctx.Err()
+	}
+
+	return true, nil
 }
 
 // entryCall returns the call of e, an entry of the server's journal, of the method md describes, with msgs, its

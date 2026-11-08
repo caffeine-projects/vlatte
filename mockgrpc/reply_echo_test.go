@@ -1,6 +1,7 @@
 package mockgrpc
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
@@ -130,4 +132,27 @@ func TestEcho_AMessageThatIsNoOutputFailsTheCall(t *testing.T) {
 
 	err = stream.RecvMsg(dynamicpb.NewMessage(desc("raw.HiRes")))
 	require.Equal(t, codes.Internal, status.Code(err), "a bidi call ends at the message that fails")
+}
+
+func TestEcho_AnswersTheMessageAsTheClientSentIt(t *testing.T) {
+	// The mock matches what the parsers read, but Echo answers what the client sent. A bidi message Echo answers isn't
+	// parsed.
+	p := &funcParser{parse: func(context.Context, *Call, proto.Message) (any, error) {
+		return map[string]string{"by": "parser"}, nil
+	}}
+	m := parsing(t, p)
+	m.MustMock(
+		Method("Greetings").Field("by", match.Equal("parser")).Reply(Echo()),
+		Method("Chat").Reply(Echo()),
+	)
+	c := client(t, m)
+
+	got, code := greetWith(t, c, "hi")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "hi", got)
+
+	said, code := chat(t, c, nil, "one", "two")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, []string{"one", "two"}, said)
+	require.Equal(t, int64(1), p.parsed.Load(), "only the unary request was parsed")
 }

@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/match"
@@ -383,4 +384,34 @@ func TestProxy_AUnixSocketTargetOutlivesTheOutboundRules(t *testing.T) {
 	res, err := client(t, m).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
 	require.NoError(t, err)
 	require.Equal(t, "hello", res.GetMessage())
+}
+
+func TestProxy_TheTargetGetsTheRequestAsTheClientSentIt(t *testing.T) {
+	// The proxying mock matches what the parsers read, but the target gets the envelope the client sent, which it
+	// reads itself. A bidi message goes to the target unparsed.
+	envelope := "sealed"
+	target := serve(t)
+	target.MustMock(
+		Method("Greetings").Message(&pb.HiReq{Message: envelope}).Reply(Message(&pb.HiRes{Message: "the envelope"})),
+		Method("Chat").Reply(Echo()),
+	)
+
+	p := &funcParser{parse: func(context.Context, *Call, proto.Message) (any, error) {
+		return map[string]string{"by": "parser"}, nil
+	}}
+	m := parsing(t, p)
+	m.MustMock(
+		Method("Greetings").Field("by", match.Equal("parser")).Reply(From(target.Addr())),
+		Method("Chat").Reply(From(target.Addr())),
+	)
+	c := client(t, m)
+
+	got, code := greetWith(t, c, envelope)
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "the envelope", got)
+
+	said, code := chat(t, c, nil, envelope)
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, []string{envelope}, said)
+	require.Equal(t, int64(1), p.parsed.Load(), "only the unary request was parsed")
 }

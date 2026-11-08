@@ -72,7 +72,8 @@ type TemplateRequest struct {
 
 	// Message is the request message as JSON reads it, field by field, with the field names of the .proto file:
 	// {{ .Request.Message.user_id }}. A client streaming call has the array of its messages: {{ index
-	// .Request.Message 0 }}.
+	// .Request.Message 0 }}. A message the server's [RequestParser] values read is what they read: a field of a value
+	// that isn't an object, such as null, fails the template.
 	Message any
 }
 
@@ -144,9 +145,9 @@ func (app *Server) templateEngine() vlatte.TemplateEngine {
 
 // templateData returns the template data of call, whose key-value store reads with ctx.
 func (app *Server) templateData(ctx context.Context, call *Call) *TemplateData {
-	// The request is as protojson writes it: JSON, which reads.
+	// The request is as protojson writes it, or as the server's parsers read it: JSON, which reads.
 	var msg any
-	if b := call.JSON(); len(b) > 0 {
+	if b, _ := call.view(); len(b) > 0 {
 		_ = json.Unmarshal(b, &msg)
 	}
 
