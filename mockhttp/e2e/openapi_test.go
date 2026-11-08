@@ -469,6 +469,31 @@ paths:
 	require.Equal(t, "\x89PNG\r\n\x1a\n", body)
 }
 
+func TestOpenAPI_ASerializedValueIsServedAsSent(t *testing.T) {
+	// A serializedValue is the body as sent, encoding included: text that reads as base64 must reach the client as
+	// that text, not as the bytes it decodes to, though its schema says base64.
+	spec := `
+openapi: 3.2.0
+info: {title: Serialized, version: "1"}
+paths:
+  /encoded:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema: {type: string, contentEncoding: base64}
+              examples:
+                encoded: {serializedValue: aGVsbG8=}
+`
+	m := serveSpec(t, spec)
+
+	status, _, body := call(t, m, http.MethodGet, "/encoded", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "aGVsbG8=", body)
+}
+
 func TestOpenAPI_ALiteralValueOfASchemaIsServedAsWritten(t *testing.T) {
 	// const and enum hold data, not schemas: a writeOnly key inside one is the value's own, and the body must be
 	// exactly that value, or it breaks the schema it was made from.

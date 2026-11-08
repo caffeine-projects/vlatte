@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/openapi"
@@ -36,6 +37,106 @@ func (r raw) value(object any, name string, kin any) (any, bool) {
 	return kin, kin != nil
 }
 
+// places says where the fields of a spec are, and what the spec writes for the scalars of their values: their text,
+// such as 1.0 or 01234, which reading them as values loses.
+type places struct {
+	location *url.URL              // the spec's
+	data     map[string][]byte     // the files of the spec, by fileKey
+	objects  map[field]node        // where the object of each field looked for is, but its value
+	nodes    map[string]*yaml.Node // the files parsed, by fileKey, as text needs them
+}
+
+// of returns where the object of field f is in the spec, such as spec.yaml#/paths/~1pets, or "" when the spec
+// doesn't give it.
+func (p *places) of(f field) string {
+	n, ok := p.objects[f]
+	if !ok {
+		return ""
+	}
+
+	return relative(p.location, n.file) + "#" + n.ptr
+}
+
+// text returns the text the spec writes for the scalar at ptr, a JSON pointer, within the value of field f, such as
+// 01234 for the integer 668, and whether the spec writes one there.
+func (p *places) text(f field, ptr string) (string, bool) {
+	n, ok := p.objects[f]
+	if !ok {
+		return "", false
+	}
+
+	key := fileKey(n.file)
+
+	doc, ok := p.nodes[key]
+	if !ok {
+		// JSON is YAML too, which keeps the text of each scalar. kin-openapi read the file: a file it cannot read
+		// again leaves doc empty, where scalarAt finds nothing.
+		doc = new(yaml.Node)
+		yaml.Unmarshal(p.data[key], doc)
+
+		p.nodes[key] = doc
+	}
+
+	y := scalarAt(doc, n.ptr+"/"+pointerToken(f.name)+ptr)
+	if y == nil {
+		return "", false
+	}
+
+	return y.Value, true
+}
+
+// scalarAt returns the scalar of doc that ptr, a JSON pointer, names, or nil.
+func scalarAt(doc *yaml.Node, ptr string) *yaml.Node {
+	y := resolveYAML(doc)
+
+	for token := range strings.SplitSeq(strings.TrimPrefix(ptr, "/"), "/") {
+		if y == nil {
+			return nil
+		}
+
+		token = unescapeToken(token)
+
+		var next *yaml.Node
+
+		switch y.Kind {
+		case yaml.MappingNode:
+			for i := 0; i+1 < len(y.Content); i += 2 {
+				if y.Content[i].Value == token {
+					next = y.Content[i+1]
+				}
+			}
+		case yaml.SequenceNode:
+			if i, err := strconv.Atoi(token); err == nil && i >= 0 && i < len(y.Content) {
+				next = y.Content[i]
+			}
+		}
+
+		y = resolveYAML(next)
+	}
+
+	if y == nil || y.Kind != yaml.ScalarNode {
+		return nil
+	}
+
+	return y
+}
+
+// resolveYAML returns the value y holds: the content of a document, what an alias names, or y.
+func resolveYAML(y *yaml.Node) *yaml.Node {
+	for y != nil {
+		switch {
+		case y.Kind == yaml.DocumentNode && len(y.Content) > 0:
+			y = y.Content[0]
+		case y.Kind == yaml.AliasNode:
+			y = y.Alias
+		default:
+			return y
+		}
+	}
+
+	return nil
+}
+
 // node is a value of a file of the spec, at a JSON pointer.
 type node struct {
 	file *url.URL
@@ -50,18 +151,19 @@ type rawReader struct {
 	data     map[string][]byte // the files, by fileKey
 	files    map[string]any    // the files decoded, by fileKey
 	out      raw
-	nulls    map[field]string              // the fields of out the spec writes as null, and where their objects are in it
+	places   *places
 	servers  map[*openapi3.Server]*url.URL // the file each server of a path or an operation is written in
 }
 
 // readRaw returns the example fields of the objects of t, which kin-openapi read from files, by fileKey: the spec at
 // location and the files its references name. A field it cannot find, as kin-openapi did, is left out, for what
-// kin-openapi read to stand. It returns as well the fields that are null, which kin-openapi reads as no value, with
-// where their objects are in the spec, such as spec.yaml#/paths/~1pets, and the file each server of a path or an
-// operation is written in, which a relative URL of it is relative to.
-func readRaw(t *openapi3.T, location *url.URL, files map[string][]byte) (raw, map[field]string, map[*openapi3.Server]*url.URL) {
+// kin-openapi read to stand. It returns as well the places of the fields it looked for, written or not, and the file
+// each server of a path or an operation is written in, which a relative URL of it is relative to. A field of a $ref
+// beside it, such as its example, is that of the *openapi3.SchemaRef.
+func readRaw(t *openapi3.T, location *url.URL, files map[string][]byte) (raw, *places, map[*openapi3.Server]*url.URL) {
 	r := &rawReader{
-		location: location, v31: t.IsOpenAPI31OrLater(), data: files, files: make(map[string]any), out: make(raw), nulls: make(map[field]string),
+		location: location, v31: t.IsOpenAPI31OrLater(), data: files, files: make(map[string]any), out: make(raw),
+		places:  &places{location: location, data: files, objects: make(map[field]node), nodes: make(map[string]*yaml.Node)},
 		servers: make(map[*openapi3.Server]*url.URL),
 	}
 	doc := node{file: location, v: r.file(location)}
@@ -101,7 +203,7 @@ func readRaw(t *openapi3.T, location *url.URL, files map[string][]byte) (raw, ma
 		}
 	}
 
-	return r.out, r.nulls, r.servers
+	return r.out, r.places, r.servers
 }
 
 // fileKey returns what names the file of u: u without its fragment, and a file's path with a leading slash, which a
@@ -199,7 +301,7 @@ func pointer(doc any, ptr string) any {
 
 	v := doc
 	for token := range strings.SplitSeq(strings.TrimPrefix(ptr, "/"), "/") {
-		token = strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~")
+		token = unescapeToken(token)
 
 		var next any
 
@@ -227,7 +329,17 @@ func (r *rawReader) child(n node, name string) node {
 func member(n node, name string) node {
 	m, _ := n.v.(map[string]any)
 
-	return node{file: n.file, ptr: n.ptr + "/" + strings.ReplaceAll(strings.ReplaceAll(name, "~", "~0"), "/", "~1"), v: m[name]}
+	return node{file: n.file, ptr: n.ptr + "/" + pointerToken(name), v: m[name]}
+}
+
+// pointerToken returns name as a token of a JSON pointer: its ~ and / escaped.
+func pointerToken(name string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(name, "~", "~0"), "/", "~1")
+}
+
+// unescapeToken returns the name token, of a JSON pointer, names: pointerToken undone.
+func unescapeToken(token string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~")
 }
 
 // itemField returns the field name of path item n, as kin-openapi reads it: it puts each field written beside the
@@ -255,20 +367,22 @@ func (r *rawReader) record(object any, n node, name string) {
 	r.keep(object, r.deref(n), name)
 }
 
-// keep keeps field name of object n, as the field of object, what kin-openapi read it into, when n writes it.
+// keep keeps field name of object n, as the field of object, what kin-openapi read it into, when n writes it, and
+// where it is, as locate does.
 func (r *rawReader) keep(object any, n node, name string) {
+	r.locate(object, n, name)
+
 	m, _ := n.v.(map[string]any)
-
-	v, ok := m[name]
-	if !ok {
-		return
+	if v, ok := m[name]; ok {
+		r.out[field{object: object, name: name}] = v
 	}
+}
 
-	f := field{object: object, name: name}
-	r.out[f] = v
-
-	if v == nil {
-		r.nulls[f] = relative(r.location, n.file) + "#" + n.ptr
+// locate keeps where n, which field name of object is of, is, when it has a place: a reference it cannot follow gives
+// none.
+func (r *rawReader) locate(object any, n node, name string) {
+	if n.file != nil {
+		r.places.objects[field{object: object, name: name}] = node{file: n.file, ptr: n.ptr}
 	}
 }
 
@@ -474,9 +588,16 @@ func (r *rawReader) content(c openapi3.Content, n node) {
 	}
 }
 
+// _exampleValues are the fields of an example that hold its value: value, and, in OpenAPI 3.2, dataValue, the value
+// as data, and serializedValue, the value as sent.
+var _exampleValues = []string{"value", "dataValue", "serializedValue"}
+
 func (r *rawReader) examples(es openapi3.Examples, n node) {
 	for name, ref := range es {
-		r.record(ref.Value, r.child(n, name), "value")
+		ex := r.child(n, name)
+		for _, f := range _exampleValues {
+			r.record(ref.Value, ex, f)
+		}
 	}
 }
 
@@ -490,6 +611,10 @@ func (r *rawReader) schema(ref *openapi3.SchemaRef, n node) {
 
 	if ref.Ref != "" {
 		r.out[field{object: ref}] = n.v
+
+		for _, name := range []string{"example", "examples"} {
+			r.locate(ref, n, name)
+		}
 	}
 
 	s, key := ref.Value, field{object: ref.Value}
@@ -513,16 +638,13 @@ func (r *rawReader) schema(ref *openapi3.SchemaRef, n node) {
 	}
 
 	n = r.deref(n)
+	one, lists, named := schemasIn(s)
 
-	for name, sub := range map[string]*openapi3.SchemaRef{
-		"items": s.Items, "not": s.Not, "contains": s.Contains, "propertyNames": s.PropertyNames, "contentSchema": s.ContentSchema,
-		"if": s.If, "then": s.Then, "else": s.Else, "additionalProperties": s.AdditionalProperties.Schema,
-		"unevaluatedItems": s.UnevaluatedItems.Schema, "unevaluatedProperties": s.UnevaluatedProperties.Schema,
-	} {
+	for name, sub := range one {
 		r.schema(sub, r.child(n, name))
 	}
 
-	for name, list := range map[string]openapi3.SchemaRefs{"allOf": s.AllOf, "anyOf": s.AnyOf, "oneOf": s.OneOf, "prefixItems": s.PrefixItems} {
+	for name, list := range lists {
 		items := r.items(r.child(n, name))
 		for i, sub := range list {
 			if i < len(items) {
@@ -531,12 +653,25 @@ func (r *rawReader) schema(ref *openapi3.SchemaRef, n node) {
 		}
 	}
 
-	for name, named := range map[string]openapi3.Schemas{"properties": s.Properties, "patternProperties": s.PatternProperties, "dependentSchemas": s.DependentSchemas, "$defs": s.Defs} {
+	for name, schemas := range named {
 		mn := r.child(n, name)
-		for key, sub := range named {
+		for key, sub := range schemas {
 			r.schema(sub, r.child(mn, key))
 		}
 	}
+}
+
+// schemasIn returns the schemas within s, by the keyword that holds them: one, a list, or a map of them by name.
+func schemasIn(s *openapi3.Schema) (one map[string]*openapi3.SchemaRef, lists map[string]openapi3.SchemaRefs, named map[string]openapi3.Schemas) {
+	one = map[string]*openapi3.SchemaRef{
+		"items": s.Items, "not": s.Not, "contains": s.Contains, "propertyNames": s.PropertyNames, "contentSchema": s.ContentSchema,
+		"if": s.If, "then": s.Then, "else": s.Else, "additionalProperties": s.AdditionalProperties.Schema,
+		"unevaluatedItems": s.UnevaluatedItems.Schema, "unevaluatedProperties": s.UnevaluatedProperties.Schema,
+	}
+	lists = map[string]openapi3.SchemaRefs{"allOf": s.AllOf, "anyOf": s.AnyOf, "oneOf": s.OneOf, "prefixItems": s.PrefixItems}
+	named = map[string]openapi3.Schemas{"properties": s.Properties, "patternProperties": s.PatternProperties, "dependentSchemas": s.DependentSchemas, "$defs": s.Defs}
+
+	return one, lists, named
 }
 
 // exact returns kin, a value of the spec as kin-openapi read it, with each integer as raw, the same value as the spec

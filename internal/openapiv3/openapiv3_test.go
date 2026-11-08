@@ -215,6 +215,265 @@ Big: {value: {id: 9007199254740999}}
 	}}, doc.Operations)
 }
 
+func TestLoad_ReadsTheDataAndTheSerializedValueOfAnExampleOfOpenAPI32(t *testing.T) {
+	// OpenAPI 3.2 gives an example as data, dataValue, which a JSON body, a parameter or a header is, or as sent,
+	// serializedValue, which another body is, such as text: a mock takes the one its body or its path is. Sent, a
+	// parameter has its style's delimiters and a JSON body is text: no mock takes those as data.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.2.0
+info: {title: Trains, version: "1"}
+paths:
+  /trips/{id}:
+    get:
+      parameters:
+        - {name: id, in: path, required: true, style: label, schema: {type: string}, examples: {berlin: {dataValue: b1}, sent: {serializedValue: .b2}}}
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: object}
+              examples:
+                big: {dataValue: {id: 9007199254740993}}
+                both: {$ref: "#/components/examples/Both"}
+                sent: {serializedValue: '{"a": 2}'}
+            application/problem+json:
+              examples:
+                both: {$ref: "#/components/examples/Both"}
+            text/plain:
+              examples:
+                sent: {dataValue: hello, serializedValue: "hello\n"}
+components:
+  examples:
+    Both: {dataValue: {a: 1}, serializedValue: '{"a": 1}'}
+`})
+
+	require.Equal(t, []openapi.Operation{{
+		Method: "GET", Path: "/trips/{id}", HasInput: true,
+		PathParams: []openapi.Parameter{{Name: "id", Style: "label", Examples: []openapi.Example{{Name: "berlin", Value: "b1"}}}},
+		Responses: []openapi.Response{{
+			Status: "200",
+			Content: []openapi.Content{
+				{MediaType: "application/json", Schema: map[string]any{"type": "object"}, Examples: []openapi.Example{
+					{Name: "big", Value: map[string]any{"id": int64(9007199254740993)}}, {Name: "both", Value: map[string]any{"a": int64(1)}},
+				}},
+				{MediaType: "application/problem+json", Examples: []openapi.Example{{Name: "both", Value: map[string]any{"a": int64(1)}}}},
+				{MediaType: "text/plain", Examples: []openapi.Example{{Name: "sent", Value: "hello\n", Serialized: true}}},
+			},
+		}},
+	}}, doc.Operations)
+}
+
+func TestLoad_LeavesOutADataValueOutsideJSON(t *testing.T) {
+	// Outside JSON, a value is its data serialized in the media type, which the mocks don't do: XML wraps text in an
+	// element and escapes it. A dataValue there gives nothing to send, in a body, a header or a parameter: it is left
+	// out, with a warning, once for an example several share, and a serializedValue beside it is what is sent. One at
+	// an externalValue is left out as such: a serializedValue would break it.
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
+openapi: 3.2.0
+info: {title: XML Data, version: "1"}
+paths:
+  /greetings/{id}:
+    get:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          content:
+            text/plain:
+              examples: {data: {dataValue: b2}, sent: {serializedValue: b3}}
+          examples: {own: {dataValue: b1}}
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Note:
+              content:
+                text/plain:
+                  examples: {data: {dataValue: hi}}
+          content:
+            application/xml:
+              schema: {type: string, xml: {name: greeting}}
+              examples:
+                data: {dataValue: 'a & b'}
+                external: {dataValue: 'a & b', externalValue: https://x.example.com/greeting.xml}
+                sent: {dataValue: 'a & b', serializedValue: '<greeting>a &amp; b</greeting>'}
+                shared: {$ref: "#/components/examples/Data"}
+            text/plain:
+              examples:
+                data: {dataValue: hello}
+                shared: {$ref: "#/components/examples/Data"}
+components:
+  examples:
+    Data: {dataValue: hi}
+`})
+
+	op := doc.Operations[0]
+	require.Equal(t, []openapi.Parameter{{
+		Name: "id", Style: "simple", MediaType: "text/plain", Examples: []openapi.Example{{Name: "sent", Value: "b3", Serialized: true}},
+	}}, op.PathParams)
+	require.Equal(t, []openapi.Header{{Name: "X-Note", MediaType: "text/plain"}}, op.Responses[0].Headers)
+	require.Equal(t, []openapi.Content{
+		{
+			MediaType: "application/xml", Schema: map[string]any{"type": "string", "xml": map[string]any{"name": "greeting"}},
+			Examples: []openapi.Example{{Name: "sent", Value: "<greeting>a &amp; b</greeting>", Serialized: true}},
+		},
+		{MediaType: "text/plain"},
+	}, op.Responses[0].Content)
+
+	at := "spec.yaml#/paths/~1greetings~1{id}/get/"
+	message := "the example is data, which the mocks don't serialize outside JSON: left out: give a serializedValue"
+	require.Equal(t, []map[string]any{
+		{"level": "warn", "example": at + "parameters/0/examples/own/dataValue", "message": message},
+		{"level": "warn", "example": at + "parameters/0/content/text~1plain/examples/data/dataValue", "message": message},
+		{"level": "warn", "example": at + "responses/200/headers/X-Note/content/text~1plain/examples/data/dataValue", "message": message},
+		{"level": "warn", "example": at + "responses/200/content/application~1xml/examples/data/dataValue", "message": message},
+		{"level": "warn", "example": "spec.yaml#/components/examples/Data/dataValue", "message": message},
+		{"level": "warn", "example": at + "responses/200/content/text~1plain/examples/data/dataValue", "message": message},
+	}, warnings)
+}
+
+func TestLoad_FailsOnAnExampleOfOpenAPI32TheSpecForbids(t *testing.T) {
+	// An example says its value one way, or the same value as data and as sent: two values would leave a mock
+	// choosing between them.
+	tests := []struct {
+		name    string
+		version string // the spec's OpenAPI version, 3.2.0 when not set
+		example string
+		want    string
+	}{
+		{name: "a value and a dataValue", example: "{value: 1, dataValue: 1}", want: _invalidA + "value and dataValue are mutually exclusive"},
+		{name: "a value and a serializedValue", example: "{value: \"1\", serializedValue: \"1\"}", want: _invalidA + "value and serializedValue are mutually exclusive"},
+		{
+			name: "an externalValue and a serializedValue", example: "{externalValue: https://x.example.com/a.json, serializedValue: \"1\"}",
+			want: _invalidA + "externalValue and serializedValue are mutually exclusive",
+		},
+		{name: "a serializedValue that isn't text", example: "{serializedValue: 1}", want: _invalidA + "serializedValue: expected a string, not 1"},
+	}
+
+	nop := zerolog.Nop()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadFiles(t, map[string]string{"spec.yaml": "openapi: " + cmp.Or(tt.version, "3.2.0") + "\ninfo: {title: Trains, version: \"1\"}\npaths: {}\n" +
+				"components: {examples: {A: " + tt.example + "}}\n"}, &nop)
+			require.ErrorIs(t, err, openapi.ErrInvalid)
+			require.EqualError(t, err, tt.want)
+		})
+	}
+
+	t.Run("the first of several, on every run", func(t *testing.T) {
+		files := map[string]string{"spec.yaml": "openapi: 3.2.0\ninfo: {title: Trains, version: \"1\"}\npaths: {}\n" +
+			"components: {examples: {C: {value: 1, dataValue: 1}, A: {value: 1, dataValue: 1}, B: {value: 1, dataValue: 1}}}\n"}
+
+		for range 10 {
+			_, err := loadFiles(t, files, &nop)
+			require.EqualError(t, err, _invalidA+"value and dataValue are mutually exclusive")
+		}
+	})
+}
+
+func TestLoad_IgnoresTheValuesOfAnExampleOfOpenAPI32BeforeIt(t *testing.T) {
+	// Before OpenAPI 3.2, dataValue and serializedValue are fields OpenAPI doesn't define: the mocks ignore them, as
+	// any such field, and Load says so.
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Trains, version: "1"}
+paths:
+  /trips:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: object}
+              examples: {data: {dataValue: {a: 1}}, value: {value: {a: 2}}}
+            text/plain:
+              schema: {type: string}
+              examples: {sent: {serializedValue: hello}}
+`})
+
+	require.Equal(t, []openapi.Content{
+		{MediaType: "application/json", Schema: map[string]any{"type": "object"}, Examples: []openapi.Example{{Name: "value", Value: map[string]any{"a": int64(2)}}}},
+		{MediaType: "text/plain", Schema: map[string]any{"type": "string"}},
+	}, doc.Operations[0].Responses[0].Content)
+
+	at := "spec.yaml#/paths/~1trips/get/responses/200/content/"
+	require.Equal(t, []map[string]any{
+		{"level": "warn", "example": at + "application~1json/examples/data", "message": "extra sibling fields: [dataValue]: ignored"},
+		{"level": "warn", "example": at + "text~1plain/examples/sent", "message": "extra sibling fields: [serializedValue]: ignored"},
+	}, warnings)
+}
+
+// _invalidA starts the error of a spec whose example A of its components OpenAPI 3.2 forbids.
+const _invalidA = "openapi: invalid spec: invalid example spec.yaml#/components/examples/A: "
+
+func TestLoad_LoadsASpecOfOpenAPI32WithTheFieldsItAdds(t *testing.T) {
+	// kin-openapi reads some of what OpenAPI 3.2 adds, such as the query method, and rejects the rest as unknown
+	// fields: a spec that uses them, such as the name of a server, which no mock needs, still makes its mocks.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.2.0
+$self: https://trains.example.com/openapi.yaml
+info: {title: Trains, version: "1"}
+servers: [{url: https://trains.example.com, name: Production}]
+tags: [{name: trips, summary: Trips, kind: nav}, {name: live, parent: trips}]
+paths:
+  /trips:
+    servers: [{url: https://trains.example.com, name: Trips}]
+    get:
+      servers: [{url: https://trains.example.com, name: Listing}]
+      responses:
+        "200":
+          summary: The trips
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                discriminator: {propertyName: kind, defaultMapping: "#/components/schemas/Trip"}
+                xml: {nodeType: element}
+            multipart/mixed:
+              prefixEncoding: [{contentType: text/plain}]
+              itemEncoding: {contentType: application/json}
+            multipart/form-data:
+              encoding:
+                form: {contentType: multipart/form-data, encoding: {a: {contentType: text/plain}}}
+                mixed: {contentType: multipart/mixed, prefixEncoding: [{contentType: text/plain}], itemEncoding: {contentType: text/plain}}
+components:
+  schemas:
+    Trip: {type: object}
+  mediaTypes:
+    Text: {schema: {type: string}}
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      deprecated: true
+      oauth2MetadataUrl: https://trains.example.com/.well-known/oauth-authorization-server
+      flows:
+        deviceAuthorization:
+          deviceAuthorizationUrl: https://trains.example.com/device
+          tokenUrl: https://trains.example.com/token
+          scopes: {}
+`})
+
+	require.Equal(t, []openapi.Operation{{
+		Method: "GET", Path: "/trips",
+		Responses: []openapi.Response{{
+			Status: "200",
+			Content: []openapi.Content{
+				{MediaType: "application/json", Schema: map[string]any{
+					"type":          "object",
+					"discriminator": map[string]any{"propertyName": "kind", "defaultMapping": "#/components/schemas/Trip"},
+					"xml":           map[string]any{"nodeType": "element"},
+				}},
+				{MediaType: "multipart/form-data"},
+				{MediaType: "multipart/mixed"},
+			},
+		}},
+	}}, doc.Operations)
+}
+
 func TestLoad_TakesANullExampleWhereverTheSpecPutsIt(t *testing.T) {
 	// kin-openapi reads value: null as no value, which it rejects: each place it checks an example is read as written.
 	const (
@@ -251,109 +510,64 @@ func TestLoad_TakesANullExampleWhereverTheSpecPutsIt(t *testing.T) {
 	}
 }
 
-func TestLoad_ChecksANullExampleAgainstItsSchema(t *testing.T) {
-	// null is a value, which its schema checks as any other, wherever the spec writes it: kin-openapi reads it as no
-	// value, which it doesn't check. A default is checked as an example.
-	tests := []struct {
-		name  string
-		place string // where the null is, with %s for the type of its schema
-		error string
-	}{
-		{
-			name:  "a named example",
-			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: %s}, examples: {none: {value: null}}}}}}",
-			error: `example none: validation failed due to: at '': got null, want object`,
-		},
-		{
-			name:  "the example of a media type",
-			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: %s}, example: null}}}}",
-			error: `invalid example of spec.yaml#/paths/~1pets/get/responses/200/content/application~1json: `,
-		},
-		{
-			name:  "the example of a parameter",
-			place: "parameters: [{name: q, in: query, schema: {type: %s}, example: null}]\n      responses: {\"204\": {description: OK}}",
-			error: `invalid example of spec.yaml#/paths/~1pets/get/parameters/0: `,
-		},
-		{
-			name:  "the example of a header",
-			place: "responses: {\"204\": {description: OK, headers: {X-A: {schema: {type: %s}, example: null}}}}",
-			error: `invalid example of spec.yaml#/paths/~1pets/get/responses/204/headers/X-A: `,
-		},
-		{
-			name:  "the example of a schema",
-			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {$ref: \"#/components/schemas/S\"}}}}}\ncomponents: {schemas: {S: {type: %s, example: null}}}",
-			error: `invalid example of spec.yaml#/components/schemas/S: `,
-		},
-		{
-			name:  "the default of a schema",
-			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {properties: {a: {type: %s, default: null}}}}}}}",
-			error: `invalid default of spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/schema/properties/a: `,
-		},
-		{
-			name: "the example of a schema beside a $ref",
-			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {$ref: \"#/components/schemas/Any\", properties: {a: {type: %s, example: null}}}}}}}" +
-				"\ncomponents: {schemas: {Any: {}}}",
-			error: `invalid example of spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/schema/properties/a: `,
-		},
-		// An example outside JSON is the body, which its schema doesn't describe, and examples is a list.
-		{
-			name:  "the example of a media type outside JSON",
-			place: "responses: {\"200\": {description: OK, content: {text/plain: {schema: {type: %s}, example: null}}}}",
-		},
-		{
-			name:  "the examples of a schema",
-			place: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: %s, examples: null}}}}}",
-		},
+func TestLoad_ChecksANullDefaultAgainstItsSchema(t *testing.T) {
+	// null is a value, which its schema checks as any other: kin-openapi reads it as no value, which it doesn't check.
+	// A default, unlike an example, is what a server takes for a value left out: one its schema rejects is a contract
+	// that contradicts itself.
+	spec := func(types string) map[string]string {
+		return map[string]string{"spec.yaml": "openapi: 3.1.0\ninfo: {title: Pets, version: \"1\"}\npaths:\n  /pets:\n    get:\n      " +
+			"responses: {\"200\": {description: OK, content: {application/json: {schema: {properties: {a: {type: " + types + ", default: null}}}}}}}\n"}
 	}
 
 	nop := zerolog.Nop()
 
-	for _, tt := range tests {
-		spec := func(types string) map[string]string {
-			return map[string]string{"spec.yaml": "openapi: 3.1.0\ninfo: {title: Pets, version: \"1\"}\npaths:\n  /pets:\n    get:\n      " +
-				fmt.Sprintf(tt.place, types) + "\n"}
-		}
+	_, err := loadFiles(t, spec("object"), &nop)
+	require.ErrorIs(t, err, openapi.ErrInvalid)
+	require.ErrorContains(t, err, `invalid default of spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/schema/properties/a: `)
+	require.ErrorContains(t, err, "got null, want object")
 
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := loadFiles(t, spec("object"), &nop)
-			if tt.error == "" {
-				require.NoError(t, err)
-				return
-			}
+	_, err = loadFiles(t, spec(`[object, "null"]`), &nop)
+	require.NoError(t, err)
+}
 
-			require.ErrorIs(t, err, openapi.ErrInvalid)
-			require.ErrorContains(t, err, tt.error)
-			require.ErrorContains(t, err, "got null, want object")
-		})
-
-		t.Run(tt.name+" its schema allows", func(t *testing.T) {
-			_, err := loadFiles(t, spec(`[object, "null"]`), &nop)
-			require.NoError(t, err)
-		})
-	}
+func TestLoad_FailsOnADefaultItsSchemaRejects(t *testing.T) {
+	// Only examples are lenient: a server takes a default for a value left out, so one its schema rejects is a
+	// contract that contradicts itself, however it converts.
+	nop := zerolog.Nop()
+	_, err := loadFiles(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      parameters: [{name: q, in: query, schema: {type: string, default: 5}}]
+      responses: {"204": {description: OK}}
+`}, &nop)
+	require.ErrorIs(t, err, openapi.ErrInvalid)
+	require.ErrorContains(t, err, "invalid default")
 }
 
 func TestLoad_NamesTheFirstNullItsSchemaRejectsOnEveryRun(t *testing.T) {
-	// Of the nulls a spec gets wrong, the one first in it is named, the same on every run.
+	// Of the null defaults a spec gets wrong, the one first in it is named, the same on every run.
 	files := map[string]string{"spec.yaml": `
 openapi: 3.1.0
 info: {title: Pets, version: "1"}
 paths:
   /pets:
     get:
-      parameters: [{name: q, in: query, schema: {type: object}, example: null}]
+      parameters: [{name: q, in: query, schema: {type: object, default: null}}]
       responses:
         "200":
           description: OK
-          headers: {X-A: {schema: {type: object}, example: null}}
-          content: {application/json: {schema: {type: object}, example: null}}
+          headers: {X-A: {schema: {type: object, default: null}}}
+          content: {application/json: {schema: {type: object, default: null}}}
 `}
 
 	nop := zerolog.Nop()
 
 	for range 10 {
 		_, err := loadFiles(t, files, &nop)
-		require.ErrorContains(t, err, `invalid example of spec.yaml#/paths/~1pets/get/parameters/0: `)
+		require.ErrorContains(t, err, `invalid default of spec.yaml#/paths/~1pets/get/parameters/0/schema: `)
 	}
 }
 
@@ -1413,9 +1627,10 @@ paths:
 	}
 }
 
-func TestLoad_FailsOnAJSONExampleItsSchemaRejects(t *testing.T) {
+func TestLoad_LeavesOutAJSONExampleItsSchemaRejects(t *testing.T) {
 	// A JSON example is the data its schema describes: one that breaks it would make a mock that breaks the contract.
-	data := []byte(`
+	// The rest of the spec still makes mocks, and the log names the example to fix.
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
 openapi: 3.1.0
 info: {title: Pets, version: "1"}
 paths:
@@ -1428,12 +1643,96 @@ paths:
             application/json:
               schema: {type: object}
               example: <Pet/>
-`)
+`})
 
-	log := zerolog.Nop()
-	_, err := openapiv3.Load(t.Context(), data, &url.URL{Path: filepath.ToSlash(filepath.Join(t.TempDir(), "spec.yaml"))}, read(t), &log)
-	require.ErrorIs(t, err, openapi.ErrInvalid)
-	require.ErrorContains(t, err, "invalid example")
+	require.Equal(t, []openapi.Content{{MediaType: "application/json", Schema: map[string]any{"type": "object"}}}, doc.Operations[0].Responses[0].Content)
+	require.Equal(t, []map[string]any{{
+		"level":   "warn",
+		"example": "spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/example",
+		"message": "the example breaks its schema's type: left out",
+	}}, warnings)
+}
+
+func TestLoad_FailsOnANamedExampleTheSpecForbids(t *testing.T) {
+	// Only the schema check of an example is lenient: a named example with both a value and an external value says
+	// two things at once, which a mock can't choose between.
+	const forbidden = "examples: {a: {value: 1, externalValue: https://x.example.com/a.json}}"
+
+	tests := []struct {
+		name      string
+		operation string
+	}{
+		{name: "of a media type", operation: "responses: {\"200\": {description: OK, content: {application/json: {schema: {type: integer}, " + forbidden + "}}}}"},
+		{name: "of a parameter", operation: "parameters: [{name: q, in: query, schema: {type: integer}, " + forbidden + "}]\n      responses: {\"204\": {description: OK}}"},
+	}
+
+	nop := zerolog.Nop()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadFiles(t, map[string]string{"spec.yaml": "openapi: 3.1.0\ninfo: {title: Pets, version: \"1\"}\npaths:\n  /pets:\n    get:\n      " + tt.operation + "\n"}, &nop)
+			require.ErrorIs(t, err, openapi.ErrInvalid)
+			require.ErrorContains(t, err, "value and externalValue are mutually exclusive")
+		})
+	}
+
+	t.Run("the first of several, on every run", func(t *testing.T) {
+		response := "{description: OK, content: {application/json: {schema: {type: integer}, " + forbidden + "}}}"
+		files := map[string]string{"spec.yaml": "openapi: 3.1.0\ninfo: {title: Pets, version: \"1\"}\npaths: {}\n" +
+			"components: {responses: {A: " + response + ", B: " + response + ", C: " + response + "}}\n"}
+
+		for range 10 {
+			_, err := loadFiles(t, files, &nop)
+			require.ErrorContains(t, err, "invalid example spec.yaml#/components/responses/A/content/application~1json/examples/a: ")
+		}
+	})
+}
+
+func TestLoad_LeavesOutANamedExampleWithoutAValue(t *testing.T) {
+	// OpenAPI lets a named example give no value, such as one with only a summary, which GitHub's spec has. kin-openapi
+	// rejects it, but it only leaves a mock nothing to take.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      parameters: [{name: q, in: query, schema: {type: integer}, examples: {none: {summary: To do}}}]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: integer}
+              examples: {none: {summary: To do}, shared: {$ref: "#/components/examples/None"}, one: {value: 1}}
+components:
+  examples:
+    None: {summary: To do}
+`})
+
+	require.Equal(t, []openapi.Example{{Name: "one", Value: int64(1)}}, doc.Operations[0].Responses[0].Content[0].Examples)
+}
+
+func TestLoad_WarnsOfAFieldOpenAPIDoesNotDefineBesideANamedExample(t *testing.T) {
+	// A named example is checked apart from the rest of the spec: a field OpenAPI doesn't define beside its value is
+	// a slip it warns of, as any other, which leaves no mock wrong.
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      responses:
+        "200":
+          description: OK
+          content: {application/json: {schema: {type: integer}, examples: {a: {value: 1, note: first}}}}
+`})
+
+	require.Equal(t, []openapi.Example{{Name: "a", Value: int64(1)}}, doc.Operations[0].Responses[0].Content[0].Examples)
+	require.Equal(t, []map[string]any{{
+		"level": "warn", "example": "spec.yaml#/paths/~1pets/get/responses/200/content/application~1json/examples/a",
+		"message": "extra sibling fields: [note]: ignored",
+	}}, warnings)
 }
 
 func TestLoad_FailsOnAnInvalidSpec(t *testing.T) {

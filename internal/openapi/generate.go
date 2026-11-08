@@ -473,14 +473,14 @@ func (g *generator) body(m Mock, r Response, c Content, status int, extras bool)
 
 	switch {
 	case len(c.Examples) > 0:
-		g.setBody(&m, c, c.Examples[0].Value)
+		g.setBody(&m, c, c.Examples[0])
 	case c.Schema != nil:
 		v, err := fakefy.New(fakefy.WithSeed(seed(m))).Schema(g.responses.root(c.Schema))
 		if err != nil {
 			g.warnf("no body fits: %v: written disabled", err)
 			m.Enabled = false
 		} else {
-			g.setBody(&m, c, v)
+			g.setBody(&m, c, Example{Value: v})
 		}
 	}
 
@@ -496,7 +496,7 @@ func (g *generator) body(m Mock, r Response, c Content, status int, extras bool)
 		em.Enabled = false
 		em.Priority = priority(_bandDisabled, m.Route)
 		em.Reply = Reply{Status: status, Header: headers}
-		g.setBody(&em, c, ex.Value)
+		g.setBody(&em, c, ex)
 		g.add(withContentType(em, c.MediaType))
 	}
 }

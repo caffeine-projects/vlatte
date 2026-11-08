@@ -7,12 +7,13 @@ import (
 	"strings"
 )
 
-// setBody sets the body of m, of content c, to v, a value of the spec or a fake one, as a mock file takes it. In JSON,
-// an object or a list is the value, which VLatte sends as JSON, and anything else its JSON text. In any other media
-// type, the generator writes no format of its own: a string is the body as is, or its bytes when c's schema says it
-// is base64, and a number or a boolean its text. An object or a list there leaves m disabled and without a body, with
-// a warning.
-func (g *generator) setBody(m *Mock, c Content, v any) {
+// setBody sets the body of m, of content c, to ex, an example of the spec or a fake value, as a mock file takes it. In
+// JSON, an object or a list is the value, which VLatte sends as JSON, and anything else its JSON text. In any other
+// media type, the generator writes no format of its own: a string is the body as is, or its bytes when c's schema
+// says it is base64 and ex isn't serialized, and a number or a boolean its text. An object or a list there leaves m
+// disabled and without a body, with a warning.
+func (g *generator) setBody(m *Mock, c Content, ex Example) {
+	v := ex.Value
 	if IsJSON(c.MediaType) {
 		switch v.(type) {
 		case map[string]any, []any:
@@ -30,7 +31,7 @@ func (g *generator) setBody(m *Mock, c Content, v any) {
 		g.warnf("the body is data, not text: written disabled: give a string example")
 		m.Enabled = false
 	case string:
-		if x != "" && g.isBase64(c.Schema) {
+		if x != "" && !ex.Serialized && g.isBase64(c.Schema) {
 			if _, err := base64.StdEncoding.DecodeString(x); err == nil {
 				m.Reply.BodyBase64 = x
 				return
