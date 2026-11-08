@@ -27,8 +27,9 @@ type Report struct {
 	// Written are the names of the files it wrote.
 	Written []string
 
-	// Stale are the names of the files generated from the same spec before that it no longer writes, which still
-	// load: the spec may have dropped their operation.
+	// Stale are the names of the files generated from the same spec before that it no longer writes: mocks, which
+	// still load, as the spec may have dropped their operation, and the copies of the spec they check requests
+	// against.
 	Stale []string
 }
 

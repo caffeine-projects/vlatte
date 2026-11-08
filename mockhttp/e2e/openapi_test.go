@@ -1013,6 +1013,196 @@ components:
 	require.Equal(t, "pets-_id-get-200-json", res.Header.Get(vlatte.HeaderMatchedMockID))
 }
 
+func TestOpenAPI_AnEncodedSlashGetsTheChecksOfThePathItReaches(t *testing.T) {
+	// The server compares a literal path, or one with a parameter inside a segment, decoded: /foo%2Fbar reaches the
+	// mocks of /foo/bar. The checks of that operation must hold for it too, or a request without credentials gets
+	// what only one with them should. A parameter that is a whole segment takes a / sent as %2F.
+	m := serveSpec(t, `
+openapi: 3.1.0
+info: {title: Slashes, version: "1"}
+security: [{bearer: []}]
+paths:
+  /foo/bar:
+    get:
+      responses: {"200": {description: OK, content: {application/json: {example: {ok: true}}}}}
+  /{dir}/{name}.txt:
+    get:
+      parameters:
+        - {name: dir, in: path, required: true, schema: {type: string}}
+        - {name: name, in: path, required: true, schema: {type: string}}
+      responses: {"200": {description: OK, content: {application/json: {example: {ok: true}}}}}
+  /tags/{tag}:
+    get:
+      parameters:
+        - {name: tag, in: path, required: true, schema: {type: string}}
+      responses: {"200": {description: OK, content: {application/json: {example: {ok: true}}}}}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer}
+`)
+
+	for _, path := range []string{"/foo/bar", "/foo%2Fbar", "/a/b.txt", "/a%2Fb.txt", "/tags/a%2Fb"} {
+		status, _, body := call(t, m, http.MethodGet, path, "")
+		require.Equal(t, http.StatusUnauthorized, status, path+": "+body)
+	}
+}
+
+func TestOpenAPI_AnExampleGetsTheChecksOfItsOperation(t *testing.T) {
+	// The mock of an example of a path parameter answers only the requests its operation's route takes, which get
+	// the operation's checks: a client sends the example a/b as a%2Fb, and /pets/a/b is no pet's path.
+	m := serveSpec(t, `
+openapi: 3.1.0
+info: {title: Examples, version: "1"}
+security: [{bearer: []}]
+paths:
+  /pets/{id}:
+    get:
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}, examples: {slash: {value: a/b}}}
+      responses: {"200": {description: OK, content: {application/json: {example: {name: Rex}}}}}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer}
+`)
+
+	send := func(path, auth string) (int, string) {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, m.URL()+path, nil)
+		require.NoError(t, err)
+
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		return res.StatusCode, res.Header.Get(vlatte.HeaderMatchedMockID)
+	}
+
+	status, id := send("/pets/a%2Fb", "")
+	require.Equal(t, http.StatusUnauthorized, status)
+	require.Equal(t, "pets-_id-get-401", id)
+
+	status, id = send("/pets/a%2Fb", "Bearer t")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "pets-_id-get-200-json-slash", id)
+
+	status, id = send("/pets/a/b", "Bearer t")
+	require.Equal(t, mockhttp.StatusNoMatch, status)
+	require.Empty(t, id)
+}
+
+func TestOpenAPI_AnEscapeInTheServersPathIsDecodedOnce(t *testing.T) {
+	// The server's path /v%2520 is /v%20 decoded once: the mocks of the operation answer under it, and so must its
+	// checks, or a request without its required parameter gets the success.
+	m := serveSpec(t, `
+openapi: 3.1.0
+info: {title: Escapes, version: "1"}
+servers: [{url: /v%2520}]
+paths:
+  /input:
+    get:
+      parameters:
+        - {name: limit, in: query, required: true, schema: {type: integer}}
+      responses: {"204": {description: OK}}
+`)
+
+	status, _, body := call(t, m, http.MethodGet, "/v%2520/input", "")
+	require.Equal(t, http.StatusBadRequest, status, body)
+
+	status, _, body = call(t, m, http.MethodGet, "/v%2520/input?limit=1", "")
+	require.Equal(t, http.StatusNoContent, status, body)
+}
+
+func TestOpenAPI_ARequestNeedNotSendAPropertyAnAllOfBranchMakesReadOnly(t *testing.T) {
+	// One branch of an allOf makes id readOnly, another requires it: the object is one, and a client needn't send
+	// what the server sets. What a branch requires otherwise still is.
+	m := serveSpec(t, `
+openapi: 3.1.0
+info: {title: Read only, version: "1"}
+paths:
+  /pets:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {type: object, properties: {id: {type: string, readOnly: true}}}
+                - {type: object, required: [id, name], properties: {name: {type: string}}}
+      responses: {"201": {description: Created}}
+`)
+
+	post := func(body string) (int, string) {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, m.URL()+"/pets", strings.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+
+		data, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		return res.StatusCode, string(data)
+	}
+
+	status, body := post(`{"name":"Rex"}`)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	status, body = post(`{}`)
+	require.Equal(t, http.StatusBadRequest, status, body)
+}
+
+func TestOpenAPI_TheStaleMocksOfARemovedOperationStillLoad(t *testing.T) {
+	// A rerun keeps the files it no longer writes, which still load: a check of a request against the spec must still
+	// find its operation, or the server starts for none of the operations left.
+	dir := t.TempDir()
+
+	generate := func(spec string) {
+		file := filepath.Join(t.TempDir(), "spec.yaml")
+		require.NoError(t, os.WriteFile(file, []byte(spec), 0o600))
+
+		loc, err := openapi.Location(file)
+		require.NoError(t, err)
+		require.Empty(t, writeMocks(t, dir, loc))
+	}
+
+	generate(`
+openapi: 3.1.0
+info: {title: Rerun, version: "1"}
+paths:
+  /input:
+    get:
+      parameters:
+        - {name: limit, in: query, schema: {type: integer}}
+      responses: {"204": {description: OK}}
+`)
+	generate(`
+openapi: 3.1.0
+info: {title: Rerun, version: "1"}
+paths:
+  /current:
+    get:
+      responses: {"204": {description: OK}}
+`)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().MockFilePatterns(filepath.Join(dir, "*.mock.yaml")).
+		Matchers(matchbuild.MustNew(matchopenapi.WithMatcher())))
+	require.NoError(t, m.Start())
+	t.Cleanup(m.Close)
+
+	status, _, body := call(t, m, http.MethodGet, "/current", "")
+	require.Equal(t, http.StatusNoContent, status, body)
+
+	// The stale check keeps the contract its operation had.
+	status, _, body = call(t, m, http.MethodGet, "/input?limit=x", "")
+	require.Equal(t, http.StatusBadRequest, status, body)
+}
+
 // serveSpec serves the mocks the generator writes of spec, an OpenAPI document, and fails on a warning.
 func serveSpec(t *testing.T, spec string) *mockhttp.Server {
 	t.Helper()
@@ -1043,6 +1233,21 @@ func serveSpecAt(t *testing.T, loc *url.URL) (*mockhttp.Server, string) {
 	t.Helper()
 
 	mocksDir := t.TempDir()
+	logs := writeMocks(t, mocksDir, loc)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().MockFilePatterns(filepath.Join(mocksDir, "*.mock.yaml")).
+		Matchers(matchbuild.MustNew(matchopenapi.WithMatcher())))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	return m, logs
+}
+
+// writeMocks writes to dir the mock files the generator writes of the OpenAPI document at loc, a file or an http(s)
+// URL, as the openapi command does, and returns what it logs, as JSON lines.
+func writeMocks(t *testing.T, dir string, loc *url.URL) string {
+	t.Helper()
+
 	read := func(u *url.URL) ([]byte, error) { return openapi.Read(t.Context(), http.DefaultClient, u) }
 
 	data, err := read(loc)
@@ -1057,15 +1262,10 @@ func serveSpecAt(t *testing.T, loc *url.URL) (*mockhttp.Server, string) {
 	files, err := openapi.Generate(t.Context(), doc, &log)
 	require.NoError(t, err)
 
-	_, err = openapi.Write(mocksDir, doc.Title, files)
+	_, err = openapi.Write(dir, doc.Title, files)
 	require.NoError(t, err)
 
-	m := mockhttp.MustNew(mockhttp.Setup().Silent().MockFilePatterns(filepath.Join(mocksDir, "*.mock.yaml")).
-		Matchers(matchbuild.MustNew(matchopenapi.WithMatcher())))
-	m.MustStart()
-	t.Cleanup(m.Close)
-
-	return m, logs.String()
+	return logs.String()
 }
 
 // call sends a request to m, with accept as its Accept when not empty, and returns the status, the ID of the mock

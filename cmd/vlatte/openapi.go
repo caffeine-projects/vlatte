@@ -40,7 +40,7 @@ operation's security asks, 415 when its body is in a media type the operation do
 operation declares instead, when its parameters or body don't fit their schemas, and 405 when the path has no
 operation of its method. Each answers the operation's response of its status, or else a problem body, which for a 400
 or 422 lists what the request breaks. Those mocks check the request against a copy of the spec written beside them,
-named after its title, such as Pet-Store.openapi.yaml: keep it with them.
+named after its title and a hash of the copy, such as Pet-Store.1a2b3c4d.openapi.yaml: keep it with them.
 Each file names the title of its spec. A rerun overwrites the files written from a spec of that title, lists those
 it no longer writes, and never touches other files: write specs that share a title to different folders.
 A spec over http(s) refers to http(s) URLs only.`,
@@ -104,7 +104,7 @@ func writeOpenAPIMocks(ctx context.Context, in, out string, stdout, stderr io.Wr
 	_, _ = fmt.Fprintf(stdout, "Wrote %d mock files, and the spec they check requests against, %s, to %s.\n", mocks, spec, out)
 
 	if len(report.Stale) > 0 {
-		_, _ = fmt.Fprintf(stdout, "These files were generated from this spec, but no longer are, and still load: %s\n",
+		_, _ = fmt.Fprintf(stdout, "These files were generated from this spec, but no longer are, and the mocks among them still load: %s\n",
 			strings.Join(report.Stale, ", "))
 	}
 

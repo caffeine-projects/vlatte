@@ -9,7 +9,7 @@ request:
           - - openapi
             - check: content_type
               operation: createPet
-              spec: Modern-Petstore.openapi.yaml
+              spec: Modern-Petstore.6e8fa666.openapi.yaml
     method: POST
     path:
         - equal

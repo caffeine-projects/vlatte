@@ -166,7 +166,7 @@ func TestGenerate_PathExamplesAndA404(t *testing.T) {
 	}}})
 
 	require.Equal(t, openapi.Request{
-		Method: "GET", Path: []any{"equal", "/pets/a b"}, Accept: []any{"accept", "application/json", []any{"application/json"}},
+		Method: "GET", PathTemplate: "/pets/a%20b", Accept: []any{"accept", "application/json", []any{"application/json"}},
 	}, mocks["pets-_id-get-200-json-example"].Request)
 	require.Equal(t, 1500, mocks["pets-_id-get-200-json-example"].Priority)
 	require.Equal(t, openapi.Request{Method: "GET", PathTemplate: "/pets/{id}"}, mocks["pets-_id-get-404"].Request)
@@ -212,7 +212,7 @@ func TestGenerate_WritesAPathExampleInTheStyleOfItsParameter(t *testing.T) {
 				Responses:  []openapi.Response{{Status: "200"}},
 			}}})
 
-			require.Equal(t, []any{"equal", tt.path}, mocks["c-_color-get-200-example"].Request.Path)
+			require.Equal(t, tt.path, mocks["c-_color-get-200-example"].Request.PathTemplate)
 		})
 	}
 }
@@ -225,8 +225,8 @@ func TestGenerate_WritesAPathExampleOfAParameterWithContentInItsMediaType(t *tes
 		value     any
 		path      string // "" for no example mock
 	}{
-		{mediaType: "application/json", value: "blue", path: `/c/"blue"`},
-		{mediaType: "application/json", value: map[string]any{"R": float64(100), "B": float64(150)}, path: `/c/{"B":150,"R":100}`},
+		{mediaType: "application/json", value: "blue", path: `/c/%22blue%22`},
+		{mediaType: "application/json", value: map[string]any{"R": float64(100), "B": float64(150)}, path: `/c/%7B%22B%22:150,%22R%22:100%7D`},
 		{mediaType: "text/plain", value: "blue", path: "/c/blue"},
 		{mediaType: "text/plain", value: []any{"blue"}},
 	}
@@ -249,7 +249,7 @@ func TestGenerate_WritesAPathExampleOfAParameterWithContentInItsMediaType(t *tes
 				return
 			}
 
-			require.Equal(t, []any{"equal", tt.path}, mocks["c-_color-get-200-example"].Request.Path)
+			require.Equal(t, tt.path, mocks["c-_color-get-200-example"].Request.PathTemplate)
 			require.Empty(t, warnings)
 		})
 	}
@@ -352,8 +352,8 @@ func TestGenerate_FillsEachPathParameterOnceFromTheTemplate(t *testing.T) {
 		Responses:  []openapi.Response{{Status: "200"}},
 	}}})
 
-	require.Equal(t, []any{"equal", "/p/{b}/1"}, mocks["p-_a-_b-get-200-example"].Request.Path)
-	require.Equal(t, []any{"equal", "/q/1/{c}"}, mocks["q-_a-_c-get-200-example"].Request.Path)
+	require.Equal(t, "/p/%7Bb%7D/1", mocks["p-_a-_b-get-200-example"].Request.PathTemplate)
+	require.Equal(t, "/q/1/{c}", mocks["q-_a-_c-get-200-example"].Request.PathTemplate)
 }
 
 func TestGenerate_NamedPathExamplesGetAMockEach(t *testing.T) {
@@ -363,8 +363,62 @@ func TestGenerate_NamedPathExamplesGetAMockEach(t *testing.T) {
 		Responses:  []openapi.Response{{Status: "200"}},
 	}}})
 
-	require.Equal(t, []any{"equal", "/pets/1"}, mocks["pets-_id-get-200-dog"].Request.Path)
-	require.Equal(t, []any{"equal", "/pets/2"}, mocks["pets-_id-get-200-cat"].Request.Path)
+	require.Equal(t, "/pets/1", mocks["pets-_id-get-200-dog"].Request.PathTemplate)
+	require.Equal(t, "/pets/2", mocks["pets-_id-get-200-cat"].Request.PathTemplate)
+}
+
+func TestGenerate_MatchesAnExampleOnlyWhereItsRouteDoes(t *testing.T) {
+	// The checks of an operation's contract apply to the requests its route matches: an example's mock must match no
+	// other. A / of a whole segment's value is sent escaped, but a value inside a segment holds none, and no
+	// parameter is empty: those examples are left out.
+	tests := []struct {
+		name    string
+		path    string
+		value   string
+		request openapi.Request
+		mock    string // the mock the warning names
+		warning string
+	}{
+		{name: "a / in a whole segment", path: "/pets/{id}", value: "a/b", request: openapi.Request{Method: "GET", PathTemplate: "/pets/a%2Fb"}},
+		{
+			name: "a / inside a segment", path: "/pets/{id}.json", value: "a/b", mock: "pets-_id-json-get-200",
+			warning: "path /pets/a/b.json of the examples of its parameters: left out: a value is empty, or holds a / inside a segment, which the route doesn't take",
+		},
+		{name: "a value inside a segment", path: "/pets/{id}.json", value: "a b", request: openapi.Request{Method: "GET", Path: []any{"equal", "/pets/a b.json"}}},
+		{
+			name: "an empty value", path: "/pets/{id}", value: "", mock: "pets-_id-get-200",
+			warning: "path /pets/ of the examples of its parameters: left out: a value is empty, or holds a / inside a segment, which the route doesn't take",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mocks, warnings := generateWithWarnings(t, &openapi.Document{Operations: []openapi.Operation{{
+				Method: "GET", Path: tt.path,
+				PathParams: []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{{Value: tt.value}}}},
+				Responses:  []openapi.Response{{Status: "200"}},
+			}}})
+
+			var examples []openapi.Request
+			for _, m := range mocks {
+				if m.Variant != "" {
+					examples = append(examples, m.Request)
+				}
+			}
+
+			if tt.warning != "" {
+				require.Empty(t, examples)
+				require.Equal(t, []map[string]any{{
+					"level": "warn", "mock": tt.mock, "method": "GET", "route": tt.path, "status": "200", "message": tt.warning,
+				}}, warnings)
+
+				return
+			}
+
+			require.Equal(t, []openapi.Request{tt.request}, examples)
+			require.Empty(t, warnings)
+		})
+	}
 }
 
 func TestGenerate_WritesWhatNothingPredictsDisabled(t *testing.T) {
@@ -412,7 +466,7 @@ func TestGenerate_RefusesARequestThatBreaksTheContract(t *testing.T) {
 	}})
 
 	refuse := func(operation, check string) []any {
-		return []any{[]any{"not", []any{"openapi", map[string]any{"spec": "Pet-store.openapi.yaml", "operation": operation, "check": check}}}}
+		return []any{[]any{"not", []any{"openapi", map[string]any{"spec": "Pet-store.77074ba4.openapi.yaml", "operation": operation, "check": check}}}}
 	}
 
 	problem := func(status int, title string, header ...string) openapi.Reply {
@@ -494,7 +548,7 @@ func TestGenerate_RefusesARequestWithTheOperationsOwnResponse(t *testing.T) {
 	require.Equal(t, 300, mocks["pets-post-415-text"].Priority)
 	require.Equal(t, openapi.Request{
 		Method: "POST", Path: []any{"equal", "/pets"},
-		Custom: []any{[]any{"not", []any{"openapi", map[string]any{"spec": "Pets.openapi.yaml", "operation": "POST /pets", "check": "request"}}}},
+		Custom: []any{[]any{"not", []any{"openapi", map[string]any{"spec": "Pets.77074ba4.openapi.yaml", "operation": "POST /pets", "check": "request"}}}},
 	}, mocks["pets-post-422-json"].Request)
 	require.Equal(t, openapi.Reply{Status: 422, Header: map[string]string{"Content-Type": "application/json"}, Body: map[string]any{"error": "invalid"}}, mocks["pets-post-422-json"].Reply)
 	require.Equal(t, 400, mocks["pets-post-422-json"].Priority)
@@ -531,14 +585,20 @@ func TestGenerate_AnswersAMethodAPathLacksWithA405(t *testing.T) {
 
 func TestGenerate_WritesTheSpecBesideTheMocks(t *testing.T) {
 	// The mocks that refuse a request name the copy of the spec they check it against: a file of the folder they
-	// are written to, named after the title, as they are, which a server doesn't load as mocks.
+	// are written to, which a server doesn't load as mocks, named after the title, as they are, and a hash of the
+	// copy. A rerun on a changed spec leaves the copy that the mocks it no longer writes check requests against.
 	spec := map[string]any{"openapi": "3.1.0"}
 
-	for title, name := range map[string]string{"Pet store": "Pet-store.openapi.yaml", "": "spec.openapi.yaml", "·": "spec.openapi.yaml"} {
+	for title, name := range map[string]string{"Pet store": "Pet-store.32587c95.openapi.yaml", "": "spec.32587c95.openapi.yaml", "·": "spec.32587c95.openapi.yaml"} {
 		files, err := openapi.Generate(t.Context(), &openapi.Document{Title: title, Spec: spec}, new(zerolog.Nop()))
 		require.NoError(t, err)
 		require.Equal(t, []openapi.File{{Name: name, Data: spec}}, files)
 	}
+
+	changed := map[string]any{"openapi": "3.1.1"}
+	files, err := openapi.Generate(t.Context(), &openapi.Document{Title: "Pet store", Spec: changed}, new(zerolog.Nop()))
+	require.NoError(t, err)
+	require.Equal(t, []openapi.File{{Name: "Pet-store.9f34eaee.openapi.yaml", Data: changed}}, files)
 }
 
 func TestGenerate_PicksTheSuccessResponse(t *testing.T) {
@@ -998,8 +1058,8 @@ func TestGenerate_NumbersUnnamedPathExamples(t *testing.T) {
 		Responses:  []openapi.Response{{Status: "200"}},
 	}}})
 
-	require.Equal(t, []any{"equal", "/pets/1"}, mocks["pets-_id-get-200-example1"].Request.Path)
-	require.Equal(t, []any{"equal", "/pets/2"}, mocks["pets-_id-get-200-example2"].Request.Path)
+	require.Equal(t, "/pets/1", mocks["pets-_id-get-200-example1"].Request.PathTemplate)
+	require.Equal(t, "/pets/2", mocks["pets-_id-get-200-example2"].Request.PathTemplate)
 }
 
 func TestGenerate_LeavesOutAHeaderNoValueFits(t *testing.T) {

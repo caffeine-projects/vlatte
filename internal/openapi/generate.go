@@ -9,7 +9,6 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -137,7 +136,7 @@ type Reply struct {
 func Generate(ctx context.Context, doc *Document, log *zerolog.Logger) ([]File, error) {
 	g := generator{
 		doc: doc, defs: make(map[string]any, len(doc.Defs)), copies: make(map[string]string),
-		spec: cmp.Or(part(doc.Title), "spec") + ".openapi.yaml", routes: make(map[string]*routeMethods),
+		spec: specName(doc), routes: make(map[string]*routeMethods),
 	}
 	// Sorted, so the copies of shared schemas get the same names on every run.
 	for _, name := range slices.Sorted(maps.Keys(doc.Defs)) {
@@ -184,6 +183,17 @@ func Generate(ctx context.Context, doc *Document, log *zerolog.Logger) ([]File, 
 	}
 
 	return append(PerMock(g.mocks), File{Name: g.spec, Data: doc.Spec}), nil
+}
+
+// specName returns the name of the file of the copy of doc's spec: its title, then a hash of the copy. A rerun on a
+// changed spec writes a copy of another name, and leaves the one the mocks it no longer writes check requests against.
+func specName(doc *Document) string {
+	data, _ := json.Marshal(doc.Spec, json.Deterministic(true))
+
+	h := fnv.New32a()
+	h.Write(data)
+
+	return fmt.Sprintf("%s.%08x.openapi.yaml", cmp.Or(part(doc.Title), "spec"), h.Sum32())
 }
 
 // stopped returns the error of generating the mocks for ctx, done, or nil.
@@ -236,8 +246,8 @@ func (g *generator) warnf(format string, args ...any) {
 
 // operation makes the mocks of op.
 func (g *generator) operation(op Operation) {
-	route := joinPath(op.BasePath, op.Path)
-	request := routeRequest(op.Method, op.BasePath, op.Path)
+	route := pathtemplate.Join(op.BasePath, op.Path)
+	request := routeRequest(op.Method, pathtemplate.NewRoute(op.BasePath, op.Path))
 
 	primary := primaryResponse(op.Responses)
 	notFound := findResponse(op.Responses, "404")
@@ -284,8 +294,7 @@ func (g *generator) operation(op Operation) {
 			}
 
 			em.Priority = priority(_bandExample, route)
-			// The server compares the path decoded, and a glob would read an example's * or [ as its own.
-			em.Request = Request{Method: op.Method, Path: []any{"equal", joinPath(op.BasePath, ex.path)}}
+			em.Request = routeRequest(op.Method, ex.route)
 			g.contents(em, r, code, false)
 		}
 
@@ -752,8 +761,9 @@ func statusCode(status string, fallback int) int {
 
 // pathExample is a concrete path of an operation, from examples of its path parameters, and the name of the example.
 type pathExample struct {
-	path string
-	name string
+	path  string // as the client writes it, decoded: the path, or the value of one parameter
+	name  string
+	route *pathtemplate.Route // the route of the path
 }
 
 // pathExamples returns the concrete paths of op that examples of its path parameters give: the nth path takes the
@@ -782,27 +792,38 @@ func (g *generator) pathExamples(op Operation) []pathExample {
 		n = max(n, len(written[i]))
 	}
 
-	out := make([]pathExample, n)
+	out := make([]pathExample, 0, n)
 	for i := range n {
-		values := make(map[string]string, len(op.PathParams))
+		var ex pathExample
 
+		values := make(map[string]string, len(op.PathParams))
 		for j, p := range op.PathParams {
-			ex := written[j][min(i, len(written[j])-1)]
-			values["{"+p.Name+"}"] = ex.path
+			w := written[j][min(i, len(written[j])-1)]
+			values["{"+p.Name+"}"] = w.path
 
 			if len(op.PathParams) == 1 {
-				out[i].name = ex.name
+				ex.name = w.name
 			}
 		}
 
 		// One pass over the template: a value that holds {name} is a value, not a parameter to fill.
-		out[i].path = fillPath(op.Path, decoded, func(param string) string {
+		ex.path = pathtemplate.Fill(op.Path, pathtemplate.Decode, func(param string) string {
 			if v, ok := values[param]; ok {
 				return v
 			}
 
 			return param
 		})
+
+		// A request to a path its operation's route doesn't take would get none of the operation's checks.
+		route, ok := pathtemplate.NewExample(op.BasePath, op.Path, values)
+		if !ok {
+			g.warnf("path %s of the examples of its parameters: left out: a value is empty, or holds a / inside a segment, which the route doesn't take", ex.path)
+			continue
+		}
+
+		ex.route = route
+		out = append(out, ex)
 	}
 
 	return out
@@ -889,90 +910,20 @@ func priority(band int, route string) int {
 	return pathtemplate.Templated(route)*_routeStep + band
 }
 
-// _wholeParam matches a segment that is a parameter, such as {id}.
-var _wholeParam = regexp.MustCompile(`^\{[^{}/]+\}$`)
-
-// routeRequest returns what a mock of path, a path of the spec under base, a base path decoded, matches: its exact
-// path, a path template whose parameters are whole segments, or a regular expression of the path for a parameter
-// inside a segment. The server compares a path decoded, as a path template decodes its literal segments: an escape
-// of the spec, such as %20, matches the request that sends it.
-func routeRequest(method, base, path string) Request {
+// routeRequest returns what a mock of rt, of method, matches. A glob would read a * or [ of the path as its own.
+func routeRequest(method string, rt *pathtemplate.Route) Request {
 	r := Request{Method: method}
 
-	// A glob would read a * or [ of the path as its own.
-	if !pathtemplate.Param.MatchString(path) {
-		r.Path = []any{"equal", joinPath(base, decoded(path))}
-		return r
+	switch rt.Kind {
+	case pathtemplate.Literal:
+		r.Path = []any{"equal", rt.Path}
+	case pathtemplate.Segments:
+		r.PathTemplate = rt.Path
+	default:
+		r.Path = []any{"regex", rt.Path}
 	}
-
-	whole := true
-	for seg := range strings.SplitSeq(path, "/") {
-		if strings.ContainsAny(seg, "{}") && !_wholeParam.MatchString(seg) {
-			whole = false
-		}
-	}
-
-	if whole {
-		r.PathTemplate = joinPath((&url.URL{Path: base}).EscapedPath(), escapePercent(path))
-		return r
-	}
-
-	quoted := func(s string) string { return regexp.QuoteMeta(decoded(s)) }
-	r.Path = []any{"regex", "^" + regexp.QuoteMeta(strings.TrimSuffix(base, "/")) + fillPath(path, quoted, func(string) string { return `[^/]+` }) + "$"}
 
 	return r
-}
-
-// fillPath returns path, a path of the spec, with literal applied to each text between its parameters and each
-// parameter, such as {id}, replaced by param of it.
-func fillPath(path string, literal, param func(s string) string) string {
-	var b strings.Builder
-
-	last := 0
-	for _, loc := range pathtemplate.Param.FindAllStringIndex(path, -1) {
-		b.WriteString(literal(path[last:loc[0]]))
-		b.WriteString(param(path[loc[0]:loc[1]]))
-
-		last = loc[1]
-	}
-
-	b.WriteString(literal(path[last:]))
-
-	return b.String()
-}
-
-// decoded returns s, text of a path of the spec, decoded, as the server compares a path.
-func decoded(s string) string {
-	// Every % starts an escape once escapePercent is done.
-	d, _ := url.PathUnescape(escapePercent(s))
-
-	return d
-}
-
-// escapePercent returns s, text of a path of the spec, with each % that starts no escape, such as that of 50%, escaped
-// as %25: a percent sign.
-func escapePercent(s string) string {
-	var b strings.Builder
-
-	for i := range len(s) {
-		b.WriteByte(s[i])
-
-		if s[i] == '%' && (i+2 >= len(s) || !isHex(s[i+1]) || !isHex(s[i+2])) {
-			b.WriteString("25")
-		}
-	}
-
-	return b.String()
-}
-
-// isHex reports whether c is a hexadecimal digit.
-func isHex(c byte) bool {
-	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
-}
-
-// joinPath joins a base path and a path of the spec.
-func joinPath(base, path string) string {
-	return strings.TrimSuffix(base, "/") + path
 }
 
 // text returns v, a value of the spec or a fake one, which JSON holds, as text: a string as is, anything else as

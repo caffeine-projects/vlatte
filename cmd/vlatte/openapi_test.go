@@ -35,7 +35,7 @@ func TestOpenAPI_WritesTheMocksOfThePetstore(t *testing.T) {
 	code := run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr)
 	require.Equal(t, 0, code, stderr.String())
 	require.Empty(t, stderr.String())
-	require.Equal(t, "Wrote 85 mock files, and the spec they check requests against, Modern-Petstore.openapi.yaml, to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
+	require.Equal(t, "Wrote 85 mock files, and the spec they check requests against, Modern-Petstore.6e8fa666.openapi.yaml, to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
 
 	if *_update {
 		require.NoError(t, os.RemoveAll(golden))
@@ -200,7 +200,7 @@ paths:
 	write("  /a: {get: {responses: {\"204\": {description: OK}}}}\n")
 	stdout.Reset()
 	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, io.Discard))
-	require.Contains(t, stdout.String(), "These files were generated from this spec, but no longer are, and still load: v1-b-405.mock.yaml, v1-b-get-204.mock.yaml\n")
+	require.Contains(t, stdout.String(), "These files were generated from this spec, but no longer are, and the mocks among them still load: X.3d394a2f.openapi.yaml, v1-b-405.mock.yaml, v1-b-get-204.mock.yaml\n")
 
 	// A file of the folder that the command didn't write stays as it is.
 	require.NoError(t, os.WriteFile(filepath.Join(out, "v1-a-get-204.mock.yaml"), []byte("id: mine\n"), 0o600))
@@ -224,7 +224,7 @@ paths:
 	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr))
 	require.Regexp(t, `^\S+ WRN the body is data, not text: written disabled: give a string example `+
 		`media_type=text/csv method=GET mock=report-get-200-text-csv route=/report status=200\n$`, stderr.String())
-	require.Equal(t, "Wrote 3 mock files, and the spec they check requests against, X.openapi.yaml, to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
+	require.Equal(t, "Wrote 3 mock files, and the spec they check requests against, X.652cdcff.openapi.yaml, to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
 }
 
 func TestOpenAPI_TheCommandServesTheMocksItWrites(t *testing.T) {

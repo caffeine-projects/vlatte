@@ -9,7 +9,7 @@ request:
           - - openapi
             - check: security
               operation: getUserById
-              spec: Modern-Petstore.openapi.yaml
+              spec: Modern-Petstore.6e8fa666.openapi.yaml
     method: GET
     path_template: /users/{id}
 response:

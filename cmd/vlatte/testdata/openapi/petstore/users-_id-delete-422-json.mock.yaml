@@ -9,7 +9,7 @@ request:
           - - openapi
             - check: request
               operation: deleteUser
-              spec: Modern-Petstore.openapi.yaml
+              spec: Modern-Petstore.6e8fa666.openapi.yaml
     method: DELETE
     path_template: /users/{id}
 response:

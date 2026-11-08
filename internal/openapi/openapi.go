@@ -11,7 +11,8 @@
 //   - 300 + 1000s: a 415 for a body in a media type the operation doesn't take.
 //   - 400 + 1000s: a 400 for parameters or a body that don't fit their schemas, or the 422 the operation declares
 //     instead.
-//   - 500 + 1000s: a mock for each example of the path parameters, on the concrete path.
+//   - 500 + 1000s: a mock for each example of the path parameters, on the concrete path, when the path's own mocks
+//     take it: no value is empty, or holds a / inside a segment.
 //   - 600 + 1000s: the main success response, one mock for each media type it offers.
 //   - 700 + 1000s: a 406 for a request whose Accept takes none of those media types.
 //   - 800 + 1000s: a 404, when the spec declares one and the path parameters have examples, one mock for each media

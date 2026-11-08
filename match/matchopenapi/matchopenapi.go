@@ -16,7 +16,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -54,6 +53,11 @@ const (
 // parameters and body as the spec describes them, but for the readOnly properties it requires, which a client needn't
 // send. A request of another operation keeps the contract, such as one of /pets/mine, of any method, for the
 // operations of /pets/{id}: OpenAPI matches the path before the method, and a path of fewer templated segments first.
+// The matcher compares a request's path as the mocks vlatte openapi writes of the operation do, under the path of
+// its first server: GET /foo%2Fbar is a request of GET /foo/bar.
+//
+// The request check is kin-openapi's, which reads each number as a float64 and a const of null as none: a bound or an
+// enum value past 2^53 is checked rounded, and const: null takes any value.
 //
 // The matcher records what a request breaks in its explanation, and never fails: a spec that doesn't load fails the
 // mock file. The matchers of a registry load each spec once, and again when its file changes.
@@ -158,27 +162,27 @@ type spec struct {
 	t       *openapi3.T
 	byID    map[string]*route // by operationId
 	byRoute map[string]*route // by method and route, such as GET /v1/pets/{id}
-	bySize  map[int][]*route  // by number of segments, the routes a path of as many segments may match
+	routes  []*route          // all of them, by number of templated segments
 	modTime time.Time
 	size    int64
 }
 
 // newSpec returns t and its routes: each operation under the path of its first server.
 func newSpec(t *openapi3.T) *spec {
-	sp := &spec{t: t, byID: make(map[string]*route), byRoute: make(map[string]*route), bySize: make(map[int][]*route)}
+	sp := &spec{t: t, byID: make(map[string]*route), byRoute: make(map[string]*route)}
 
 	for path, item := range t.Paths.Map() {
 		for method, op := range item.Operations() {
 			base := ""
 			if op.Servers != nil && len(*op.Servers) > 0 {
 				if u, err := url.Parse((*op.Servers)[0].URL); err == nil {
-					base = strings.TrimSuffix(u.Path, "/")
+					base = u.Path
 				}
 			}
 
-			rt := newRoute(t, strings.ToUpper(method), base+path, path, item, op)
+			rt := newRoute(t, strings.ToUpper(method), base, path, item, op)
 			sp.byRoute[rt.method+" "+rt.path] = rt
-			sp.bySize[len(rt.segments)] = append(sp.bySize[len(rt.segments)], rt)
+			sp.routes = append(sp.routes, rt)
 
 			if op.OperationID != "" {
 				sp.byID[op.OperationID] = rt
@@ -186,30 +190,34 @@ func newSpec(t *openapi3.T) *spec {
 		}
 	}
 
+	slices.SortStableFunc(sp.routes, func(a, b *route) int { return a.templated - b.templated })
+
 	return sp
 }
 
-// routedElsewhere reports whether a request to the path of segments, which rt matches, goes to another path: one
-// that matches it with fewer templated segments, of any method, as OpenAPI matches /pets/mine before /pets/{id},
-// and the path before the method.
-func (sp *spec) routedElsewhere(segments []string, rt *route) bool {
-	return slices.ContainsFunc(sp.bySize[len(segments)], func(other *route) bool {
-		if other == rt || other.templated >= rt.templated {
+// routedElsewhere reports whether r, a request to a path rt matches, goes to another path: one that matches it with
+// fewer templated segments, of any method, as OpenAPI matches /pets/mine before /pets/{id}, and the path before the
+// method.
+func (sp *spec) routedElsewhere(r *http.Request, rt *route) bool {
+	for _, other := range sp.routes {
+		if other.templated >= rt.templated {
 			return false
 		}
 
-		_, ok := other.match(segments)
+		if _, ok := other.where.Match(r.URL); ok {
+			return true
+		}
+	}
 
-		return ok
-	})
+	return false
 }
 
 // route is an operation of a spec, where it answers.
 type route struct {
 	method    string
-	path      string    // the path of the spec under the path of its first server, such as /v1/pets/{id}
-	segments  []segment // the segments of path
-	templated int       // the number of segments that hold a parameter
+	path      string              // the path of the spec under the path of its first server, such as /v1/pets/{id}
+	where     *pathtemplate.Route // how its mocks compare a request's path
+	templated int                 // the number of segments of path that hold a parameter
 
 	// security are the requirements of the operation, else of the spec, of which a request keeps one.
 	security openapi3.SecurityRequirements
@@ -222,16 +230,10 @@ type route struct {
 	request *routers.Route
 }
 
-// segment is a segment of the path of a route.
-type segment struct {
-	literal string         // the segment, decoded, when it holds no parameter
-	pattern *regexp.Regexp // what it matches, when it holds parameters, each a group
-	names   []string       // the names of its parameters, in order
-}
-
-// newRoute returns the route of op, of method, of the path item of path in t, under base: at route.
-func newRoute(t *openapi3.T, method, at, path string, item *openapi3.PathItem, op *openapi3.Operation) *route {
-	rt := &route{method: method, path: at, templated: pathtemplate.Templated(at), security: t.Security}
+// newRoute returns the route of op, of method, of the path item of path in t, under base, a base path decoded.
+func newRoute(t *openapi3.T, method, base, path string, item *openapi3.PathItem, op *openapi3.Operation) *route {
+	at := pathtemplate.Join(base, path)
+	rt := &route{method: method, path: at, where: pathtemplate.NewRoute(base, path), templated: pathtemplate.Templated(at), security: t.Security}
 
 	if op.Security != nil {
 		rt.security = *op.Security
@@ -256,73 +258,7 @@ func newRoute(t *openapi3.T, method, at, path string, item *openapi3.PathItem, o
 	unsecured.Security = &openapi3.SecurityRequirements{}
 	rt.request = &routers.Route{Spec: t, Path: path, PathItem: item, Method: method, Operation: &unsecured}
 
-	for seg := range strings.SplitSeq(at, "/") {
-		locs := pathtemplate.Param.FindAllStringIndex(seg, -1)
-		if locs == nil {
-			rt.segments = append(rt.segments, segment{literal: unescape(seg)})
-			continue
-		}
-
-		var expr strings.Builder
-
-		names := make([]string, 0, len(locs))
-
-		expr.WriteString("^")
-
-		last := 0
-		for _, loc := range locs {
-			expr.WriteString(regexp.QuoteMeta(unescape(seg[last:loc[0]])))
-			expr.WriteString("(.+)")
-			names = append(names, seg[loc[0]+1:loc[1]-1])
-			last = loc[1]
-		}
-
-		expr.WriteString(regexp.QuoteMeta(unescape(seg[last:])) + "$")
-
-		rt.segments = append(rt.segments, segment{pattern: regexp.MustCompile(expr.String()), names: names})
-	}
-
 	return rt
-}
-
-// match returns the values of the parameters of rt's path in a path of segments, decoded, or false when the path is
-// not rt's.
-func (rt *route) match(segments []string) (map[string]string, bool) {
-	if len(segments) != len(rt.segments) {
-		return nil, false
-	}
-
-	params := make(map[string]string)
-
-	for i, seg := range rt.segments {
-		if seg.pattern == nil {
-			if segments[i] != seg.literal {
-				return nil, false
-			}
-
-			continue
-		}
-
-		values := seg.pattern.FindStringSubmatch(segments[i])
-		if values == nil {
-			return nil, false
-		}
-
-		for j, name := range seg.names {
-			params[name] = values[j+1]
-		}
-	}
-
-	return params, true
-}
-
-// unescape returns s, a segment of a path, decoded, or as it is when it holds an escape that isn't one.
-func unescape(s string) string {
-	if d, err := url.PathUnescape(s); err == nil {
-		return d
-	}
-
-	return s
 }
 
 // matcher matches a request that keeps the contract of the operation of route, for its check.
@@ -350,13 +286,8 @@ func (m *matcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return false, nil
 	}
 
-	segments := strings.Split(r.URL.EscapedPath(), "/")
-	for i, seg := range segments {
-		segments[i] = unescape(seg)
-	}
-
-	params, own := m.route.match(segments)
-	if !own || !strings.EqualFold(r.Method, m.route.method) || m.spec.routedElsewhere(segments, m.route) {
+	params, own := m.route.where.Match(r.URL)
+	if !own || !strings.EqualFold(r.Method, m.route.method) || m.spec.routedElsewhere(r, m.route) {
 		return true, nil
 	}
 
@@ -565,31 +496,98 @@ func reason(se *openapi3.SchemaError, at string) string {
 	return strings.TrimPrefix(r, "at '"+at+"': ")
 }
 
-// unrequireReadOnly drops from the required properties of each schema of t the ones it, or a schema of its allOf,
-// marks readOnly: a client needn't send them. kin-openapi checks a 3.0 spec so, but not a 3.1 one.
+// unrequireReadOnly drops from the required properties of each schema of t, and of the schemas of its allOf, the
+// ones it marks readOnly: a client needn't send them. A schema marks readOnly a property that a schema of its allOf,
+// or of theirs, gives a schema that is readOnly, or one of whose allOf is: the annotations of an allOf apply to the
+// object, whichever branch holds them. kin-openapi's own check, which a 3.1 spec gets only for a schema with a
+// reference and no keyword of JSON Schema 2020, misses a property readOnly through its own allOf.
 func unrequireReadOnly(t *openapi3.T) {
+	var schemas []*openapi3.Schema
+
 	_ = t.WalkSchemas(func(_ string, ref *openapi3.SchemaRef) error {
-		s := ref.Value
-		s.Required = slices.DeleteFunc(s.Required, func(name string) bool {
-			return readOnly(s, name, make(map[*openapi3.Schema]bool))
-		})
+		if ref.Value != nil {
+			schemas = append(schemas, ref.Value)
+		}
 
 		return nil
 	})
+
+	// The names a schema marks readOnly are marked wherever it applies: it is changed in place. A schema of its allOf
+	// may apply elsewhere without them: it is changed in a copy.
+	for _, s := range schemas {
+		if names := readOnlyNames(s); len(names) > 0 {
+			unrequire(s, names, map[*openapi3.Schema]*openapi3.Schema{s: nil})
+		}
+	}
 }
 
-// readOnly reports whether s, or a schema of its allOf, marks its property name readOnly. seen are the schemas it
-// looked at already, against a cycle.
-func readOnly(s *openapi3.Schema, name string, seen map[*openapi3.Schema]bool) bool {
-	if s == nil || seen[s] {
-		return false
+// readOnlyNames returns the names of the properties s marks readOnly.
+func readOnlyNames(s *openapi3.Schema) map[string]bool {
+	names := make(map[string]bool)
+
+	for _, branch := range allOf(s) {
+		for name, p := range branch.Properties {
+			if p != nil && p.Value != nil && slices.ContainsFunc(allOf(p.Value), func(x *openapi3.Schema) bool { return x.ReadOnly }) {
+				names[name] = true
+			}
+		}
 	}
 
-	seen[s] = true
+	return names
+}
 
-	if p := s.Properties[name]; p != nil && p.Value != nil && p.Value.ReadOnly {
-		return true
+// allOf returns s and the schemas of its allOf, and of theirs, each once.
+func allOf(s *openapi3.Schema) []*openapi3.Schema {
+	out := []*openapi3.Schema{s}
+
+	for i := 0; i < len(out); i++ {
+		for _, ref := range out[i].AllOf {
+			if ref != nil && ref.Value != nil && !slices.Contains(out, ref.Value) {
+				out = append(out, ref.Value)
+			}
+		}
 	}
 
-	return slices.ContainsFunc(s.AllOf, func(ref *openapi3.SchemaRef) bool { return readOnly(ref.Value, name, seen) })
+	return out
+}
+
+// unrequire drops names from the required properties of s, and replaces each schema of its allOf that requires one
+// of them, or whose allOf does, by a copy that doesn't. copies are the copies made, by schema, and nil for each
+// schema being changed: one that is reached again, through a cycle, is left as it is.
+func unrequire(s *openapi3.Schema, names map[string]bool, copies map[*openapi3.Schema]*openapi3.Schema) {
+	s.Required = slices.DeleteFunc(slices.Clone(s.Required), func(name string) bool { return names[name] })
+
+	branches := slices.Clone(s.AllOf)
+	for i, ref := range branches {
+		if ref == nil || ref.Value == nil || !requiresAny(ref.Value, names) {
+			continue
+		}
+
+		c, ok := copies[ref.Value]
+		if ok && c == nil {
+			continue
+		}
+
+		if !ok {
+			copies[ref.Value] = nil
+
+			branch := *ref.Value
+			unrequire(&branch, names, copies)
+
+			c = &branch
+			copies[ref.Value] = c
+		}
+
+		// Without its reference, kin-openapi checks the copy, not the schema the reference names.
+		branches[i] = &openapi3.SchemaRef{Value: c}
+	}
+
+	s.AllOf = branches
+}
+
+// requiresAny reports whether s, or a schema of its allOf, requires one of names.
+func requiresAny(s *openapi3.Schema, names map[string]bool) bool {
+	return slices.ContainsFunc(allOf(s), func(x *openapi3.Schema) bool {
+		return slices.ContainsFunc(x.Required, func(name string) bool { return names[name] })
+	})
 }
