@@ -61,7 +61,7 @@ curl -k https://localhost:8443/payments \
 
 </HomeHero>
 
-<HomeSection title="Run it your way" lead="The same mocks, in a test, from files, or in a container.">
+<HomeSection title="Run it your way" lead="The same mocks, in a test, from files, from an OpenAPI spec, or in a container.">
 <HomeRun>
 
 ::: code-group
@@ -79,6 +79,12 @@ m.MustMock(mockhttp.Getf("/health").Reply(mockhttp.OK()))
 # Install the binary for your platform; see Installation.
 
 # Serves the mock files of testdata/vlatte/_mocks.
+vlatte --addr=:8080
+```
+
+```sh [OpenAPI]
+# Writes a mock for every response of the spec.
+vlatte openapi --in openapi.yaml --out testdata/vlatte/_mocks
 vlatte --addr=:8080
 ```
 

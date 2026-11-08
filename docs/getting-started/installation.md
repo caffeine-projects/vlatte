@@ -21,7 +21,7 @@ Import the packages you use: `mockhttp` for HTTP, `mockgrpc` for gRPC, and `matc
 | `match` | Request matchers, such as `match.Equal`, `match.JSONPath` and `match.All` |
 | `match/matchbuild` | The matcher lists of mock files, and the registry of custom matchers |
 | `match/matchscenario` | Scenario state for mock servers |
-| `match/matchopenapi` | The `openapi` matcher, which the mocks `vlatte openapi` writes check requests with: give it to a server's registry to load them in Go |
+| `match/matchopenapi` | The `openapi` matcher, which the mocks [`vlatte openapi`](/openapi/) writes check requests with: give it to a server's registry to load them in Go |
 | `webhook` | Calling a URL after a mock is served |
 | `fault` | Pipes that make an HTTP mock answer wrong |
 | `journal` | The request journal |

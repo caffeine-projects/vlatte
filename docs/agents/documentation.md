@@ -29,6 +29,7 @@ Follow the Markdown URLs in the index: a section's overview is normally `index.m
 | Write a Go HTTP client test | [Quick start](/getting-started/quick-start), [REST client guide](/guides/testing-a-rest-client), [Verifying requests](/verify/) |
 | Serve mocks for a browser or mobile app | [Frontend client guide](/guides/testing-a-frontend-client), [Mock files and the CLI](/guides/mock-files-and-the-cli), [Docker](/run/docker) |
 | Test a gRPC client | [gRPC overview](/grpc/), [Streaming client guide](/guides/grpc-streaming-client) |
+| Mock an API from its OpenAPI spec | [OpenAPI overview](/openapi/), [Generating mocks](/openapi/generate), [Replies](/openapi/replies) |
 | Capture an upstream and replay it | [Record and replay guide](/guides/record-and-replay), [Files and secrets](/recording/files-secrets) |
 | Work with mocks on a running server | [MCP setup](/mcp/setup), [MCP tools](/mcp/tools) |
 

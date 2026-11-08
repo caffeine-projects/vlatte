@@ -41,6 +41,7 @@ VLatte starts real HTTP and gRPC servers that answer the way you tell them to. S
 - **[Matchers](https://vlatte.dev/matchers/)** shared by every protocol: equality, JSON path, JSON Schema, XPath, regex, globs, dates and combinators, plus your own.
 - **Replies** with templated headers and bodies, sequences, random picks, echo, multipart, Server-Sent Events and custom functions.
 - **Mock files** in YAML or JSON, with [JSON schemas](https://vlatte.dev/reference/schemas) for editors, reloaded on demand.
+- **[Mocks from an OpenAPI spec](https://vlatte.dev/openapi/).** `vlatte openapi` writes a mock file for every response of an OpenAPI 3.0, 3.1 or 3.2 spec, from its examples or values that fit its schemas, and mocks that answer requests breaking the spec with the errors its server would.
 - **Scenarios** for stateful flows, and **webhooks** sent after a mock answers.
 - **Proxying, and recording** of a real service to play it back later, with outbound rules that limit the addresses a server connects to.
 - **Fault injection:** latency, slow bandwidth, connection resets, malformed and empty answers.
@@ -159,6 +160,15 @@ delay: 150ms
 vlatte --addr=127.0.0.1:8080
 curl -H 'Authorization: Bearer x' http://127.0.0.1:8080/users/7
 # {"id": 7, "name": "ann"}
+```
+
+### CLI with an OpenAPI spec
+
+```sh
+vlatte openapi --in openapi.yaml --out testdata/vlatte/_mocks
+vlatte --addr=127.0.0.1:8080
+curl http://127.0.0.1:8080/pets/42
+# answers from the spec's examples, or values that fit its schemas
 ```
 
 ## Documentation

@@ -84,6 +84,17 @@ const sidebar: DefaultTheme.SidebarItem[] = [
     ],
   },
   {
+    text: 'OpenAPI',
+    collapsed: true,
+    items: [
+      { text: 'Overview', link: '/openapi/' },
+      { text: 'Generating mocks', link: '/openapi/generate' },
+      { text: 'Replies', link: '/openapi/replies' },
+      { text: 'Requests that break the spec', link: '/openapi/contract' },
+      { text: 'Troubleshooting', link: '/openapi/troubleshooting' },
+    ],
+  },
+  {
     text: 'Features',
     collapsed: true,
     items: [
