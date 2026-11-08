@@ -2,6 +2,8 @@ package openapi
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -79,9 +81,38 @@ func Read(ctx context.Context, client *http.Client, u *url.URL) ([]byte, error) 
 	return data, nil
 }
 
+// errNoVersion is the error of a document that is JSON or YAML, but names no version.
+var errNoVersion = fmt.Errorf("%w: expected an openapi or swagger field with its version, such as openapi: 3.1.0", ErrNotOpenAPI)
+
 // Detect returns the version a spec in JSON or YAML declares: its openapi field, such as 3.1.0, or its swagger field,
 // such as 2.0. It fails with [ErrNotOpenAPI] when it declares neither.
 func Detect(data []byte) (string, error) {
+	// JSON first, as kin-openapi reads a spec, with encoding/json v1: YAML rejects some JSON, such as an emoji escaped
+	// as a surrogate pair, or a key written twice.
+	var doc struct {
+		OpenAPI jsontext.Value `json:"openapi"`
+		Swagger jsontext.Value `json:"swagger"`
+	}
+
+	if json.Unmarshal(data, &doc, jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true)) == nil {
+		for _, v := range []jsontext.Value{doc.OpenAPI, doc.Swagger} {
+			var version string
+
+			switch v.Kind() {
+			case jsontext.KindString:
+				_ = json.Unmarshal(v, &version) // a valid string
+			case jsontext.KindNumber:
+				version = string(v)
+			}
+
+			if version != "" {
+				return version, nil
+			}
+		}
+
+		return "", errNoVersion
+	}
+
 	// Nodes keep a version as written: swagger: 2.0 is a number to YAML.
 	var head struct {
 		OpenAPI yaml.Node `yaml:"openapi"`
@@ -98,5 +129,5 @@ func Detect(data []byte) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("%w: expected an openapi or swagger field with its version, such as openapi: 3.1.0", ErrNotOpenAPI)
+	return "", errNoVersion
 }

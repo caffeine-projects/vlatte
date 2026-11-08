@@ -2,6 +2,7 @@ package openapi_test
 
 import (
 	"bytes"
+	"context"
 	json "encoding/json/v2"
 	"fmt"
 	"maps"
@@ -534,7 +535,8 @@ func TestGenerate_WritesTheSpecBesideTheMocks(t *testing.T) {
 	spec := map[string]any{"openapi": "3.1.0"}
 
 	for title, name := range map[string]string{"Pet store": "Pet-store.openapi.yaml", "": "spec.openapi.yaml", "·": "spec.openapi.yaml"} {
-		files := openapi.Generate(&openapi.Document{Title: title, Spec: spec}, new(zerolog.Nop()))
+		files, err := openapi.Generate(t.Context(), &openapi.Document{Title: title, Spec: spec}, new(zerolog.Nop()))
+		require.NoError(t, err)
 		require.Equal(t, []openapi.File{{Name: name, Data: spec}}, files)
 	}
 }
@@ -699,6 +701,63 @@ func TestGenerate_ASchemaKeepsItsOwnDefs(t *testing.T) {
 	})
 
 	require.Equal(t, []any{"rex", "pet"}, mocks["a-get-200-json"].Reply.Body)
+}
+
+func TestGenerate_ResolvesEveryRefOfASchemaHowEverItReachesASharedSchema(t *testing.T) {
+	// A fake value gets only the shared schemas its schema reaches: one it reaches from its own $defs, or by a
+	// pointer into a shared schema, must resolve too, and its own $defs keep winning over a shared one's name.
+	shared := map[string]any{
+		"Pet":  map[string]any{"type": "object", "required": []any{"name"}, "properties": map[string]any{"name": map[string]any{"const": "rex"}}},
+		"Name": map[string]any{"const": "shared"},
+	}
+
+	tests := []struct {
+		name   string
+		schema map[string]any
+		want   any
+	}{
+		{
+			name:   "a pointer into a shared schema",
+			schema: map[string]any{"$ref": "#/$defs/Pet/properties/name"},
+			want:   `"rex"`,
+		},
+		{
+			// A fragment is a URI's: it may percent-encode any character, as fakefy reads it.
+			name:   "a percent-encoded pointer",
+			schema: map[string]any{"$ref": "#/%24defs/%50et/properties/name"},
+			want:   `"rex"`,
+		},
+		{
+			name: "a shared schema its own $defs name",
+			schema: map[string]any{
+				"$defs": map[string]any{"Wrap": map[string]any{"$ref": "#/$defs/Pet/properties/name"}},
+				"$ref":  "#/$defs/Wrap",
+			},
+			want: `"rex"`,
+		},
+		{
+			name: "its own $defs over a shared schema of the same name",
+			schema: map[string]any{
+				"$defs": map[string]any{"Name": map[string]any{"const": "own"}},
+				"$ref":  "#/$defs/Name",
+			},
+			want: `"own"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mocks := generate(t, &openapi.Document{
+				Defs: shared,
+				Operations: []openapi.Operation{{
+					Method: "GET", Path: "/a",
+					Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{MediaType: "application/json", Schema: tt.schema}}}},
+				}},
+			})
+
+			require.Equal(t, tt.want, mocks["a-get-200-json"].Reply.Body)
+		})
+	}
 }
 
 func TestGenerate_LeavesOutWriteOnlyPropertiesOfASharedSchemaOfAnyName(t *testing.T) {
@@ -883,6 +942,21 @@ func TestGenerate_FakesWhatHasNoExample(t *testing.T) {
 	}, m.Reply)
 }
 
+func TestGenerate_StopsWhenCanceledWhileMakingTheLastOperation(t *testing.T) {
+	// Ctrl+C while the last operation's values are made, which can take minutes, must not let the command write the
+	// mocks anyway: the context reports canceled from its second check on, as it does once canceled mid-run.
+	doc := &openapi.Document{Operations: []openapi.Operation{
+		{Method: "GET", Path: "/a", Responses: []openapi.Response{{Status: "204"}}},
+	}}
+
+	log := zerolog.Nop()
+	files, err := openapi.Generate(&canceledLater{Context: t.Context()}, doc, &log)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.EqualError(t, err, "openapi: generating the mocks: context canceled")
+	require.Nil(t, files)
+}
+
 func TestGenerate_WritesTheSameMocksOnEveryRun(t *testing.T) {
 	// A regenerated folder diffs cleanly in git only when a rerun writes the same values, whatever else the spec
 	// holds.
@@ -1008,7 +1082,8 @@ func generateWithWarnings(t *testing.T, doc *openapi.Document) (map[string]opena
 	var logs bytes.Buffer
 
 	log := zerolog.New(&logs)
-	files := openapi.Generate(doc, &log)
+	files, err := openapi.Generate(t.Context(), doc, &log)
+	require.NoError(t, err)
 
 	mocks := make(map[string]openapi.Mock, len(files))
 	copies := 0
@@ -1051,4 +1126,20 @@ func enabledIDs(mocks map[string]openapi.Mock, enabled bool) []string {
 	}
 
 	return out
+}
+
+// canceledLater is a context that reports no error the first time it is checked, and canceled from then on.
+type canceledLater struct {
+	context.Context
+
+	checks int
+}
+
+func (c *canceledLater) Err() error {
+	c.checks++
+	if c.checks == 1 {
+		return nil
+	}
+
+	return context.Canceled
 }

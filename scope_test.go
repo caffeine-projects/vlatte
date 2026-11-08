@@ -509,3 +509,26 @@ func TestScopesMachine(t *testing.T) {
 		})
 	})
 }
+
+func TestScopesAdd_NamesTheFirstTenFailingBuildersAndCountsTheRest(t *testing.T) {
+	// A folder of generated mock files a server can't read fails each the same way: a line for each of thousands buries
+	// the reason.
+	app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
+
+	builders := make([]vlatte.Builder[*fakeMock, struct{}], 13)
+	want := make([]string, 0, 11)
+
+	for i := range builders {
+		builders[i] = fakeBuilder{err: errors.New("bad file")}
+		if i < 10 {
+			want = append(want, "server: mock "+strconv.Itoa(i)+": bad file")
+		}
+	}
+
+	want = append(want, "server: 3 more mocks fail to build")
+
+	scope, err := app.Mock(builders...)
+
+	require.Nil(t, scope)
+	require.EqualError(t, err, strings.Join(want, "\n"))
+}

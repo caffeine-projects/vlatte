@@ -120,6 +120,10 @@ type Config struct {
 	// custom ones. Nil builds the built-in matchers only.
 	Matchers *matchbuild.Registry
 
+	// RequestParsers read the request messages of calls, in order, for matchers, templates and replies: see
+	// [RequestParser].
+	RequestParsers []RequestParser
+
 	// TemplateEngine compiles the templates of replies and events. Nil uses a vlatte.GoTemplateEngine.
 	TemplateEngine vlatte.TemplateEngine
 
@@ -417,6 +421,12 @@ func (cb *ConfigBuilder) EventListeners(listeners *vlatte.Listener) *ConfigBuild
 // matchers: [matchbuild.WithMatcher]. Servers can share a registry. Nil builds the built-in matchers only.
 func (cb *ConfigBuilder) Matchers(r *matchbuild.Registry) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Matchers = r })
+}
+
+// RequestParsers adds parsers of the request messages of calls, after those added before: the first that can parse a
+// message parses it. See [RequestParser].
+func (cb *ConfigBuilder) RequestParsers(parsers ...RequestParser) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.RequestParsers = append(conf.RequestParsers, parsers...) })
 }
 
 // GlobalEvents sets the events that run for every mock, before the mock's own.

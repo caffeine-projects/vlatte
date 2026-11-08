@@ -52,7 +52,10 @@ func TestGenerate_GivesEveryMockAUniqueIDEveryFileSystemTakes(t *testing.T) {
 	log := zerolog.Nop()
 	got := make([]string, 0, len(routes))
 
-	for _, f := range openapi.Generate(&openapi.Document{Operations: ops}, &log) {
+	files, err := openapi.Generate(t.Context(), &openapi.Document{Operations: ops}, &log)
+	require.NoError(t, err)
+
+	for _, f := range files {
 		// The copy of the spec has no mocks.
 		if f.Mocks == nil {
 			continue
