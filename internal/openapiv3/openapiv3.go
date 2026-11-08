@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	json "encoding/json/v2"
+	"errors"
 	"fmt"
 	"maps"
 	"net/url"
@@ -21,8 +22,17 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
-// _nullValue is the externalValue a null example holds while kin-openapi validates it.
-const _nullValue = "vlatte:null"
+// _standInValue is the externalValue an example holds while kin-openapi validates it, when kin-openapi reads it as
+// having no value: one whose value is null, or one of OpenAPI 3.2 with only a dataValue or a serializedValue.
+const _standInValue = "vlatte:example"
+
+// _openAPI32Fields are the fields OpenAPI 3.2 adds that kin-openapi doesn't read and would reject as unknown: those of
+// the document, components, encodings, examples, media types, OAuth flows, responses, security schemes, servers and
+// tags. kin-openapi allows them by name, on any object. No mock needs what they say but for the values of examples.
+var _openAPI32Fields = []string{
+	"$self", "dataValue", "deprecated", "deviceAuthorization", "encoding", "itemEncoding", "kind", "mediaTypes", "name",
+	"oauth2MetadataUrl", "parent", "prefixEncoding", "serializedValue", "summary",
+}
 
 // _componentsPrefix starts a reference to a shared schema, which the model writes under $defs.
 const _componentsPrefix = "#/components/schemas/"
@@ -179,8 +189,15 @@ func hasComponent(t *openapi3.T, collection, name string) bool {
 // validate validates t as kin-openapi does, but for the values of examples, which kin-openapi would reject the
 // document for: the converter checks those the mocks use, as [converter.fit] does. The named examples of media types
 // and parameters are checked otherwise as kin-openapi does. A default r says is null, which kin-openapi reads as no
-// value, is checked as null. The walk meets the parts of t in the same order on every run, which names the same error.
+// value, is checked as null. In OpenAPI 3.2, the fields it adds that kin-openapi doesn't read are no error, and those
+// of an example that hold its value are checked as OpenAPI 3.2 has them. The walk meets the parts of t in the same
+// order on every run, which names the same error.
 func validate(ctx context.Context, t *openapi3.T, r raw, where *places) error {
+	opts := []openapi3.ValidationOption{openapi3.DisableExamplesValidation()}
+	if t.IsOpenAPI32OrLater() {
+		opts = append(opts, openapi3.AllowExtraSiblingFields(_openAPI32Fields...))
+	}
+
 	// A media type of a shared component is reached from each of its users: it is walked once. A callback may lead
 	// back to a path item already walked.
 	seen := make(map[*openapi3.MediaType]bool)
@@ -249,7 +266,7 @@ func validate(ctx context.Context, t *openapi3.T, r raw, where *places) error {
 
 	// kin-openapi checks the document's servers only: those of a path or an operation are checked the same way.
 	servers := func(ss openapi3.Servers, what string) {
-		if err := ss.Validate(ctx); err != nil && invalid == nil {
+		if err := ss.Validate(ctx, opts...); err != nil && invalid == nil {
 			invalid = fmt.Errorf("invalid %s: invalid servers: %w", what, err)
 		}
 	}
@@ -336,37 +353,80 @@ func validate(ctx context.Context, t *openapi3.T, r raw, where *places) error {
 		return invalid
 	}
 
-	// kin-openapi rejects an example with neither a value nor an externalValue: a null example stands in as one with
-	// an externalValue.
-	var nulls []*openapi3.Example
+	examples := make(map[*openapi3.Example]bool)
 
-	for f, v := range r {
-		if ex, ok := f.object.(*openapi3.Example); ok && v == nil && ex.Value == nil && ex.ExternalValue == "" {
-			ex.ExternalValue = _nullValue
-			nulls = append(nulls, ex)
+	for f := range r {
+		if ex, ok := f.object.(*openapi3.Example); ok {
+			examples[ex] = true
+		}
+	}
+
+	if t.IsOpenAPI32OrLater() {
+		for _, ex := range slices.SortedFunc(maps.Keys(examples), func(a, b *openapi3.Example) int {
+			return cmp.Compare(where.of(field{object: a, name: "value"}), where.of(field{object: b, name: "value"}))
+		}) {
+			if err := checkValues(r, ex); err != nil {
+				return fmt.Errorf("invalid example %s: %w", where.of(field{object: ex, name: "value"}), err)
+			}
+		}
+	}
+
+	// kin-openapi rejects an example with neither a value nor an externalValue, as it reads one whose value is null,
+	// and one of OpenAPI 3.2 with only a dataValue or a serializedValue, which it doesn't know: such an example stands
+	// in as one with an externalValue.
+	var standIns []*openapi3.Example
+
+	for ex := range examples {
+		if ex.Value == nil && ex.ExternalValue == "" {
+			ex.ExternalValue = _standInValue
+			standIns = append(standIns, ex)
 		}
 	}
 
 	defer func() {
-		for _, ex := range nulls {
+		for _, ex := range standIns {
 			ex.ExternalValue = ""
 		}
 	}()
 
-	if err := t.Validate(ctx, openapi3.DisableExamplesValidation()); err != nil {
+	if err := t.Validate(ctx, opts...); err != nil {
 		return err
 	}
 
 	for _, examples := range named {
 		for _, name := range slices.Sorted(maps.Keys(examples)) {
 			ex := examples[name].Value
-			if err := ex.Validate(ctx); err != nil {
+			if err := ex.Validate(ctx, opts...); err != nil {
 				return fmt.Errorf("invalid example %s: %w", cmp.Or(where.of(field{object: ex, name: "value"}), name), err)
 			}
 		}
 	}
 
 	return validateDefaults(t, r, where)
+}
+
+// checkValues checks the fields of example ex that hold its value, as r has them, as OpenAPI 3.2 has them, which
+// kin-openapi doesn't know: value excludes dataValue and serializedValue, and externalValue excludes serializedValue,
+// which is text.
+func checkValues(r raw, ex *openapi3.Example) error {
+	_, value := r[field{object: ex, name: "value"}]
+	_, data := r[field{object: ex, name: "dataValue"}]
+	serialized, isSerialized := r[field{object: ex, name: "serializedValue"}]
+
+	switch {
+	case value && data:
+		return errors.New("value and dataValue are mutually exclusive")
+	case value && isSerialized:
+		return errors.New("value and serializedValue are mutually exclusive")
+	case ex.ExternalValue != "" && isSerialized:
+		return errors.New("externalValue and serializedValue are mutually exclusive")
+	}
+
+	if _, ok := serialized.(string); isSerialized && !ok {
+		return fmt.Errorf("serializedValue: expected a string, not %s", text(serialized))
+	}
+
+	return nil
 }
 
 // inOrder returns the values of m in the order of their keys.
@@ -489,18 +549,18 @@ func (c converter) operation(path, method string, common openapi3.Parameters, op
 
 	for _, name := range slices.Sorted(maps.Keys(params)) {
 		p := params[name]
-		examples, schema, mediaType := c.examplesOf(p, p.Example, p.Examples, p.Schema, false), p.Schema, ""
+		examples, schema, mediaType := c.examplesOf(p, p.Example, p.Examples, "", p.Schema, false), p.Schema, ""
 
 		// A parameter has a schema or content, of one media type.
 		if len(p.Content) > 0 {
 			mediaType = slices.Min(slices.Collect(maps.Keys(p.Content)))
 			media := p.Content[mediaType]
-			examples = append(examples, c.examplesOf(media, media.Example, media.Examples, dataOf(mediaType, media.Schema), false)...)
+			examples = append(examples, c.examplesOf(media, media.Example, media.Examples, mediaType, media.Schema, false)...)
 			schema = media.Schema
 		}
 
 		if s := schema; s != nil && s.Value != nil {
-			examples = append(examples, c.examplesOf(s.Value, s.Value.Example, nil, s, false)...)
+			examples = append(examples, c.examplesOf(s.Value, s.Value.Example, nil, "", s, false)...)
 
 			var kin any
 			if s.Value.Examples != nil {
@@ -548,7 +608,7 @@ func (c converter) response(status string, res *openapi3.Response) openapi.Respo
 			Name:     name,
 			Explode:  ref.Value.Explode != nil && *ref.Value.Explode,
 			Schema:   c.schema(ref.Value.Schema),
-			Examples: c.examplesOf(ref.Value, ref.Value.Example, ref.Value.Examples, ref.Value.Schema, true),
+			Examples: c.examplesOf(ref.Value, ref.Value.Example, ref.Value.Examples, "", ref.Value.Schema, true),
 		}
 
 		// A header has a schema or content, of one media type.
@@ -556,7 +616,7 @@ func (c converter) response(status string, res *openapi3.Response) openapi.Respo
 			mt := slices.Min(slices.Collect(maps.Keys(ref.Value.Content)))
 			media := ref.Value.Content[mt]
 			h.MediaType, h.Schema = mt, c.schema(media.Schema)
-			h.Examples = c.examplesOf(media, media.Example, media.Examples, dataOf(mt, media.Schema), true)
+			h.Examples = c.examplesOf(media, media.Example, media.Examples, mt, media.Schema, true)
 		}
 
 		r.Headers = append(r.Headers, h)
@@ -565,7 +625,7 @@ func (c converter) response(status string, res *openapi3.Response) openapi.Respo
 	for _, mt := range slices.Sorted(maps.Keys(res.Content)) {
 		media := res.Content[mt]
 		r.Content = append(r.Content, openapi.Content{
-			MediaType: mt, Schema: c.schema(media.Schema), Examples: c.examplesOf(media, media.Example, media.Examples, dataOf(mt, media.Schema), true),
+			MediaType: mt, Schema: c.schema(media.Schema), Examples: c.examplesOf(media, media.Example, media.Examples, mt, media.Schema, true),
 		})
 	}
 
@@ -573,10 +633,19 @@ func (c converter) response(status string, res *openapi3.Response) openapi.Respo
 }
 
 // examplesOf returns the example of owner, the object whose example field is example, if it has one, then the named
-// examples, in name order, with their values as the spec writes them, fitted to schema, as the body of a response
-// when response is set, as fit does. A named example at an externalValue, not inline, is left out.
-func (c converter) examplesOf(owner, example any, named openapi3.Examples, schema *openapi3.SchemaRef, response bool) []openapi.Example {
+// examples, in name order, with their values as the spec writes them. Those of mediaType, unless it is JSON, are the
+// body as sent, such as text, which a named example of OpenAPI 3.2 gives as its serializedValue, else its dataValue;
+// those of JSON, a parameter or a header, whose mediaType is "", are data, its dataValue, fitted to schema, as the
+// body of a response when response is set, as fit does. A named example at an externalValue, not inline, is left
+// out, as is one of data with only a serializedValue, which writes it as sent: a parameter with its style's
+// delimiters, JSON as text.
+func (c converter) examplesOf(owner, example any, named openapi3.Examples, mediaType string, schema *openapi3.SchemaRef, response bool) []openapi.Example {
 	var out []openapi.Example
+
+	values := []string{"value", "dataValue"}
+	if mediaType != "" && !openapi.IsJSON(mediaType) {
+		values, schema = []string{"value", "serializedValue", "dataValue"}, nil
+	}
 
 	f := field{object: owner, name: "example"}
 	if v, ok := c.raw.value(owner, f.name, example); ok {
@@ -589,25 +658,25 @@ func (c converter) examplesOf(owner, example any, named openapi3.Examples, schem
 		// kin-openapi resolves every reference it loads, or fails: a reference holds its value.
 		ex := named[name].Value
 
-		f := field{object: ex, name: "value"}
-		if v, ok := c.raw.value(ex, f.name, ex.Value); ok {
-			if v, ok = c.fit(v, schema, response, f, ""); ok {
-				out = append(out, openapi.Example{Name: name, Value: v})
+		// value excludes the others; text that is data is sent as is.
+		for _, n := range values {
+			kin := ex.Value
+			if n != "value" {
+				kin = nil
+			}
+
+			f := field{object: ex, name: n}
+			if v, ok := c.raw.value(ex, f.name, kin); ok {
+				if v, ok = c.fit(v, schema, response, f, ""); ok {
+					out = append(out, openapi.Example{Name: name, Value: v})
+				}
+
+				break
 			}
 		}
 	}
 
 	return out
-}
-
-// dataOf returns schema, of a media type, when the examples of the media type are the data it describes: those of
-// JSON. Those of another media type, such as XML, are the body as sent, which no schema describes.
-func dataOf(mediaType string, schema *openapi3.SchemaRef) *openapi3.SchemaRef {
-	if openapi.IsJSON(mediaType) {
-		return schema
-	}
-
-	return nil
 }
 
 // schema translates the schema of ref into JSON Schema 2020-12, or returns nil for no schema. kin-openapi read the
