@@ -34,7 +34,9 @@ func TestOpenAPI_WritesTheMocksOfThePetstore(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr)
 	require.Equal(t, 0, code, stderr.String())
-	require.Empty(t, stderr.String())
+	require.Regexp(t, `^\S+ INF reading the spec\n`+
+		`\S+ INF generating the mocks openapi=3\.2\.0 operations=15 schemas=8 title="Modern Petstore"\n`+
+		`\S+ INF generated the mocks mocks=85 took=\S+ warnings=0\n$`, stderr.String())
 	require.Equal(t, "Wrote 85 mock files, and the spec they check requests against, Modern-Petstore.6e8fa666.openapi.yaml, to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
 
 	if *_update {
@@ -141,11 +143,29 @@ func TestOpenAPI_FailsOnASpecItCannotUse(t *testing.T) {
 			out := filepath.Join(t.TempDir(), "mocks")
 
 			var stderr bytes.Buffer
-			require.Equal(t, 1, run(t.Context(), []string{"openapi", "--in", tt.spec, "--out", out}, nil, io.Discard, &stderr))
+			require.Equal(t, 1, run(t.Context(), []string{"openapi", "--in", tt.spec, "--out", out, "--log-level", "warn"}, nil, io.Discard, &stderr))
 			require.Equal(t, tt.want, stderr.String())
 			require.NoDirExists(t, out)
 		})
 	}
+}
+
+func TestOpenAPI_LogsNoCredentialOfTheSpecsURL(t *testing.T) {
+	// A spec's URL may carry a password or a token, and standard error often ends up in a CI log that others read.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "openapi: 3.1.0\ninfo: {title: X, version: \"1\"}\npaths: {/a: {get: {responses: {\"204\": {description: OK}}}}}\n")
+	}))
+	t.Cleanup(srv.Close)
+
+	u, err := url.Parse(srv.URL + "/spec.yaml?token=DUMMY_TOKEN")
+	require.NoError(t, err)
+	u.User = url.UserPassword("user", "DUMMY_PASSWORD")
+
+	var stderr bytes.Buffer
+	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", u.String(), "--out", t.TempDir()}, nil, io.Discard, &stderr))
+	require.Contains(t, stderr.String(), "INF generated the mocks")
+	require.NotContains(t, stderr.String(), "DUMMY_PASSWORD")
+	require.NotContains(t, stderr.String(), "DUMMY_TOKEN")
 }
 
 func TestOpenAPI_ASpecOverHTTPReadsNoLocalFile(t *testing.T) {
@@ -195,7 +215,9 @@ paths:
 
 	var stdout, stderr bytes.Buffer
 	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr))
-	require.Regexp(t, `^\S+ WRN the servers have different paths: the mocks answer under the first one's, "/v1"\n$`, stderr.String())
+	require.Regexp(t, `\n\S+ WRN the servers have different paths: the mocks answer under the first one's, "/v1"\n`+
+		`\S+ INF generating the mocks openapi=3\.1\.0 operations=2 schemas=0 title=X\n`+
+		`\S+ INF generated the mocks mocks=4 took=\S+ warnings=1\n$`, stderr.String())
 
 	write("  /a: {get: {responses: {\"204\": {description: OK}}}}\n")
 	stdout.Reset()
@@ -222,8 +244,9 @@ paths:
 
 	var stdout, stderr bytes.Buffer
 	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr))
-	require.Regexp(t, `^\S+ WRN the body is data, not text: written disabled: give a string example `+
-		`media_type=text/csv method=GET mock=report-get-200-text-csv route=/report status=200\n$`, stderr.String())
+	require.Regexp(t, `\n\S+ WRN the body is data, not text: written disabled: give a string example `+
+		`media_type=text/csv method=GET mock=report-get-200-text-csv route=/report status=200\n`+
+		`\S+ INF generated the mocks mocks=3 took=\S+ warnings=1\n$`, stderr.String())
 	require.Equal(t, "Wrote 3 mock files, and the spec they check requests against, X.652cdcff.openapi.yaml, to "+out+".\nServe them with: vlatte --mock-files '"+filepath.Join(out, "*.mock.yaml")+"'\n", stdout.String())
 }
 
@@ -269,9 +292,45 @@ paths:
 
 	var stdout, stderr bytes.Buffer
 	require.Equal(t, 1, run(ctx, []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr))
-	require.Equal(t, "openapi: generating the mocks: context canceled\n", stderr.String())
+	require.Regexp(t, `\n\S+ INF generating the mocks .*\nopenapi: generating the mocks: context canceled\n$`, stderr.String())
 	require.Empty(t, stdout.String())
 	require.NoDirExists(t, out)
+}
+
+func TestOpenAPI_SaysWhichStepFailed(t *testing.T) {
+	// A spec that doesn't load stops the command before it generates: the last line says what it was doing.
+	spec := filepath.Join(t.TempDir(), "spec.yaml")
+	require.NoError(t, os.WriteFile(spec, []byte("name: x\n"), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	require.Equal(t, 1, run(t.Context(), []string{"openapi", "--in", spec, "--out", t.TempDir()}, nil, &stdout, &stderr))
+	require.Regexp(t, `^\S+ INF reading the spec\n`+
+		`openapi: not an OpenAPI or Swagger document: expected an openapi or swagger field with its version, such as openapi: 3\.1\.0\n$`, stderr.String())
+	require.Empty(t, stdout.String())
+}
+
+func TestOpenAPI_LogsAtTheLevelAsked(t *testing.T) {
+	// --log-level warn keeps what the user must act on and drops the progress, as the server's flag does.
+	dir := t.TempDir()
+	spec := filepath.Join(dir, "spec.yaml")
+	require.NoError(t, os.WriteFile(spec, []byte(`openapi: 3.1.0
+info: {title: X, version: "1"}
+paths:
+  /report: {get: {responses: {"200": {description: OK, content: {text/csv: {example: [a, b]}}}}}}
+`), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", filepath.Join(dir, "mocks"), "--log-level", "WARN"}, nil, &stdout, &stderr))
+	require.Regexp(t, `^\S+ WRN the body is data, not text: written disabled: give a string example \S+ \S+ \S+ \S+ \S+\n$`, stderr.String())
+	require.Contains(t, stdout.String(), "Wrote 3 mock files")
+
+	stderr.Reset()
+	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", filepath.Join(dir, "mocks"), "--log-level", "disabled"}, nil, io.Discard, &stderr))
+	require.Empty(t, stderr.String())
+
+	stderr.Reset()
+	require.Equal(t, 2, run(t.Context(), []string{"openapi", "--in", spec, "--out", filepath.Join(dir, "mocks"), "--log-level", "loud"}, nil, io.Discard, &stderr))
+	require.Equal(t, "openapi: --log-level: expected one of trace, debug, info, warn, error, fatal, panic, none or disabled, not \"loud\"\n"+_helpHint+"\n", stderr.String())
 }
 
 func TestOpenAPI_TakesAnInAndAnOut(t *testing.T) {

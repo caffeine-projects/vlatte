@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,6 +104,16 @@ func testSchema() *Schema[testConfig] {
 			Set: func(c *testConfig, v Value) error { feature(c).Mode = v.Str; return nil },
 		},
 	)
+}
+
+func TestChoose_FindsAChoiceByNameInAnyCase(t *testing.T) {
+	// A command's flag takes a level as the server's settings do: a mistyped one names the levels it could be.
+	v, err := Choose(LogLevels, "WARN")
+	require.NoError(t, err)
+	require.Equal(t, int64(zerolog.WarnLevel), v)
+
+	_, err = Choose(LogLevels, "loud")
+	require.EqualError(t, err, `expected one of trace, debug, info, warn, error, fatal, panic, none or disabled, not "loud"`)
 }
 
 func TestNewSchema_DerivesNamesFromKeys(t *testing.T) {

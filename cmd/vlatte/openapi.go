@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
+	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/openapi"
 	"github.com/caffeine-projects/vlatte/internal/openapiv3"
 	"github.com/caffeine-projects/vlatte/mockhttp"
@@ -23,7 +24,7 @@ const _openapiTimeout = 30 * time.Second
 
 // openapiCmd writes mock files from an OpenAPI spec. It sets code to 1 when it fails.
 func openapiCmd(code *int) *cobra.Command {
-	var in, out string
+	var in, out, level string
 
 	cmd := &cobra.Command{
 		Use:   "openapi --in <spec> --out <dir>",
@@ -36,9 +37,9 @@ serializedValue, which is sent as is, base64 or not: a dataValue there is data t
 out. Each media type of a response gets a mock, which answers the client whose Accept prefers it, and each operation
 a 406 for a client that takes none. Responses nothing in a request predicts, such as 503, are written disabled: the
 admin API enables them.
-Mocks written by hand win over them. What the spec asks that can't be honored is logged on standard error.
-So is an example that doesn't fit its schema, such as 12345 for a string: converted when its text reads as the type
-the schema asks, else left out.
+Mocks written by hand win over them. What the command does, and what the spec asks that can't be honored, is logged
+on standard error. So is an example that doesn't fit its schema, such as 12345 for a string: converted when its text
+reads as the type the schema asks, else left out.
 A request that breaks the spec gets the error its server would answer: 401 when it lacks the credential the
 operation's security asks, 415 when its body is in a media type the operation doesn't take, 400, or the 422 the
 operation declares instead, when its parameters or body don't fit their schemas, and 405 when the path has no
@@ -52,40 +53,57 @@ A spec over http(s) refers to http(s) URLs only.`,
 			"  vlatte openapi --in https://example.com/openapi.json --out mocks\n",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			*code = writeOpenAPIMocks(cmd.Context(), in, out, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			lvl, err := config.Choose(config.LogLevels, level)
+			if err != nil {
+				return fmt.Errorf("openapi: --log-level: %w", err)
+			}
+
+			*code = writeOpenAPIMocks(cmd.Context(), in, out, zerolog.Level(lvl), cmd.OutOrStdout(), cmd.ErrOrStderr())
+
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&in, "in", "", "the spec: a file or an http(s) URL, in JSON or YAML")
 	cmd.Flags().StringVar(&out, "out", "", "the folder to write the mock files to, created if missing")
+	cmd.Flags().StringVar(&level, "log-level", "info",
+		"the level of the log on standard error: info says what the command is doing, warn only what it can't honor")
+	_ = cmd.RegisterFlagCompletionFunc("log-level",
+		cobra.FixedCompletions(config.ChoiceNames(config.LogLevels), cobra.ShellCompDirectiveNoFileComp))
 	_ = cmd.MarkFlagRequired("in")
 	_ = cmd.MarkFlagRequired("out")
 
 	return cmd
 }
 
-// writeOpenAPIMocks writes the mock files of the spec in to the folder out, and returns the exit code: 0, or 1 when
-// it fails.
-func writeOpenAPIMocks(ctx context.Context, in, out string, stdout, stderr io.Writer) int {
-	// No server runs to share its log: the command logs what it cannot honor on a log of its own, for the person
-	// reading standard error, in a terminal or a CI log.
+// writeOpenAPIMocks writes the mock files of the spec in to the folder out, logging at level what it does on stderr,
+// and returns the exit code: 0, or 1 when it fails.
+func writeOpenAPIMocks(ctx context.Context, in, out string, level zerolog.Level, stdout, stderr io.Writer) int {
+	// No server runs to share its log: the command logs what it does and what it cannot honor on a log of its own,
+	// for the person reading standard error, in a terminal or a CI log.
+	warnings := 0
 	console := zerolog.ConsoleWriter{Out: stderr, TimeFormat: time.RFC3339, NoColor: true}
-	log := zerolog.New(console).Level(zerolog.InfoLevel).With().Timestamp().Logger()
+	count := zerolog.HookFunc(func(_ *zerolog.Event, l zerolog.Level, _ string) {
+		if l == zerolog.WarnLevel {
+			warnings++
+		}
+	})
+	log := zerolog.New(console).Level(level).With().Timestamp().Logger().Hook(count)
 
-	doc, err := loadOpenAPI(ctx, in, &log)
+	log.Info().Msg("reading the spec")
+
+	doc, version, err := loadOpenAPI(ctx, in, &log)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
+
+	log.Info().Str("title", doc.Title).Str("openapi", version).Int("operations", len(doc.Operations)).
+		Int("schemas", len(doc.Defs)).Msg("generating the mocks")
+
+	start := time.Now()
 
 	files, err := openapi.Generate(ctx, doc, &log)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err)
-		return 1
-	}
-
-	report, err := openapi.Write(out, doc.Title, files)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
@@ -105,6 +123,15 @@ func writeOpenAPIMocks(ctx context.Context, in, out string, stdout, stderr io.Wr
 		mocks++
 	}
 
+	log.Info().Int("mocks", mocks).Int("warnings", warnings).Stringer("took", time.Since(start).Round(time.Millisecond)).
+		Msg("generated the mocks")
+
+	report, err := openapi.Write(out, doc.Title, files)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+
 	_, _ = fmt.Fprintf(stdout, "Wrote %d mock files, and the spec they check requests against, %s, to %s.\n", mocks, spec, out)
 
 	if len(report.Stale) > 0 {
@@ -119,11 +146,12 @@ func writeOpenAPIMocks(ctx context.Context, in, out string, stdout, stderr io.Wr
 	return 0
 }
 
-// loadOpenAPI reads the spec in, a file or an http(s) URL, with the package of its version.
-func loadOpenAPI(ctx context.Context, in string, log *zerolog.Logger) (*openapi.Document, error) {
+// loadOpenAPI reads the spec in, a file or an http(s) URL, with the package of its version, and returns it and its
+// version, as written.
+func loadOpenAPI(ctx context.Context, in string, log *zerolog.Logger) (*openapi.Document, string, error) {
 	loc, err := openapi.Location(in)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	client := &http.Client{Timeout: _openapiTimeout}
@@ -138,19 +166,21 @@ func loadOpenAPI(ctx context.Context, in string, log *zerolog.Logger) (*openapi.
 
 	data, err := read(loc)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	version, err := openapi.Detect(data)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	if !strings.HasPrefix(version, "3.") {
-		return nil, fmt.Errorf("openapi: version %s is not supported: expected OpenAPI 3.0, 3.1 or 3.2", version)
+		return nil, "", fmt.Errorf("openapi: version %s is not supported: expected OpenAPI 3.0, 3.1 or 3.2", version)
 	}
 
-	return openapiv3.Load(ctx, data, loc, read, log)
+	doc, err := openapiv3.Load(ctx, data, loc, read, log)
+
+	return doc, version, err
 }
 
 // remote reports whether u is an http(s) URL.

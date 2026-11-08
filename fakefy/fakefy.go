@@ -65,7 +65,8 @@ var (
 
 // Faker makes fake values. A Faker is not safe for concurrent use.
 type Faker struct {
-	rnd *rand.Rand
+	rnd  *rand.Rand
+	defs *Defs
 }
 
 // Option configures a [Faker].
@@ -98,12 +99,12 @@ func New(opts ...Option) *Faker {
 // float64, bool or nil, or a number of the schema as the schema has it, when neither an int64 nor a float64 holds it
 // exactly. It shares nothing with schema, so the caller may change it.
 //
-// A value comes from the first of const, examples, example, default and enum the schema has; then from its format,
-// such as email or date-time; then from the name of its field, such as createdAt or price; then from its type and
-// bounds. A $ref resolves within schema, allOf merges its schemas, and oneOf and anyOf take one of their branches,
-// setting an OpenAPI discriminator's property to name it, unless the branch fixes its value. Of a list of types, the
-// first a value satisfies wins, null last, or first from four levels down, so a nullable schema that nests itself
-// ends. An optional property or item no value satisfies is left out.
+// A value comes from the first of const, examples, example, default and enum the schema has; then from its format, such
+// as email or date-time; then from the name of its field, such as createdAt or price; then from its type and bounds. A
+// $ref resolves within schema, or to a schema of the [Defs] of [WithDefs], allOf merges its schemas, and oneOf and
+// anyOf take one of their branches, setting an OpenAPI discriminator's property to name it, unless the branch fixes its
+// value. Of a list of types, the first a value satisfies wins, null last, or first from four levels down, so a nullable
+// schema that nests itself ends. An optional property or item no value satisfies is left out.
 //
 // A schema that compiles as JSON Schema 2020-12, or as draft 4, as OpenAPI 3.0 writes one, checks each value, formats
 // too: one that doesn't validate, such as an example the rest of the schema breaks, is made again, from the schema's
@@ -118,9 +119,18 @@ func (f *Faker) Schema(schema map[string]any) (any, error) {
 // Field returns a value for schema, as [Faker.Schema] does, for a field called name, such as a property, a query
 // parameter or a header: the name picks among the values the schema allows, so an email field gets an email address.
 func (f *Faker) Field(name string, schema map[string]any) (any, error) {
-	w := walk{f: f, root: schema, examples: true}
+	root := schema
 
-	sch := validator(schema)
+	var sch *jsonschema.Schema
+
+	if f.defs != nil {
+		root = f.defs.root(schema)
+		sch = f.defs.validator(schema, root)
+	} else {
+		sch = validator(schema)
+	}
+
+	w := walk{f: f, root: root, examples: true}
 
 	var invalid error
 
@@ -128,7 +138,7 @@ func (f *Faker) Field(name string, schema map[string]any) (any, error) {
 		w.examples = w.examples && try < _maxTries/2
 		w.failures = 0
 
-		v, err := w.value(schema, name, "", 0)
+		v, err := w.value(root, name, "", 0)
 
 		// The examples may be what no value satisfies, such as unique items an example repeats.
 		if errors.Is(err, ErrUnsatisfiable) && w.examples {

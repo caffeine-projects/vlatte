@@ -10,6 +10,7 @@ import (
 	"math"
 	"math/big"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"uuid"
@@ -427,6 +428,47 @@ func TestSchema_ARefChainEnds(t *testing.T) {
 	_, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"$defs": defs, "$ref": "#/$defs/a0"})
 	require.ErrorIs(t, err, fakefy.ErrUnsatisfiable)
 	require.EqualError(t, err, "fakefy: no value satisfies the schema: at the root: $refs chain past 32 schemas")
+}
+
+func TestWithDefs_ARefChainEndsWhereItWouldWithTheSchemasUnderTheDefs(t *testing.T) {
+	// A chain of $refs to shared schemas ends at the same length as one to the schema's own: a chain the embedded
+	// schemas allow, such as 32 $refs, makes a value with Defs too.
+	tests := []struct {
+		refs int
+		want any
+		err  error
+	}{
+		{refs: 31, want: "ok"},
+		{refs: 32, want: "ok"},
+		{refs: 33, err: fakefy.ErrUnsatisfiable},
+	}
+
+	for _, tt := range tests {
+		t.Run(strconv.Itoa(tt.refs), func(t *testing.T) {
+			defs := make(map[string]any, tt.refs)
+			for i := range tt.refs {
+				def := map[string]any{"const": "ok"}
+				if i+1 < tt.refs {
+					def = map[string]any{"$ref": fmt.Sprintf("#/$defs/N%d", i+1)}
+				}
+
+				defs[fmt.Sprintf("N%d", i)] = def
+			}
+
+			for _, f := range []func() (any, error){
+				func() (any, error) {
+					return fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"$ref": "#/$defs/N0", "$defs": defs})
+				},
+				func() (any, error) {
+					return fakefy.New(fakefy.WithSeed(1), fakefy.WithDefs(fakefy.NewDefs(defs))).Schema(map[string]any{"$ref": "#/$defs/N0"})
+				},
+			} {
+				v, err := f()
+				require.ErrorIs(t, err, tt.err)
+				require.Equal(t, tt.want, v)
+			}
+		})
+	}
 }
 
 func TestSchema_ASchemaThatIsNotJSONStillMakesValues(t *testing.T) {

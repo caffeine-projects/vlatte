@@ -475,7 +475,9 @@ func (g *generator) body(m Mock, r Response, c Content, status int, extras bool)
 	case len(c.Examples) > 0:
 		g.setBody(&m, c, c.Examples[0])
 	case c.Schema != nil:
-		v, err := fakefy.New(fakefy.WithSeed(seed(m))).Schema(g.responses.root(c.Schema))
+		schema := g.responses.object(c.Schema)
+
+		v, err := g.responses.faker(seed(m)).Schema(schema)
 		if err != nil {
 			g.warnf("no body fits: %v: written disabled", err)
 			m.Enabled = false
@@ -582,10 +584,18 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 		return nil
 	}
 
-	f := fakefy.New(fakefy.WithSeed(seed(m) ^ 1))
+	// The schemas first, for the Faker to hold every copy of a shared schema they add.
+	schemas := make([]map[string]any, len(r.Headers))
+	for i, hd := range r.Headers {
+		if len(hd.Examples) == 0 && hd.Schema != nil {
+			schemas[i] = g.responses.object(hd.Schema)
+		}
+	}
+
+	f := g.responses.faker(seed(m) ^ 1)
 	h := make(map[string]string, len(r.Headers))
 
-	for _, hd := range r.Headers {
+	for i, hd := range r.Headers {
 		var v any
 
 		switch {
@@ -595,7 +605,7 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 			continue
 		default:
 			var err error
-			if v, err = f.Field(hd.Name, g.responses.root(hd.Schema)); err != nil {
+			if v, err = f.Field(hd.Name, schemas[i]); err != nil {
 				g.warnf("no value of header %s fits: %v: left out", hd.Name, err)
 				continue
 			}
@@ -617,6 +627,7 @@ type view struct {
 	doc    map[string]any    // the document's shared schemas
 	defs   map[string]any    // the shared schemas as the side sees them, and copyWithout's copies
 	copies map[string]string // the names in defs of copyWithout's copies, by shared schema and properties left out
+	fakes  *fakefy.Defs      // defs, for fakefy, or nil until it is first needed and after defs gains a copy
 }
 
 // newView returns how a side that leaves out the properties marker marks, or with keep, only stops requiring them,
@@ -634,7 +645,7 @@ func newView(doc map[string]any, marker string, keep bool) *view {
 
 // RequestRoots returns each of schemas, schemas of a document whose shared schemas are defs, as a request sees it: a
 // property a schema marks readOnly is no longer required, as a request needn't send it, but stays declared, as it
-// may. Each is a root, as a response's is, with the shared schemas its $ref values name under $defs.
+// may. Each is a root, with the shared schemas its $ref values name under $defs.
 func RequestRoots(defs map[string]any, schemas []any) []map[string]any {
 	vw := newView(defs, "readOnly", true)
 
@@ -648,18 +659,9 @@ func RequestRoots(defs map[string]any, schemas []any) []map[string]any {
 
 // root returns schema as vw's side sees it, with the document's shared schemas its $ref values name, in turn, under
 // $defs, for them to resolve. Its own $defs win over a shared schema of the same name. Leaving out the others keeps
-// fakefy from compiling every schema of a large spec for each value.
+// a validator from compiling every schema of a large spec for each schema.
 func (vw *view) root(schema any) map[string]any {
-	root := make(map[string]any, 2)
-
-	switch s := vw.strip(schema, nil).(type) {
-	case map[string]any:
-		root = s
-	case bool:
-		if !s {
-			root["not"] = make(map[string]any)
-		}
-	}
+	root := vw.object(schema)
 
 	own, _ := root["$defs"].(map[string]any)
 	defs := maps.Clone(own)
@@ -671,6 +673,30 @@ func (vw *view) root(schema any) map[string]any {
 	root["$defs"] = defs
 
 	return root
+}
+
+// object returns schema as vw's side sees it, as an object.
+func (vw *view) object(schema any) map[string]any {
+	switch s := vw.strip(schema, nil).(type) {
+	case map[string]any:
+		return s
+	case bool:
+		if !s {
+			return map[string]any{"not": make(map[string]any)}
+		}
+	}
+
+	return make(map[string]any)
+}
+
+// faker returns a Faker of seed whose $refs resolve to vw's shared schemas, as they are now: object may have added
+// copies of them.
+func (vw *view) faker(seed uint64) *fakefy.Faker {
+	if vw.fakes == nil {
+		vw.fakes = fakefy.NewDefs(maps.Clone(vw.defs))
+	}
+
+	return fakefy.New(fakefy.WithSeed(seed), fakefy.WithDefs(vw.fakes))
 }
 
 // named adds to defs each shared schema of vw that a $ref in v names, and those that one names, in turn, but for the
@@ -1120,6 +1146,7 @@ func (vw *view) copyWithout(name string, dropped []string) string {
 
 	// Taken before the copy is made, for the copy to refer to itself.
 	vw.copies[key] = copied
+	vw.fakes = nil
 	vw.defs[copied] = nil
 	vw.defs[copied] = vw.strip(def, without)
 
