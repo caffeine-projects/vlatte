@@ -1379,6 +1379,31 @@ func TestLoad_FailsOnANamedExampleTheSpecForbids(t *testing.T) {
 	})
 }
 
+func TestLoad_LeavesOutANamedExampleWithoutAValue(t *testing.T) {
+	// OpenAPI lets a named example give no value, such as one with only a summary, which GitHub's spec has. kin-openapi
+	// rejects it, but it only leaves a mock nothing to take.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      parameters: [{name: q, in: query, schema: {type: integer}, examples: {none: {summary: To do}}}]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: integer}
+              examples: {none: {summary: To do}, shared: {$ref: "#/components/examples/None"}, one: {value: 1}}
+components:
+  examples:
+    None: {summary: To do}
+`})
+
+	require.Equal(t, []openapi.Example{{Name: "one", Value: int64(1)}}, doc.Operations[0].Responses[0].Content[0].Examples)
+}
+
 func TestLoad_WarnsOfAFieldOpenAPIDoesNotDefineBesideANamedExample(t *testing.T) {
 	// A named example is checked apart from the rest of the spec: a field OpenAPI doesn't define beside its value is
 	// a slip it warns of, as any other, which leaves no mock wrong.
