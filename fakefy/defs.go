@@ -157,12 +157,13 @@ func (d *Defs) shared(schema map[string]any) *jsonschema.Schema {
 }
 
 // compile returns a compiler that holds schemas, under $defs, as JSON Schema 2020-12 with formats asserted, or nil
-// when they don't all compile so, or when a $ref of theirs may resolve otherwise there than in the schema of a value:
-// one that is not to a schema under $defs, such as # for the root, or one under a $id.
+// when they don't all compile so, or when a reference of theirs may resolve otherwise there than in the schema of a
+// value: a $ref that is not to a schema under $defs, such as # for the root, one under a $id, or a $dynamicRef or
+// $dynamicAnchor, which resolve by the resources a value passes through.
 func compile(schemas map[string]any) *jsonschema.Compiler {
 	moved := anyObject(schemas, func(o map[string]any) bool {
 		_, named := defName(o["$ref"])
-		return has(o, "$id") || has(o, "$ref") && !named
+		return has(o, "$id") || has(o, "$dynamicRef") || has(o, "$dynamicAnchor") || has(o, "$ref") && !named
 	})
 	if moved {
 		return nil

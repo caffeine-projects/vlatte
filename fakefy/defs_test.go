@@ -131,6 +131,15 @@ func TestWithDefs_MakesTheValuesOfTheSchemaWithTheSchemasItReachesUnderItsDefs(t
 	}}
 	toRoot := map[string]any{"allOf": []any{map[string]any{"$ref": "#"}}}
 
+	// P's child applies the root through $dynamicRef: an example whose child lacks id breaks it.
+	dynamic := map[string]any{
+		"type": "object", "required": []any{"id"}, "examples": []any{map[string]any{"id": 1, "child": make(map[string]any)}},
+		"properties": map[string]any{
+			"id":    map[string]any{"type": "integer"},
+			"child": map[string]any{"$dynamicRef": "#", "type": "object", "properties": map[string]any{"id": map[string]any{"type": "integer"}}},
+		},
+	}
+
 	// A Go caller's schema can hold what JSON can't: its values go unchecked, with Defs or without.
 	notJSON := map[string]any{"type": "integer", "minimum": 1, "example": 0, "x-limit": math.Inf(1)}
 
@@ -155,6 +164,13 @@ func TestWithDefs_MakesTheValuesOfTheSchemaWithTheSchemasItReachesUnderItsDefs(t
 			shared:   map[string]any{"R": toRoot},
 			schema:   root,
 			embedded: map[string]any{"anyOf": root["anyOf"], "$defs": map[string]any{"R": toRoot}},
+		},
+		{
+			// # is the root of the value's schema here too.
+			name:     "a shared schema with a $dynamicRef",
+			shared:   map[string]any{"P": dynamic},
+			schema:   map[string]any{"$ref": "#/$defs/P"},
+			embedded: map[string]any{"$ref": "#/$defs/P", "$defs": map[string]any{"P": dynamic}},
 		},
 		{
 			name:     "a $id below the root",
