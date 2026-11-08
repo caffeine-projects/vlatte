@@ -302,6 +302,39 @@ func TestLoad_FailsOnAnExampleOfOpenAPI32TheSpecForbids(t *testing.T) {
 	})
 }
 
+func TestLoad_IgnoresTheValuesOfAnExampleOfOpenAPI32BeforeIt(t *testing.T) {
+	// Before OpenAPI 3.2, dataValue and serializedValue are fields OpenAPI doesn't define: the mocks ignore them, as
+	// any such field, and Load says so.
+	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Trains, version: "1"}
+paths:
+  /trips:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: object}
+              examples: {data: {dataValue: {a: 1}}, value: {value: {a: 2}}}
+            text/plain:
+              schema: {type: string}
+              examples: {sent: {serializedValue: hello}}
+`})
+
+	require.Equal(t, []openapi.Content{
+		{MediaType: "application/json", Schema: map[string]any{"type": "object"}, Examples: []openapi.Example{{Name: "value", Value: map[string]any{"a": int64(2)}}}},
+		{MediaType: "text/plain", Schema: map[string]any{"type": "string"}},
+	}, doc.Operations[0].Responses[0].Content)
+
+	at := "spec.yaml#/paths/~1trips/get/responses/200/content/"
+	require.Equal(t, []map[string]any{
+		{"level": "warn", "example": at + "application~1json/examples/data", "message": "extra sibling fields: [dataValue]: ignored"},
+		{"level": "warn", "example": at + "text~1plain/examples/sent", "message": "extra sibling fields: [serializedValue]: ignored"},
+	}, warnings)
+}
+
 // _invalidA starts the error of a spec whose example A of its components OpenAPI 3.2 forbids.
 const _invalidA = "openapi: invalid spec: invalid example spec.yaml#/components/examples/A: "
 

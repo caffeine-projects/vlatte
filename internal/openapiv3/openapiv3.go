@@ -72,7 +72,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 	// The model refers to shared schemas by name: a reference to another file becomes one.
 	t.InternalizeRefs(ctx, refNames(location))
 
-	c := converter{v30: t.IsOpenAPI30(), raw: r, places: where, log: log, fits: make(map[fitKey]fitted)}
+	c := converter{v30: t.IsOpenAPI30(), v32: t.IsOpenAPI32OrLater(), raw: r, places: where, log: log, fits: make(map[fitKey]fitted)}
 	doc := &openapi.Document{Defs: make(map[string]any)}
 
 	if t.Info != nil {
@@ -622,6 +622,7 @@ func basePath(servers openapi3.Servers, served func(s *openapi3.Server) *url.URL
 // converter translates the parts of a document into the model.
 type converter struct {
 	v30    bool              // the document is OpenAPI 3.0, whose schemas are not JSON Schema 2020-12
+	v32    bool              // the document is OpenAPI 3.2, whose examples may give their value as data or as sent
 	raw    raw               // the examples as the spec writes them
 	places *places           // where the fields of raw are, and the text of their scalars
 	log    *zerolog.Logger   // where an example that doesn't fit its schema is logged
@@ -731,13 +732,17 @@ func (c converter) response(status string, res *openapi3.Response) openapi.Respo
 // those of JSON, a parameter or a header, whose mediaType is "", are data, its dataValue, fitted to schema, as the
 // body of a response when response is set, as fit does. A named example at an externalValue, not inline, is left
 // out, as is one of data with only a serializedValue, which writes it as sent: a parameter with its style's
-// delimiters, JSON as text.
+// delimiters, JSON as text. Before OpenAPI 3.2, those fields are unknown, and a named example has its value only.
 func (c converter) examplesOf(owner, example any, named openapi3.Examples, mediaType string, schema *openapi3.SchemaRef, response bool) []openapi.Example {
 	var out []openapi.Example
 
 	values := []string{"value", "dataValue"}
 	if mediaType != "" && !openapi.IsJSON(mediaType) {
 		values, schema = []string{"value", "serializedValue", "dataValue"}, nil
+	}
+
+	if !c.v32 {
+		values = values[:1]
 	}
 
 	f := field{object: owner, name: "example"}
