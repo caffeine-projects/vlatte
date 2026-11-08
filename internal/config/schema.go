@@ -61,6 +61,18 @@ type Choice struct {
 	Value int64
 }
 
+// Choose returns the value of the choice of choices named name, in any case, as a setting with those choices reads it.
+// The error lists the names a command can tell its user.
+func Choose(choices []Choice, name string) (int64, error) {
+	for _, choice := range choices {
+		if strings.EqualFold(name, choice.Name) {
+			return choice.Value, nil
+		}
+	}
+
+	return 0, fmt.Errorf("expected one of %s, not %q", orList(ChoiceNames(choices)), name)
+}
+
 // Field declares a setting of a T.
 type Field[T any] struct {
 	// Key is the dotted, snake_case path of the setting, such as "log.level".
@@ -319,7 +331,7 @@ func (c *catalog) Usage(envPrefix string) string {
 
 		fmt.Fprintf(&b, "\n        %s", f.usage)
 		if len(f.choices) > 0 {
-			fmt.Fprintf(&b, " One of: %s.", strings.Join(choiceNames(f.choices), ", "))
+			fmt.Fprintf(&b, " One of: %s.", strings.Join(ChoiceNames(f.choices), ", "))
 		}
 
 		if f.def != "" {

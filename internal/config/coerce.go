@@ -261,7 +261,7 @@ func want(f *field) string {
 		return "true or false"
 	case Int:
 		if len(f.choices) > 0 {
-			return "one of " + orList(choiceNames(f.choices))
+			return "one of " + orList(ChoiceNames(f.choices))
 		}
 
 		return "an integer"
@@ -322,8 +322,8 @@ func listOf(s string) string {
 	return "[" + strings.Join(items, ", ") + "]"
 }
 
-// choiceNames lists the names of choices, in order.
-func choiceNames(choices []Choice) []string {
+// ChoiceNames lists the names of choices, in order.
+func ChoiceNames(choices []Choice) []string {
 	names := make([]string, 0, len(choices))
 	for _, choice := range choices {
 		names = append(names, choice.Name)
