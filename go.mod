@@ -21,7 +21,7 @@ require (
 	github.com/mattn/go-colorable v0.1.16
 	github.com/mattn/go-isatty v0.0.24
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/ohler55/ojg v1.28.8
+	github.com/ohler55/ojg v1.28.9
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/rs/zerolog v1.35.1
 	github.com/ryanuber/go-glob v1.0.0
