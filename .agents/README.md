@@ -22,11 +22,21 @@ This project's own rules are not a skill: they live in [`CONVENTIONS.md`](../CON
 - On Windows, symlinks need Developer Mode and `git config --global core.symlinks true` before cloning.
 - If you had an untracked `.claude/skills/` folder, move it before pulling.
 
+## Tool-specific files
+
+`AGENTS.md` and `CONVENTIONS.md` are written for every tool. The files a tool needs to find them, or to pin a sub-agent's model, are listed here. They are agent docs too.
+
+| Tool | File | What it does |
+|---|---|---|
+| Claude Code | `CLAUDE.md` | Imports `AGENTS.md` and `CONVENTIONS.md` |
+| Claude Code | `.claude/skills` | See Discovery above |
+| Claude Code | [`.claude/agents/`](../.claude/agents/) | Agent definitions for the roles in "Use the cheapest thing that gets it right" in [`AGENTS.md`](../AGENTS.md); each pins its model in its `model:` frontmatter |
+
 ## Adding a skill
 
 Create `.agents/skills/<name>/SKILL.md` with `name` (equal to the folder name) and `description` frontmatter. Keep `SKILL.md` short and put details in `references/` files, which agents read only when needed. Never create skills under `.claude/skills/`.
 
-Then add a row to the Skills table in [`AGENTS.md`](../AGENTS.md) naming the work that loads it. `go test -run TestAgentDocs ./test` fails when a table row names no skill, a `name` differs from its folder, or `.claude/skills` stops linking here.
+Then add a row to the Skills table in [`AGENTS.md`](../AGENTS.md) naming the work that loads it. An agent loads a skill only when its `name` equals its folder's.
 
 ## Third-party skills
 

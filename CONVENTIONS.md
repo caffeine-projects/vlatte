@@ -4,19 +4,18 @@ How to change **this** repository. Agent behavior is in [`AGENTS.md`](AGENTS.md)
 
 These override the `use-modern-go` and `uber-go-style` skills. Apply them to code you write or change. `[lint]` means `make lint` checks it.
 
-## After every edit
+## Checks
 
-Run the checks in this order and fix failures before calling the task done. First match wins.
+Run the checks when the change is complete, and again after every fix that follows, not after each file you touch. Run them in this order and fix failures before calling the task done. First match wins.
 
-- **Docs only**: every file the task changed is `*.md`.
-  1. `go test -run TestAgentDocs ./test` when an agent doc or a skill changed. Nothing else.
+- **Docs only**: every file the task changed is `*.md`. No Go check; a change to an agent doc, a skill or an agent definition runs `review-change` instead (`AGENTS.md` § Size the change).
 - **Anything else**:
   1. `go tool gofumpt -l .` prints nothing. `make fmt` fixes it.
   2. `go mod tidy -diff` prints nothing. `make tidy` fixes it.
   3. `make lint`
   4. `make test`
 
-One file that is not `*.md` means the task is not docs only. CI (`.github/workflows/ci.yml`) runs the checks above on every change but one to `*.md` files outside the agent docs.
+One file that is not `*.md` means the task is not docs only. CI (`.github/workflows/ci.yml`) runs the checks above on every change but one to `*.md` files only, unless its `paths` list names one of them.
 
 ## Code shape
 

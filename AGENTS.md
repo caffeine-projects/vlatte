@@ -1,21 +1,67 @@
 # Agent instructions
 
-Rules for changing **this** repository, for every AI tool (e.g. Claude Code, Codex, Cursor, Copilot).
+Rules for changing **this** repository, for every AI tool (Claude Code, Codex, Cursor, Copilot, …).
 
-Before any edit, read [`CONVENTIONS.md`](CONVENTIONS.md).
+Before any edit, read [`CONVENTIONS.md`](CONVENTIONS.md). Every rule holds unless explicitly overridden. Where a rule gives its reason, apply it to every case the reason covers, not only to the words.
 
-These rules apply to every task unless explicitly overridden.
-Bias: caution over speed on non-trivial work. Use judgment on trivial tasks.
+## Size the change
 
-## Agent docs
+Decide the size before the first edit, from the request and the code. The size sets how much process the change pays for.
 
-- `CONVENTIONS.md`, `CLAUDE.md`, this file, `.agents/README.md` and the first-party skills change only when the maintainer explicitly asks for that change. A request to fix or build code is not one. When your work makes a rule wrong or shows one missing, stop and propose the exact wording; do not write it.
-- They hold rules: what an agent would get wrong without being told. Not design descriptions or history. A rule `make lint` checks is marked `[lint]`.
-- A rule names a pattern, never a list of files or symbols that grows with the code.
+A change is **small** when every line below holds, and **standard** otherwise:
+
+- It edits one Go file and its test file, or only `*.md` files.
+- It adds or changes no exported API: no exported name, option, default, signature or mock file key. A fix inside one that keeps its contract does not count.
+- It creates, moves or renames no file, except a test file beside its source.
+- It touches nothing under `.github/`.
+
+| Step | Small | Standard |
+|---|---|---|
+| Plan | A few lines in chat: the files, the test, the rule lines that decide it | Load `plan-change` and write the plan it asks for |
+| Checks | `CONVENTIONS.md` § Checks | The same |
+| Review | Read your own diff against the Rule map sections and the Working rules, and for anything left behind (debug output, a TODO, a stray file) | Run `review-change`: where your tool has sub-agents, one with a fresh context reviews the whole diff |
+| Report | What changed, what you ran and its result | The same, and what each review round found |
+
+- A small change that stops fitting a line above is standard from there: stop and plan before the next edit.
+- When unsure, it is standard.
+- A change to an agent doc, a skill or an agent definition runs `review-change` whatever its size: a wrong line there misleads every later session.
+
+## Working rules
+
+- **Look, then ask.** Ask only what neither the code nor these files answer: what the request leaves open, or why code you must change is built the way it is, when the change depends on the answer. Ask before the first edit when you can see the question then. Never guess a requirement. An option you offer states a choice, never a requirement the user did not give; recommend one. State any other assumption you went ahead on.
+- **Minimum change.** Build what was asked and nothing beside it: no extra option, no abstraction for a single use, no refactor, reformat or comment fix in code the task does not need. Clean up only what your own change left behind. When a simpler approach than the one asked for exists, say so before you build.
+- **Reuse first.** Before adding code, read the exports, callers and shared utilities around it. Before adding a type, a helper or an option, use the one that exists, because two names for one concept split every caller. A new one states why none fits.
+- **Facts from the code.** Take an API shape, a constraint or a design decision from the code and these files, never from `docs/`, a `README.md` other than `.agents/README.md`, or `docs/.ai/`: they may describe the code as it once was.
+- **Legacy is not precedent.** Conventions are what these files and the lint config define, not older idioms in nearby code. Code that contradicts them is legacy, even next to yours: do not copy it, because copying is how it spreads. Flag it; do not rewrite it. If you think a convention is harmful, say so; do not fork silently.
+- **Conflicts.** Where two patterns contradict, follow these files and the Skills precedence; where they are silent, the more recent and better-tested one. Say which you followed and flag the other; never blend them. When a rule blocks what the task needs, stop and name the rule; do not work around it.
+- **Two attempts.** After two failed attempts at the same failure, stop, say what you tried and ask. Never retry silently.
+- **Report what is true.** "Done" means the checks ran and you saw them pass. Name every check, test or step you skipped and why: "tests pass" is wrong if any were skipped. A sub-agent's report is a claim until you have read its diff or the command output it returns.
+
+## Use the cheapest thing that gets it right
+
+Work goes to the first of these that does it right:
+
+1. **A command**, when code can answer or produce it: count, search, check, convert, generate. A command's output is exact and can be rerun, and reasoning that imitates it is neither.
+2. **A cheaper model**, in a sub-agent, for the work the table gives it.
+3. **Your own model**, for everything else.
+
+| Work | Model | Role |
+|---|---|---|
+| Find where something is, list callers, read a log, run the checks and report each command's exit status and what failed | the smallest your tool offers | `scout` |
+| Carry out the steps of a finished plan, edit docs only, rename across callers, apply one decided pattern to many files | a mid-tier one | `implementer` |
+| Size and plan a change, design an exported API or a type, a bug of unknown cause, an agent doc, a skill or an agent definition, the review | yours, never a cheaper one | `reviewer` for the review; the rest stays with you |
+
+- The last row wins over the two above it.
+- An agent definition is a file your tool reads to start a sub-agent in a set role, with its own instructions, tools and model. Where your tool has one for the role, start it: it pins the model. [`.agents/README.md`](.agents/README.md) lists the tools that have them. Otherwise choose the sub-agent's model yourself; where your tool cannot, end a standard plan by telling the user which steps a cheaper model can carry out.
+- A cheaper model takes no design decision. Its brief says to stop and report where a step leaves one open; you decide, then send it back. One that fails twice at a step hands the step back to you.
+- A sub-agent knows only its brief. Give it the goal, the exact files, the plan steps that are its own, the checks to run and what to return. One that edits files also gets the sections to read first: this file whole and the ones the Rule map names for its files.
+- You stay the author. Read the diff a sub-agent returns before you build on it, and size, check and review the whole change as your own.
+- Do not delegate what a few tool calls with short output finish: the brief costs more than the work. A search or a check run is delegated for the output it keeps out of your context.
+- Handed a finished plan to carry out, as a sub-agent or because the user named the steps, you are that cheaper model: carry it out as written. Sizing, planning and `review-change` stay with whoever handed it over.
 
 ## Rule map
 
-Before you create or edit a file of a kind below, re-read its section, even if you read it at the start of the task.
+Before the first file of a kind below that you create or edit in a task, re-read its section, even if it is already in your context: a rule read at the start of a task fades by the time it applies.
 
 | Before you create or edit… | Re-read |
 |---|---|
@@ -25,128 +71,30 @@ Before you create or edit a file of a kind below, re-read its section, even if y
 | a doc comment, a `doc.go`, an `Example` or the README | CONVENTIONS.md § Documentation |
 | code that calls a third-party module | CONVENTIONS.md § Third-party APIs |
 | `.github/**` | CONVENTIONS.md § Security |
-| an agent doc or a skill | AGENTS.md § Agent docs |
+| an agent doc, a skill or an agent definition | AGENTS.md § Agent docs |
 
 ## Skills
 
-[`.agents/skills/`](.agents/README.md) holds skills for every agent (`.claude/skills` links to it). Load the one the table names before that work.
+[`.agents/skills/`](.agents/README.md) holds skills for every agent. Load the one the table names before that work.
 
 | Before you… | Load |
 |---|---|
-| plan a change to code | `plan-change` |
-| hand over a change | `review-change` |
+| plan a standard change | `plan-change` |
+| hand over a standard change or a change to an agent doc, a skill or an agent definition; review a diff when asked | `review-change` |
 | edit a Go file; run its `list` step on the file first | `use-modern-go` |
 | design, write or review Go: errors, goroutines, globals, interfaces, structs, naming, tests, options | `uber-go-style` |
 
-When they disagree: `CONVENTIONS.md` > `use-modern-go` > `uber-go-style` > nearby code. This applies to lines you write or change. Flag older code; do not rewrite it.
-If `use-modern-go` cannot run (e.g. no network on first install), say so and continue; `make lint` still flags old idioms.
+- When they disagree: `CONVENTIONS.md` > `use-modern-go` > `uber-go-style` > nearby code.
+- If `use-modern-go` cannot run (e.g. no network on first install), say so and continue; `make lint` still flags old idioms.
+- `plan-change`, `review-change` and the `uber-go-style` index are written here; the rest is vendored. Do not edit a vendored file. For an unavoidable patch, follow "Third-party skills" in [`.agents/README.md`](.agents/README.md).
 
-`plan-change`, `review-change` and the `uber-go-style` index are written here; `use-modern-go` and the `uber-go-style` rule files are vendored. Do not edit a vendored file. For an unavoidable patch, follow "Third-party skills" in [`.agents/README.md`](.agents/README.md).
+## Agent docs
 
-## Generated documentation
-
-When generating documentation—for example from assessments, analyses, or summaries—place it under:
-
-- **`docs/.ai`**
-
-Examples: assessment write-ups, flow analyses, design notes. Keep human-authored docs elsewhere (e.g. `docs/` root or other subdirs); use `docs/.ai` specifically for AI-generated content so it’s easy to find and optional to commit.
-Files under `.agents/` are agent tooling, not generated docs; keep them there.
+- `CONVENTIONS.md`, this file, `.agents/README.md`, the skills written here, and the tool-specific files `.agents/README.md` lists change only when the maintainer explicitly asks for that change. A request to fix or build code is not one. When your work makes a rule wrong or shows one missing, stop and propose the exact wording; do not write it.
+- They hold rules: what an agent would get wrong without being told. Not design descriptions or history. A rule `make lint` checks is marked `[lint]`.
+- A rule names a pattern, never a list of files or symbols that grows with the code.
 
 ## Output
 
-Chat in short, plain English. Lead with the answer. No filler.
-Keep code names, paths, and error text exact. Do not simplify those.
-
-## Git
-
-- Never commit or push unless asked.
-- Branch: `<type>/<topic>`, a Conventional Commits type and a kebab-case topic (`fix/proxy-timeout`). Never an AI tool or model name (`claude`, `codex`, `copilot`, `cursor`, `gemini`, …).
-- A branch your environment assigns that breaks the branch rule (`claude/…`, `codex/…`) is replaced with a `<type>/<topic>` one: the maintainer's standing permission.
-- Conventional Commits: `<type>(<optional scope>): <description>`. Types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `perf`. Description under 72 characters, imperative mood, no trailing period.
-- No AI attribution in commits, pull requests, comments or reviews: no `Co-Authored-By` naming an assistant, no session link, no "Generated with" line. The contributor is the author of record.
-- Never use `git stash`. If uncommitted changes exist and you need to switch state, stop and ask.
-- Never revert, discard, or `git checkout --` a file outside the current task's scope, including files a tool (`make fmt`, `go fix`) changed as a side effect. That uncommitted state is other in-progress work: stop and report it.
-
-## Rule 1 — Think Before Coding
-
-State assumptions explicitly. If uncertain, ask rather than guess.
-Present multiple interpretations when ambiguity exists.
-Push back when a simpler approach exists.
-Ask only what the code and these files cannot answer. An option states a choice, never a requirement the user did not give; recommend one.
-Stop when confused. Name what is unclear.
-
-## Rule 2 — Simplicity First
-
-Minimum code that solves the problem. Nothing speculative.
-No features beyond what was asked. No abstractions for single-use code.
-Test: would a senior engineer say this is overcomplicated? If yes, simplify.
-
-## Rule 3 — Surgical Changes
-
-Touch only what you must. Clean up only your own mess.
-Do not “improve” adjacent code, comments, or formatting.
-Do not refactor what is not broken. Match existing style unless it contradicts these files (Rule 11).
-
-## Rule 4 — Goal-Driven Execution
-
-Define success criteria. Loop until verified.
-Do not follow steps blindly. Define success and iterate.
-Strong success criteria let you loop independently.
-Done means the checks in `CONVENTIONS.md` § After every edit pass.
-
-## Rule 5 — Use the model only for judgment calls
-
-Use the model for: classification, drafting, summarization, extraction.
-Do not use the model for: routing, retries, deterministic transforms.
-If code can answer or produce it, code does: count, search, check, convert and generate with a command, because a command's output is exact and can be rerun, and reasoning that imitates it is neither.
-
-## Rule 6 — Do not spiral
-
-Do not loop on the same failure. If repeated attempts fail, stop and ask.
-Say so when you are looping. Do not silently retry.
-
-## Rule 7 — Surface conflicts, do not average them
-
-If two patterns contradict, follow these files and the Skills precedence; where they are silent, the more recent and better-tested one.
-Explain why. Flag the other for cleanup.
-Do not blend conflicting patterns.
-When a rule blocks what the task needs, stop and name the rule; do not work around it.
-
-## Rule 8 — Read before you write
-
-Before adding code, read exports, immediate callers, shared utilities.
-Before adding a type, a helper or an option, find the one that exists and use it, because two names for one concept split every caller. A new one needs the reason none fits.
-“Looks orthogonal” is dangerous. If unsure why code is structured a way, ask.
-
-## Rule 9 — Tests verify intent, not just behavior
-
-Tests must encode why behavior matters, not just what it does.
-A test that cannot fail when business logic changes is wrong.
-Where a test goes and how it asserts is `CONVENTIONS.md` § Tests.
-
-## Rule 10 — Checkpoint after every significant step
-
-Summarize what was done, what is verified, what is left.
-Do not continue from a state you cannot describe back.
-If you lose track, stop and restate.
-
-## Rule 11 — Match the codebase’s conventions, even if you disagree
-
-Conformance beats taste inside the codebase.
-Conventions are what this file, `CONVENTIONS.md`, and the lint config define. Older Go idioms in nearby code are not conventions.
-Code that contradicts these files is legacy, even when it sits next to yours: do not copy it, because copying is how it spreads.
-If you genuinely think a convention is harmful, surface it. Do not fork silently.
-
-## Rule 12 — Fail loud
-
-“Completed” is wrong if anything was skipped silently.
-“Tests pass” is wrong if any were skipped.
-Default to surfacing uncertainty, not hiding it.
-
-## Rule 13 — Plan against the rules
-
-Before the first edit of a change to code, load `plan-change` and write the plan it asks for: the files and their tests, the existing code reused, the rules that decide it quoted, the skills loaded. A rule read at the start of a task fades by the time it applies; quoted into the plan, it is in front of you when you decide.
-
-## Rule 14 — Review your own work
-
-After each significant step, and before you hand over, run `review-change` on your whole diff, in a fresh context if your tool offers one, because an author reads past their own shortcuts. Check that it does what was asked and nothing more, follows these files, has tests that can fail, and leaves nothing behind (debug output, a TODO, a stray file). Fix what you find before you report.
+- Chat in short, plain English. Lead with the answer. No filler.
+- Keep code names, paths, and error text exact. Do not simplify those.
