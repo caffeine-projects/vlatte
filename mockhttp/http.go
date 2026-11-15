@@ -24,6 +24,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/internal/buildinfo"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/internal/tmplfunc"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
@@ -621,6 +622,10 @@ func (app *Server) DescribeConfig() string {
 		buf.WriteString(app.Name())
 		buf.WriteString("\n")
 	}
+
+	buf.WriteString("Version: ")
+	buf.WriteString(buildinfo.Version())
+	buf.WriteString("\n")
 
 	buf.WriteString("Work Dir: ")
 	buf.WriteString(app.config.Path(WorkDirVar))

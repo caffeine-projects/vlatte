@@ -98,7 +98,6 @@ jobs:
     - name: Test
       run: make testci
 
-    # The examples are modules of their own, which ./... does not reach.
     - name: Test examples
       run: make example:check
 
