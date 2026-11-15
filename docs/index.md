@@ -41,11 +41,59 @@ const toolbox = [
 
 ::: code-group
 
-<<< @/../examples/02-http-payments/payments/client_test.go#example{go} [Go test]
+```go [Go test]
+func TestCharge(t *testing.T) {
+	m := mockhttp.MustNew()
+	m.MustStart()
+	t.Cleanup(m.Close)
 
-<<< @/../examples/03-grpc-greeter/greeter_test.go#example{go} [gRPC]
+	paid := m.MustMock(mockhttp.Postf("/payments").
+		Header("Authorization", match.HasPrefix("Bearer ")).
+		Body(match.JSONPath("$.amount", match.GreaterThan(0))).
+		Reply(mockhttp.Created().
+			JSON(map[string]any{"id": "pay_1"})))
 
-<<< @/../examples/02-http-payments/testdata/vlatte/_mocks/payments_mock.yaml{yaml} [Mock file]
+	client := payments.NewClient(m.URL(), "token")
+	_, err := client.Charge(t.Context(), 42)
+
+	require.NoError(t, err)
+	paid.AssertCalled(t)
+}
+```
+
+```go [gRPC]
+func TestGreeter(t *testing.T) {
+	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockgrpc.Method("greeter.Greeter/SayHello").
+		Field("name", match.HasPrefix("a")).
+		Reply(mockgrpc.Message(&pb.HelloReply{Message: "hi ann"})))
+
+	client := pb.NewGreeterClient(m.MustDial())
+	res, err := client.SayHello(t.Context(), &pb.HelloRequest{Name: "ann"})
+
+	require.NoError(t, err)
+	require.Equal(t, "hi ann", res.GetMessage())
+}
+```
+
+```yaml [Mock file]
+# testdata/vlatte/_mocks/payments_mock.yaml
+request:
+  method: POST
+  path: /payments
+  header:
+    authorization: [hasprefix, "Bearer "]
+  body: [jsonpath, $.amount, [gt, 0]]
+response:
+  status: 201
+  header:
+    content-type: application/json
+  body:
+    id: pay_1
+```
 
 ```sh [CLI]
 vlatte --https --addr=:8443

@@ -16,8 +16,9 @@ FUZZTIME ?= 30s # time per target for make fuzz
 export GORELEASER_VERSION GOLANGCI_LINT_VERSION GOVULNCHECK_VERSION FUZZTIME
 
 .PHONY: test
-test: ## run tests
+test: ## run tests, the examples included
 	@go test -v -race -timeout 1m ./...
+	@$(MAKE) --no-print-directory example:check
 
 .PHONY: testfail
 testfail: ## run tests and print the name of failed ones
@@ -81,8 +82,9 @@ deps: ## dependencies
 	@go mod download
 
 .PHONY: tidy
-tidy: ## tidy go.mod and go.sum
+tidy: ## tidy go.mod and go.sum, the example modules included
 	@go mod tidy
+	@for mod in $(EXAMPLE_MODULES); do go -C "$$mod" mod tidy || exit 1; done
 
 .PHONY: fmt
 fmt: ## format code with gci and gofumpt

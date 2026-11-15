@@ -1,7 +1,5 @@
 package payments_test
 
-// The docs home page shows the imports and TestCharge, from here to the end of the region.
-// #region example
 import (
 	"testing"
 
@@ -31,12 +29,9 @@ func TestCharge(t *testing.T) {
 	paid.AssertCalled(t)
 }
 
-// #endregion example
-
 func TestMockFileAnswersTheChargeAsTheGoMockDoes(t *testing.T) {
-	// The home page shows this mock file, and the CLI serving it from the folder above, next to TestCharge. The file stays
-	// out of this package's testdata/vlatte/_mocks, which every server of these tests loads on start: there, it would
-	// answer TestCharge in place of its own mock.
+	// payments_mock.yaml stays out of this package's testdata/vlatte/_mocks, which every server of these tests loads on
+	// start: there, it would answer TestCharge in place of its own mock.
 	m := mockhttp.MustNew()
 	m.MustStart()
 	t.Cleanup(m.Close)

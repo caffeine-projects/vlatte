@@ -38,6 +38,7 @@ test-report.out
 # AI
 .claude/*
 !.claude/skills
+!.claude/agents
 CLAUDE.local.md
 .mcp.json
 

@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=https://vlatte.dev/schemas/http.schema.json
+id: lab-health
+request:
+  method: GET
+  path: /healthz
+response:
+  status: 200
+  header:
+    content-type: text/plain
+  body: |
+    vlatte-lab-ok
+---
+id: lab-stall
+request:
+  method: GET
+  path: /stall
+response:
+  status: 200
+  body: this response never reaches the client
+wire_pipes:
+  - type: timeout
+    after: 5s
+---
+id: lab-slow
+request:
+  method: GET
+  path: /download/slow
+response:
+  status: 200
+  header:
+    content-type: text/plain
+  body_file: payload.txt
+pipes:
+  - type: bandwidth
+    rate: 260
+---
+id: lab-truncated
+request:
+  method: GET
+  path: /download/truncated
+response:
+  status: 200
+  header:
+    content-type: text/plain
+  body_file: payload.txt
+pipes:
+  - type: limit_data
+    bytes: 64

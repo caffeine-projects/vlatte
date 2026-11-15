@@ -4,9 +4,36 @@
 
 A gRPC mock server serves any method of the services whose generated code the program imports: it needs no implementation registered. A mock names its method, matches the calls, and answers them, whatever their type: unary, server streaming, client streaming or bidi streaming.
 
-Here, `pb` is the generated code for the `greeter.proto` of [examples/03-grpc-greeter](https://github.com/caffeine-projects/vlatte/tree/main/examples/03-grpc-greeter), where this test runs. Use your own service's generated code in its place.
+Here, `pb` is the generated code for a `greeter.proto` such as the one in [examples/03-grpc-greeter](https://github.com/caffeine-projects/vlatte/tree/main/examples/03-grpc-greeter). Use your own service's generated code in its place.
 
-<<< @/../examples/03-grpc-greeter/greeter_test.go#example{go}
+```go
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/mockgrpc"
+
+	"example.com/greeter/pb"
+)
+
+func TestGreeter(t *testing.T) {
+	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockgrpc.Method("greeter.Greeter/SayHello").
+		Field("name", match.HasPrefix("a")).
+		Reply(mockgrpc.Message(&pb.HelloReply{Message: "hi ann"})))
+
+	client := pb.NewGreeterClient(m.MustDial())
+	res, err := client.SayHello(t.Context(), &pb.HelloRequest{Name: "ann"})
+
+	require.NoError(t, err)
+	require.Equal(t, "hi ann", res.GetMessage())
+}
+```
 
 `Setup().InMemory()` serves on an in-memory listener, with no port: only `m.Dial()` reaches it, and `m.Close()` closes the connections it returns. Without it, the server listens on a local port, which `m.Addr()` names, for clients of any language.
 
