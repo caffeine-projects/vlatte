@@ -3,10 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	json "encoding/json/v2"
 	"io"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte/recipe/http/githubauth"
 )
 
 func TestSplitArgs_GivesEachServerItsFlags(t *testing.T) {
@@ -104,6 +108,15 @@ func TestSplitArgs_KeepsAValueWithItsFlag(t *testing.T) {
 			joined:   []string{"-n=api"},
 			want:     commandArgs{http: []string{"-n=api"}},
 		},
+		{
+			name:     "help with a value",
+			separate: []string{"--help=true"},
+			joined:   []string{"--help=true"},
+			want: commandArgs{
+				settings: []string{"--help=true"},
+				http:     []string{"--help=true"},
+			},
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, splitArgs(tt.separate))
@@ -142,6 +155,77 @@ func TestRun_AFlagKeepsItsValueWhatever(t *testing.T) {
 			code := run(ctx, append([]string{"--addr", randomAddr(t)}, tt.args...), nil, io.Discard, &stderr)
 
 			require.Equal(t, 0, code, stderr.String())
+		})
+	}
+}
+
+func TestRun_HelpWithAValueStillHelps(t *testing.T) {
+	// Go's flag package reads -help=<anything> as help: another setting that is wrong does not hide it.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var stdout, stderr bytes.Buffer
+	code := run(ctx, []string{"--help=true", "--recipe-oidc-client-id"}, nil, &stdout, &stderr)
+
+	require.Equal(t, 0, code, stderr.String())
+	require.Contains(t, stdout.String(), "Usage:")
+}
+
+func TestRun_ASubcommandNameCanBeAFlagsValue(t *testing.T) {
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	addr := randomAddr(t)
+	start(t, "-recipe-github-auth-user-name", "version", "--addr", addr, "--log-level", "disabled")
+
+	target := "http://" + addr + githubauth.UserPath
+	firstAnswer(t, target)
+
+	status, body := getWithToken(t, target, githubauth.DefaultToken)
+	require.Equal(t, http.StatusOK, status)
+
+	var got githubauth.User
+	require.NoError(t, json.Unmarshal([]byte(body), &got))
+	require.Equal(t, "version", got.Name)
+}
+
+func TestJoinValues_JoinsFlagsBeforeTheCommand(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "a value that names a command",
+			args: []string{"-n", "version"},
+			want: []string{"-n=version"},
+		},
+		{
+			name: "a bool flag takes no value",
+			args: []string{"--debug", "version"},
+			want: []string{"--debug", "version"},
+		},
+		{
+			name: "a command's own flags",
+			args: []string{"openapi", "--out", "x"},
+			want: []string{"openapi", "--out", "x"},
+		},
+		{
+			name: "the terminator",
+			args: []string{"-n", "api", "--", "-x"},
+			want: []string{"-n=api", "--", "-x"},
+		},
+		{
+			name: "no arguments",
+			args: []string{},
+			want: []string{},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, joinValues(tt.args))
 		})
 	}
 }

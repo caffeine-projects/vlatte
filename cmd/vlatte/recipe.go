@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"sync"
@@ -212,6 +213,10 @@ func oidcFields() []config.Field[oidcRecipe] {
 		return config.Field[oidcRecipe]{
 			Key: "paths." + key, Kind: config.String, Usage: "Path of the " + what + " endpoint, under the issuer's path.", Default: def,
 			Set: func(r *oidcRecipe, v config.Value) error {
+				if _, _, ok := httpx.URLPath(v.Str); !ok {
+					return config.Invalid(v, v.Key+" must be a URL path, such as "+def+", not "+strconv.Quote(v.Str), "")
+				}
+
 				set(&r.paths, v.Str)
 				return nil
 			},
@@ -244,7 +249,13 @@ func oidcFields() []config.Field[oidcRecipe] {
 						strconv.Quote(v.Str), "")
 				}
 
-				r.opts = append(r.opts, oidc.Issuer(v.Str))
+				// The command serves the endpoints under the issuer's path: an empty issuer, or one without a path, at the root.
+				u, _ := url.Parse(v.Str)
+				if _, _, ok := httpx.URLPath(u.EscapedPath()); !ok {
+					return config.Invalid(v, v.Key+"'s path must be a URL path, such as /realms/demo, not "+strconv.Quote(u.EscapedPath()), "")
+				}
+
+				r.opts = append(r.opts, oidc.Issuer(v.Str), oidc.Mount(u.EscapedPath()))
 
 				return nil
 			},

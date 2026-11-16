@@ -113,3 +113,34 @@ func TestParsePrefixes_TakesCIDRRangesOnly(t *testing.T) {
 	_, err = ParsePrefixes([]string{"10.0.0.1"})
 	require.EqualError(t, err, `expected address ranges in CIDR form, such as 10.0.0.0/8, not "10.0.0.1"`)
 }
+
+func TestURLPath_TakesThePathOfAURL(t *testing.T) {
+	for _, tt := range []struct {
+		in      string
+		path    string
+		escaped string
+		ok      bool
+	}{
+		{in: "/keys", path: "/keys", escaped: "/keys", ok: true},
+		{in: "keys", path: "/keys", escaped: "/keys", ok: true},
+		{in: "/keys%20and%20tokens", path: "/keys and tokens", escaped: "/keys%20and%20tokens", ok: true},
+		{in: "keys:v1", path: "/keys:v1", escaped: "/keys:v1", ok: true},
+		{in: "_keys:v1", path: "/_keys:v1", escaped: "/_keys:v1", ok: true},
+		{in: "/cb/https://x", path: "/cb/https://x", escaped: "/cb/https://x", ok: true},
+		{in: "/keys?x"},
+		{in: "/keys#a"},
+		{in: "/keys?"},
+		{in: "//host/keys"},
+		{in: "https://h/keys"},
+		{in: "https://id example/keys"},
+		{in: "/%zz"},
+	} {
+		t.Run(tt.in, func(t *testing.T) {
+			path, escaped, ok := URLPath(tt.in)
+
+			require.Equal(t, tt.ok, ok)
+			require.Equal(t, tt.path, path)
+			require.Equal(t, tt.escaped, escaped)
+		})
+	}
+}

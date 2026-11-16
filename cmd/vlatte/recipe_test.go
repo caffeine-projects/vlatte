@@ -282,6 +282,26 @@ func TestCLI_OIDCRecipeFromTheFileAndFlags(t *testing.T) {
 	require.Equal(t, map[string]any{"sub": "alice"}, claims)
 }
 
+func TestCLI_OIDCIssuerWithAPathIsServedUnderIt(t *testing.T) {
+	// The command serves directly, so it mounts the endpoints at the issuer's path.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	addr := randomAddr(t)
+	start(t, "--addr", addr, "--log-level", "disabled", "--template-keys", "vlatte=RS256",
+		"--recipe-oidc-issuer", "http://"+addr+"/realms/demo")
+
+	status, body := firstAnswer(t, "http://"+addr+"/realms/demo/.well-known/openid-configuration")
+	require.Equal(t, http.StatusOK, status)
+
+	var discovery map[string]any
+	require.NoError(t, json.Unmarshal([]byte(body), &discovery))
+	require.Equal(t, "http://"+addr+"/realms/demo/jwks", discovery["jwks_uri"])
+
+	status, _ = firstAnswer(t, discovery["jwks_uri"].(string))
+	require.Equal(t, http.StatusOK, status)
+}
+
 func TestCLI_ARecipeTurnedOffAddsNoMocks(t *testing.T) {
 	withoutDockerHost(t)
 	t.Chdir(t.TempDir())
@@ -438,9 +458,19 @@ func TestRun_RecipeSettingErrors(t *testing.T) {
 			want: `flag --recipe-oidc-issuer: invalid_value: recipe.oidc.issuer must be an absolute URL with no query or fragment, such as https://id.example, not "https://id.example/realms#"`,
 		},
 		{
+			name: "issuer whose path starts with a host",
+			args: []string{"--recipe-oidc-issuer=http://h//x"},
+			want: `flag --recipe-oidc-issuer: invalid_value: recipe.oidc.issuer's path must be a URL path, such as /realms/demo, not "//x"`,
+		},
+		{
 			name: "issuer with a query",
 			args: []string{"--recipe-oidc-issuer=https://id.example/realms?x=1"},
 			want: `flag --recipe-oidc-issuer: invalid_value: recipe.oidc.issuer must be an absolute URL with no query or fragment, such as https://id.example, not "https://id.example/realms?x=1"`,
+		},
+		{
+			name: "path with a query",
+			args: []string{"--recipe-oidc-paths-jwks=/keys?x"},
+			want: `flag --recipe-oidc-paths-jwks: invalid_value: recipe.oidc.paths.jwks must be a URL path, such as /jwks, not "/keys?x"`,
 		},
 		{
 			name: "mistyped flag",

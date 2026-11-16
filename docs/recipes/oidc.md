@@ -34,18 +34,19 @@ Each code is exchanged once, and PKCE takes S256 only. Every mock is a template,
 |---|---|---|
 | `ClientID(id)`, `ClientSecret(secret)` | The app's credentials. ID tokens have the client ID as `aud`. | `oidc.DefaultClientID`, `DefaultClientSecret` |
 | `KeyID(kid)` | The server's key ID tokens are signed with. Discovery announces its algorithm. | `DefaultKeyID` |
-| `Issuer(url)` | The `iss` of ID tokens, and the base URL of the endpoints. An absolute URL with no query or fragment. | The server's URL |
+| `Issuer(url)` | The `iss` of ID tokens, and the base URL of the endpoints. An absolute URL with no query or fragment. | The server's URL, with `Mount`'s path |
 | `Claims(map)` | The user's claims, in ID tokens and from userinfo. | `oidc.DefaultClaims()` |
 | `AccessToken(token)`, `TokenTTL(d)` | The access token issued, and how long tokens last. | `DefaultAccessToken`, `DefaultTokenTTL` (1h) |
-| `WithPaths(oidc.Paths{...})` | Where the endpoints are, under the issuer's path, such as Google's `/o/oauth2/v2/auth`. | `oidc.DefaultPaths()` |
+| `WithPaths(oidc.Paths{...})` | Where the endpoints are: relative to the issuer when announced, and to `Mount` when served, such as Google's `/o/oauth2/v2/auth`. A path that holds a host, a query, a fragment or an invalid escape fails `Prep`. | `oidc.DefaultPaths()` |
+| `Mount(path)` | The path the server serves the endpoints under, for an app that reaches it at an issuer with that path. Without it, they are at the root, where a proxy that strips the issuer's path forwards them. | The root |
 
-An issuer with a path serves every endpoint under it: with the issuer `http://localhost:8080/realms/demo`, discovery is at `/realms/demo/.well-known/openid-configuration`, and `oidc.Paths{JWKS: "/keys"}` serves the JWKS at `/realms/demo/keys`. A path without a leading `/` gets one.
+With `Issuer("http://localhost:8080/realms/demo")` and `Mount("/realms/demo")`, discovery is at `/realms/demo/.well-known/openid-configuration`, and `oidc.Paths{JWKS: "/keys"}` serves the JWKS at `/realms/demo/keys`. A path without a leading `/` gets one, and an escaped path is announced as written.
 
 It covers the authorization code flow only: not the implicit or hybrid flows, refresh tokens, nor `client_secret_basic`.
 
 ## From the vlatte command
 
-The `recipe.oidc` section sets the options above, and `recipe.oidc.paths.*` sets `WithPaths`. The key still comes from `template.keys`: `recipe.oidc` without it fails at startup, and the error says to set it.
+The `recipe.oidc` section sets the options above, and `recipe.oidc.paths.*` sets `WithPaths`. With an issuer that has a path, the command serves the endpoints under it, as `Mount` does. The key still comes from `template.keys`: `recipe.oidc` without it fails at startup, and the error says to set it.
 
 ```sh
 vlatte --template-keys vlatte=RS256 --recipe-oidc --recipe-oidc-client-id my-app

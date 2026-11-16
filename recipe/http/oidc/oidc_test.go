@@ -301,7 +301,7 @@ func TestOIDC_WorksWithAKeyFromTheSettings(t *testing.T) {
 	require.Equal(t, "RS256", tok.Alg)
 }
 
-func TestOIDC_ServesItsEndpointsUnderTheIssuersPath(t *testing.T) {
+func TestOIDC_MountServesTheEndpointsUnderItsPath(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
 		suffix string
@@ -316,7 +316,7 @@ func TestOIDC_ServesItsEndpointsUnderTheIssuersPath(t *testing.T) {
 			t.Cleanup(m.Close)
 
 			issuer := m.URL("/realms/demo") + tt.suffix
-			require.NoError(t, m.Prep(t.Context(), oidc.New(oidc.Issuer(issuer))))
+			require.NoError(t, m.Prep(t.Context(), oidc.New(oidc.Issuer(issuer), oidc.Mount("/realms/demo"))))
 
 			status, body := get(t, m.URL("/realms/demo/.well-known/openid-configuration"), "")
 			require.Equal(t, http.StatusOK, status)
@@ -355,8 +355,8 @@ func TestOIDC_ServesItsEndpointsUnderTheIssuersPath(t *testing.T) {
 	}
 }
 
-func TestOIDC_ExplicitPathsAreUnderTheIssuersPath(t *testing.T) {
-	// A path is joined to the issuer as to a URL: without a leading /, it still starts a segment of its own.
+func TestOIDC_ExplicitPathsAreUnderTheMount(t *testing.T) {
+	// A path is joined to the mount as to a URL: without a leading /, it still starts a segment of its own.
 	for _, tt := range []struct {
 		name string
 		jwks string
@@ -370,7 +370,8 @@ func TestOIDC_ExplicitPathsAreUnderTheIssuersPath(t *testing.T) {
 			t.Cleanup(m.Close)
 
 			require.NoError(t, m.Prep(t.Context(),
-				oidc.New(oidc.Issuer(m.URL("/realms/demo")), oidc.WithPaths(oidc.Paths{JWKS: tt.jwks}))))
+				oidc.New(oidc.Issuer(m.URL("/realms/demo")), oidc.Mount("/realms/demo"),
+					oidc.WithPaths(oidc.Paths{JWKS: tt.jwks}))))
 
 			_, body := get(t, m.URL("/realms/demo/.well-known/openid-configuration"), "")
 
@@ -382,6 +383,52 @@ func TestOIDC_ExplicitPathsAreUnderTheIssuersPath(t *testing.T) {
 			require.Equal(t, http.StatusOK, status)
 		})
 	}
+}
+
+func TestOIDC_AMountWithoutAnIssuerAnnouncesTheServersURL(t *testing.T) {
+	m := newServer(t, oidc.Mount("/realms/demo"))
+
+	status, body := get(t, m.URL("/realms/demo/.well-known/openid-configuration"), "")
+	require.Equal(t, http.StatusOK, status)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal([]byte(body), &doc))
+	require.Equal(t, m.URL("/realms/demo"), doc["issuer"])
+	require.Equal(t, m.URL("/realms/demo/jwks"), doc["jwks_uri"])
+
+	status, _ = get(t, doc["jwks_uri"].(string), "")
+	require.Equal(t, http.StatusOK, status)
+}
+
+func TestOIDC_AMountWithAnEscapedTrailingSlashIsServedAsAnnounced(t *testing.T) {
+	// The mount's trailing / goes, written plain or escaped: what discovery announces is what the server serves.
+	m := newServer(t, oidc.Mount("/realms/demo%2F"))
+
+	status, body := get(t, m.URL("/realms/demo/.well-known/openid-configuration"), "")
+	require.Equal(t, http.StatusOK, status)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal([]byte(body), &doc))
+	require.Equal(t, m.URL("/realms/demo/jwks"), doc["jwks_uri"])
+
+	status, _ = get(t, doc["jwks_uri"].(string), "")
+	require.Equal(t, http.StatusOK, status)
+}
+
+func TestOIDC_PrepRefusesAPathThatIsNotOne(t *testing.T) {
+	t.Run("an endpoint path", func(t *testing.T) {
+		m := serverWithKey(t)
+
+		require.ErrorContains(t, m.Prep(t.Context(), oidc.New(oidc.WithPaths(oidc.Paths{JWKS: "/keys?x"}))),
+			`oidc: expected the jwks path to be a URL path, such as /jwks, not "/keys?x"`)
+	})
+
+	t.Run("the mount", func(t *testing.T) {
+		m := serverWithKey(t)
+
+		require.ErrorContains(t, m.Prep(t.Context(), oidc.New(oidc.Mount("/x#y"))),
+			`oidc: expected the mount to be a URL path, such as /realms/demo, not "/x#y"`)
+	})
 }
 
 func TestOIDC_PrepRefusesAnIssuerThatIsNotAnAbsoluteURL(t *testing.T) {
@@ -396,6 +443,141 @@ func TestOIDC_PrepRefusesAnIssuerThatIsNotAnAbsoluteURL(t *testing.T) {
 					strconv.Quote(issuer))
 		})
 	}
+}
+
+func TestOIDC_AnIssuerBehindAProxyThatStripsItsPath(t *testing.T) {
+	// A proxy that removes the issuer's path forwards the endpoints at the root, where Issuer alone serves them.
+	m := serverWithKey(t)
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	proxy := mockhttp.MustNew(mockhttp.Setup().Silent())
+	proxy.MustMock(mockhttp.ProxyAll(mockhttp.From(m.URL()).TrimPrefix("/realms/demo")))
+	proxy.MustStart()
+	t.Cleanup(proxy.Close)
+
+	require.NoError(t, m.Prep(t.Context(), oidc.New(oidc.Issuer(proxy.URL("/realms/demo")))))
+
+	status, body := get(t, proxy.URL("/realms/demo/.well-known/openid-configuration"), "")
+	require.Equal(t, http.StatusOK, status)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal([]byte(body), &doc))
+	require.Equal(t, proxy.URL("/realms/demo/jwks"), doc["jwks_uri"])
+
+	status, _ = get(t, proxy.URL("/realms/demo/jwks"), "")
+	require.Equal(t, http.StatusOK, status)
+}
+
+func TestOIDC_ACodeWorksAtItsOwnProviderOnly(t *testing.T) {
+	// Two recipes on one server share the code scenario: a code from one provider must not be exchanged at the other.
+	m := serverWithKey(t)
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	paths := func(prefix string) oidc.Option {
+		return oidc.WithPaths(oidc.Paths{
+			Discovery: prefix + "/discovery", Authorize: prefix + "/authorize", Token: prefix + "/token",
+			JWKS: prefix + "/jwks", UserInfo: prefix + "/userinfo",
+		})
+	}
+	require.NoError(t, m.Prep(t.Context(), oidc.New(paths("/first")), oidc.New(paths("/second"))))
+
+	res := do(t, http.MethodGet, m.URL("/first/authorize")+"?"+url.Values{
+		"response_type": {"code"}, "client_id": {oidc.DefaultClientID},
+		"redirect_uri": {"https://app.example/cb"}, "scope": {"openid"},
+	}.Encode(), "", nil)
+	require.Equal(t, http.StatusFound, res.StatusCode)
+
+	location, err := url.Parse(res.Header.Get(mockhttp.HeaderLocation))
+	require.NoError(t, err)
+
+	form := url.Values{
+		"grant_type": {"authorization_code"}, "client_id": {oidc.DefaultClientID},
+		"client_secret": {oidc.DefaultClientSecret}, "redirect_uri": {"https://app.example/cb"},
+		"code": {location.Query().Get("code")},
+	}
+
+	res = do(t, http.MethodPost, m.URL("/second/token"), "", form)
+	require.Equal(t, http.StatusBadRequest, res.StatusCode)
+
+	var body map[string]any
+	require.NoError(t, json.UnmarshalRead(res.Body, &body))
+	require.Equal(t, "invalid_grant", body["error"])
+
+	res = do(t, http.MethodPost, m.URL("/first/token"), "", form)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestOIDC_ACodeWorksForItsOwnIssuerAndClientOnly(t *testing.T) {
+	// Two recipes on the same paths, as behind proxies that strip their issuers' paths, differ in one thing only: a
+	// code issued by the first is not the second's to exchange (RFC 6749 §4.1.3). Both authorize endpoints match the
+	// request when the client is the same: the first recipe's, added first, issues the code.
+	for _, tt := range []struct {
+		name   string
+		first  []oidc.Option
+		second []oidc.Option
+		client string
+	}{
+		{
+			name:   "another client of the same issuer",
+			first:  []oidc.Option{oidc.Issuer("https://id.example"), oidc.ClientID("a"), oidc.ClientSecret("sa")},
+			second: []oidc.Option{oidc.Issuer("https://id.example"), oidc.ClientID("b"), oidc.ClientSecret("sb")},
+			client: "b",
+		},
+		{
+			name:   "the same client of another issuer",
+			first:  []oidc.Option{oidc.Issuer("https://a.example"), oidc.ClientID("a"), oidc.ClientSecret("sa")},
+			second: []oidc.Option{oidc.Issuer("https://b.example"), oidc.ClientID("a"), oidc.ClientSecret("sb")},
+			client: "a",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := serverWithKey(t)
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			require.NoError(t, m.Prep(t.Context(), oidc.New(tt.first...), oidc.New(tt.second...)))
+
+			res := do(t, http.MethodGet, m.URL("/authorize")+"?"+url.Values{
+				"response_type": {"code"}, "client_id": {"a"}, "redirect_uri": {"https://app.example/cb"}, "scope": {"openid"},
+			}.Encode(), "", nil)
+			require.Equal(t, http.StatusFound, res.StatusCode)
+
+			location, err := url.Parse(res.Header.Get(mockhttp.HeaderLocation))
+			require.NoError(t, err)
+
+			exchange := func(client, secret string) *http.Response {
+				return do(t, http.MethodPost, m.URL("/token"), "", url.Values{
+					"grant_type": {"authorization_code"}, "client_id": {client}, "client_secret": {secret},
+					"redirect_uri": {"https://app.example/cb"}, "code": {location.Query().Get("code")},
+				})
+			}
+
+			res = exchange(tt.client, "sb")
+			require.Equal(t, http.StatusBadRequest, res.StatusCode, "the second recipe's token endpoint")
+
+			var body map[string]any
+			require.NoError(t, json.UnmarshalRead(res.Body, &body))
+			require.Equal(t, "invalid_grant", body["error"])
+
+			res = exchange("a", "sa")
+			require.Equal(t, http.StatusOK, res.StatusCode, "the first recipe's token endpoint")
+		})
+	}
+}
+
+func TestOIDC_AnEscapedPathIsServedAsAnnounced(t *testing.T) {
+	m := newServer(t, oidc.WithPaths(oidc.Paths{JWKS: "/keys%20and%20tokens"}))
+
+	_, body := get(t, m.URL("/.well-known/openid-configuration"), "")
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal([]byte(body), &doc))
+	require.Equal(t, m.URL()+"/keys%20and%20tokens", doc["jwks_uri"])
+
+	status, _ := get(t, m.URL()+"/keys%20and%20tokens", "")
+	require.Equal(t, http.StatusOK, status)
 }
 
 // Generators
