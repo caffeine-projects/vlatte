@@ -11,9 +11,10 @@ Thanks for helping with VLatte. This page covers what you need to get a change m
 
 - Go 1.27 or later. CI tests the latest Go and the minimum in `go.mod`.
 - [golangci-lint](https://golangci-lint.run/) v2.14.0, for `make lint`.
-- Node.js 26, the current LTS, only to work on the docs site in `docs/`.
+- Node.js 26, the current LTS, for the docs site in `docs/`, which `make check` builds.
+- [Lychee](https://lychee.cli.rs/) v0.24.2, the version the pinned `lychee-action` installs, for the link check in `make check`.
 
-[`mise.toml`](mise.toml) pins all three: run `mise install` if you use [mise](https://mise.jdx.dev/).
+[`mise.toml`](mise.toml) pins all four: run `mise install` if you use [mise](https://mise.jdx.dev/).
 
 ## Setup
 
@@ -27,20 +28,19 @@ make deps
 
 ## Checks
 
-Run these before you open a pull request, in this order. CI runs the same checks.
+Run this before you open a pull request. It runs what CI runs: formatting, modules, lint, every test with the race detector, the examples and the documentation links.
 
 ```sh
-make fmt    # format with gci and gofumpt
-make tidy   # tidy go.mod and go.sum
-make lint   # golangci-lint
-make test   # every test, with the race detector
+make check
 ```
+
+`make fmt` and `make tidy` fix what its format and module steps report.
 
 Also useful: `make fuzz`, `make bench` and `make vuln`.
 
 The Go checks in CI skip changes that touch only `*.md` files or `docs/`. For the docs site, `make docs-dev` serves it with live reload and `make docs-build` builds it.
 
-To check documentation links, install [Lychee](https://lychee.cli.rs/) v0.24.2 (the version the pinned `lychee-action` installs), then run:
+To check documentation links alone, run:
 
 ```sh
 make docs-build

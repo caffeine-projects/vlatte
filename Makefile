@@ -51,6 +51,29 @@ fuzz: ## run every fuzz target for FUZZTIME each
 lint: ## run linters
 	@golangci-lint run
 
+# The gate every change passes before it is done. Not covered: the Docker build and its smoke test (make docker),
+# the GoReleaser config (make release-check), the vulnerability scans (make vuln), the second Go version CI tests,
+# coverage and SonarCloud. Tests run without -v and without coverage, unlike make testci.
+.PHONY: check
+check: ## run the quality gate CI runs: format, modules, lint, tests, examples, docs links
+	@fail=0; \
+	step() { \
+		name="$$1"; shift; \
+		if out="$$("$$@" 2>&1)"; then echo "ok    $$name"; else echo "FAIL  $$name"; echo "$$out"; fail=1; fi; \
+	}; \
+	step format     $(MAKE) --no-print-directory check-fmt; \
+	step modules    go mod tidy -diff; \
+	step lint       $(MAKE) --no-print-directory lint; \
+	step test       go test -race -timeout 1m ./...; \
+	step examples   $(MAKE) --no-print-directory example:check; \
+	step docs-build $(MAKE) --no-print-directory docs-build; \
+	step docs-links $(MAKE) --no-print-directory docs-check-links; \
+	exit $$fail
+
+.PHONY: check-fmt
+check-fmt: ## fail when a file is not gofumpt-formatted
+	@out="$$(go tool gofumpt -l .)" || exit 1; [ -z "$$out" ] || { echo "$$out"; echo "run 'make fmt'"; exit 1; }
+
 .PHONY: bench
 bench: ## run benchmarks
 	@go test -v ./... -bench=. -count 2 -benchmem -run=^#
@@ -67,7 +90,7 @@ build: ## build the vlatte CLI into bin/
 
 .PHONY: docker
 docker: ## build the vlatte image as vlatte:dev
-	@docker build -t vlatte:dev .
+	@docker build --build-arg VERSION="$$(git describe --tags --always --dirty)" -t vlatte:dev .
 
 .PHONY: release-check
 release-check: ## check the GoReleaser config

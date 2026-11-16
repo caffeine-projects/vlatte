@@ -16,21 +16,23 @@ func TestVersionFrom_NamesTheVlatteTheProgramWasBuiltWith(t *testing.T) {
 	other := debug.Module{Path: "example.com/app", Version: "v0.4.0"}
 
 	tests := []struct {
-		name string
-		info *debug.BuildInfo
-		want string
+		name   string
+		linked string
+		info   *debug.BuildInfo
+		want   string
 	}{
-		{"installed with a version", &debug.BuildInfo{Main: vlatte("v1.2.3")}, "v1.2.3"},
-		{"built from a checkout", &debug.BuildInfo{Main: vlatte("v0.0.0-20261029224014-2946bcd2b88d+dirty")}, "v0.0.0-20261029224014-2946bcd2b88d+dirty"},
-		{"a dependency of the program", &debug.BuildInfo{Main: other, Deps: []*debug.Module{new(vlatte("v1.2.3"))}}, "v1.2.3"},
-		{"built without version control", &debug.BuildInfo{Main: vlatte("(devel)")}, "devel"},
-		{"not in the build", &debug.BuildInfo{Main: other}, "devel"},
-		{"no build information", nil, "devel"},
+		{"installed with a version", "", &debug.BuildInfo{Main: vlatte("v1.2.3")}, "v1.2.3"},
+		{"built from a checkout", "", &debug.BuildInfo{Main: vlatte("v0.0.0-20261029224014-2946bcd2b88d+dirty")}, "v0.0.0-20261029224014-2946bcd2b88d+dirty"},
+		{"a dependency of the program", "", &debug.BuildInfo{Main: other, Deps: []*debug.Module{new(vlatte("v1.2.3"))}}, "v1.2.3"},
+		{"built without version control", "", &debug.BuildInfo{Main: vlatte("(devel)")}, "devel"},
+		{"not in the build", "", &debug.BuildInfo{Main: other}, "devel"},
+		{"no build information", "", nil, "devel"},
+		{"linked with a version, as the Docker image is", "v1.2.3", &debug.BuildInfo{Main: vlatte("(devel)")}, "v1.2.3"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, versionFrom(tc.info))
+			require.Equal(t, tc.want, versionFrom(tc.linked, tc.info))
 		})
 	}
 }

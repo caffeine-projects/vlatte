@@ -30,7 +30,7 @@ This project's own rules are not a skill: they live in [`CONVENTIONS.md`](../CON
 |---|---|---|
 | Claude Code | `CLAUDE.md` | Imports `AGENTS.md` and `CONVENTIONS.md` |
 | Claude Code | `.claude/skills` | See Discovery above |
-| Claude Code | [`.claude/agents/`](../.claude/agents/) | Agent definitions for the roles in "Use the cheapest thing that gets it right" in [`AGENTS.md`](../AGENTS.md); each pins its model in its `model:` frontmatter |
+| Claude Code | `.claude/agents/` | Agent definitions for the roles in "Use the cheapest thing that gets it right" in [`AGENTS.md`](../AGENTS.md); each pins its model in its `model:` frontmatter |
 
 ## Adding a skill
 

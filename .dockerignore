@@ -1,6 +1,11 @@
-# Files git doesn't track: the build keeps .git, and a tracked file left out would mark the binary's version dirty.
-.claude/*
-!.claude/skills
+# Files the image build does not need. The binary's version comes from the VERSION build arg, not from .git.
+.git
+.agents/
+.claude/
+AGENTS.md
+CLAUDE.md
+CONVENTIONS.md
+.mcp.json
 .idea/
 .vscode/
 .local/

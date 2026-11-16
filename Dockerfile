@@ -13,13 +13,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION=devel
 
-# The context keeps .git: Go stamps the binary's version from it, the tag of a release.
+# The context has no .git: the binary reports the VERSION build arg, the tag of a release.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=bind,target=. \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags='-s -w' -o /out/vlatte ./cmd/vlatte
+    go build -trimpath -buildvcs=false \
+    -ldflags="-s -w -X github.com/caffeine-projects/vlatte/internal/buildinfo._version=${VERSION}" \
+    -o /out/vlatte ./cmd/vlatte
 
 # The working directory the server writes its own files to, such as its journal, owned by the image's user.
 RUN mkdir -p /out/home/testdata/vlatte

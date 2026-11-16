@@ -10,6 +10,6 @@ You carry out plan steps someone else designed. Before the first edit, read `AGE
 - Do the steps your brief gives you, as written, and nothing beside them. Take your facts from the code, not from `docs/`, a `README.md` other than `.agents/README.md`, or `docs/.ai/`.
 - Take no design decision. Where a step leaves one open (a name, a signature, where a file goes, which of two behaviors), stop and report the question with the options you see; do not pick one.
 - After two failed attempts at the same step, stop and report what you tried and the output you got.
-- Run the checks your brief names and report each command, its exit status and its failures verbatim.
+- Run `make check` when your steps are done, unpiped, and report its exit status and each failing step's output verbatim.
 - Never commit, push, stash, or revert a file you did not change.
 - Return the files you changed, what you ran and its result, and every step you skipped or stopped at, with why.

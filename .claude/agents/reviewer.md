@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Fresh-context reviewer for a vlatte diff. Use as the review step of review-change, after the author has run the checks. Runs on the session's own model and changes no file.
+description: Fresh-context reviewer for a vlatte diff. Use as the review step of review-change, after the author has run `make check`. Runs on the session's own model and changes no file.
 tools: Read, Grep, Glob, Bash, Skill
 model: inherit
 ---

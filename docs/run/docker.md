@@ -33,7 +33,7 @@ The `Dockerfile` builds the image from a checkout, for the platforms of its dist
 ```sh
 git clone https://github.com/caffeine-projects/vlatte.git
 cd vlatte
-docker build -t vlatte:dev .
+docker build --build-arg VERSION="$(git describe --tags --always --dirty)" -t vlatte:dev .
 docker run --rm vlatte:dev version
 ```
 

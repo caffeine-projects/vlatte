@@ -9,16 +9,25 @@ import (
 // _modulePath is the path of the vlatte module.
 const _modulePath = "github.com/caffeine-projects/vlatte"
 
-// Version is the version of vlatte the program was built with, as its main module or as a dependency: the tag it was
-// built at, or a pseudo-version naming its commit, with +dirty for uncommitted changes. It is "devel" when the build
-// carries no version, such as one with -buildvcs=false.
+// _version is the version a build links in with
+// -X github.com/caffeine-projects/vlatte/internal/buildinfo._version=<version>, as the Docker image does.
+var _version string
+
+// Version is the version of vlatte the program was built with, as its main module or as a dependency: the version the
+// build was linked with, as the Docker image is, or else the tag it was built at, or a pseudo-version naming its
+// commit, with +dirty for uncommitted changes. It is "devel" when the build carries no version, such as one with
+// -buildvcs=false and no linked version.
 func Version() string {
 	info, _ := debug.ReadBuildInfo()
 
-	return versionFrom(info)
+	return versionFrom(_version, info)
 }
 
-func versionFrom(info *debug.BuildInfo) string {
+func versionFrom(linked string, info *debug.BuildInfo) string {
+	if linked != "" {
+		return linked
+	}
+
 	if info == nil {
 		return "devel"
 	}

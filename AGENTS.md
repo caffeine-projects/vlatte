@@ -18,9 +18,9 @@ A change is **small** when every line below holds, and **standard** otherwise:
 | Step | Small | Standard |
 |---|---|---|
 | Plan | A few lines in chat: the files, the test, the rule lines that decide it | Load `plan-change` and write the plan it asks for |
-| Checks | `CONVENTIONS.md` § Checks | The same |
+| Checks | `make check` (`CONVENTIONS.md` § Checks) | The same |
 | Review | Read your own diff against the Rule map sections and the Working rules, and for anything left behind (debug output, a TODO, a stray file) | Run `review-change`: where your tool has sub-agents, one with a fresh context reviews the whole diff |
-| Report | What changed, what you ran and its result | The same, and what each review round found |
+| Report | First line: `make check` passed, or the step that fails and that the change is not ready to commit. Then what changed | The same, and what each review round found |
 
 - A small change that stops fitting a line above is standard from there: stop and plan before the next edit.
 - When unsure, it is standard.
@@ -35,7 +35,7 @@ A change is **small** when every line below holds, and **standard** otherwise:
 - **Legacy is not precedent.** Conventions are what these files and the lint config define, not older idioms in nearby code. Code that contradicts them is legacy, even next to yours: do not copy it, because copying is how it spreads. Flag it; do not rewrite it. If you think a convention is harmful, say so; do not fork silently.
 - **Conflicts.** Where two patterns contradict, follow these files and the Skills precedence; where they are silent, the more recent and better-tested one. Say which you followed and flag the other; never blend them. When a rule blocks what the task needs, stop and name the rule; do not work around it.
 - **Two attempts.** After two failed attempts at the same failure, stop, say what you tried and ask. Never retry silently.
-- **Report what is true.** "Done" means the checks ran and you saw them pass. Name every check, test or step you skipped and why: "tests pass" is wrong if any were skipped. A sub-agent's report is a claim until you have read its diff or the command output it returns.
+- **Report what is true.** "Done" means `make check` exited 0 on the final tree and you saw it. With a step failing, the report's first line says so and that the change is not ready to commit; never a line among the others. Name every check, test or step you skipped and why. A sub-agent's report is a claim until you have read its diff or the command output it returns.
 
 ## Use the cheapest thing that gets it right
 
@@ -47,7 +47,7 @@ Work goes to the first of these that does it right:
 
 | Work | Model | Role |
 |---|---|---|
-| Find where something is, list callers, read a log, run the checks and report each command's exit status and what failed | the smallest your tool offers | `scout` |
+| Find where something is, list callers, read a log | the smallest your tool offers | `scout` |
 | Carry out the steps of a finished plan, edit docs only, rename across callers, apply one decided pattern to many files | a mid-tier one | `implementer` |
 | Size and plan a change, design an exported API or a type, a bug of unknown cause, an agent doc, a skill or an agent definition, the review | yours, never a cheaper one | `reviewer` for the review; the rest stays with you |
 
@@ -56,14 +56,15 @@ Work goes to the first of these that does it right:
 - A cheaper model takes no design decision. Its brief says to stop and report where a step leaves one open; you decide, then send it back. One that fails twice at a step hands the step back to you.
 - A sub-agent knows only its brief. Give it the goal, the exact files, the plan steps that are its own, the checks to run and what to return. One that edits files also gets the sections to read first: this file whole and the ones the Rule map names for its files.
 - You stay the author. Read the diff a sub-agent returns before you build on it, and size, check and review the whole change as your own.
-- Do not delegate what a few tool calls with short output finish: the brief costs more than the work. A search or a check run is delegated for the output it keeps out of your context.
+- Do not delegate what a few tool calls with short output finish: the brief costs more than the work. A search is delegated for the output it keeps out of your context.
 - Handed a finished plan to carry out, as a sub-agent or because the user named the steps, you are that cheaper model: carry it out as written. Sizing, planning and `review-change` stay with whoever handed it over.
+- Run `make check` yourself, never through a sub-agent: its exit status is the fact "done" rests on. A sub-agent that edits files may run it too; that does not replace your run.
 
 ## Rule map
 
-Before the first file of a kind below that you create or edit in a task, re-read its section, even if it is already in your context: a rule read at the start of a task fades by the time it applies.
+The sections that govern each kind of file. Read a section when it is not in your context, and name these sections in the brief of a sub-agent that edits files.
 
-| Before you create or edit… | Re-read |
+| A change to… | Is governed by |
 |---|---|
 | a Go file | CONVENTIONS.md § Code shape |
 | an error, an error message or a `panic` | CONVENTIONS.md § Errors |
@@ -81,7 +82,7 @@ Before the first file of a kind below that you create or edit in a task, re-read
 |---|---|
 | plan a standard change | `plan-change` |
 | hand over a standard change or a change to an agent doc, a skill or an agent definition; review a diff when asked | `review-change` |
-| edit a Go file; run its `list` step on the file first | `use-modern-go` |
+| edit Go; run its `list` step once per task for each module you edit, on any file of the module, before the first Go edit | `use-modern-go` |
 | design, write or review Go: errors, goroutines, globals, interfaces, structs, naming, tests, options | `uber-go-style` |
 
 - When they disagree: `CONVENTIONS.md` > `use-modern-go` > `uber-go-style` > nearby code.

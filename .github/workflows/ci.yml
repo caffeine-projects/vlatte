@@ -137,6 +137,9 @@ jobs:
         platforms: linux/amd64,linux/arm64
         cache-from: type=gha,scope=docker
         cache-to: type=gha,scope=docker,mode=max
+        build-args: |
+          VERSION=${{ github.sha }}
+          REVISION=${{ github.sha }}
 
     - name: Build
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -145,6 +148,9 @@ jobs:
         load: true
         tags: vlatte:ci
         cache-from: type=gha,scope=docker
+        build-args: |
+          VERSION=${{ github.sha }}
+          REVISION=${{ github.sha }}
 
     - name: Smoke test
       run: |
@@ -157,12 +163,10 @@ jobs:
         fi
 
         version="$(docker run --rm vlatte:ci version)"
-        revision="$(git rev-parse --short=12 HEAD)"
-        case "$version" in
-          *+dirty) echo "::error::version $version is dirty"; exit 1 ;;
-          *"$revision"*) ;;
-          *) echo "::error::version $version does not name revision $revision"; exit 1 ;;
-        esac
+        if [ "$version" != "$GITHUB_SHA" ]; then
+          echo "::error::the image reports version $version, not the VERSION build arg $GITHUB_SHA"
+          exit 1
+        fi
 
         mocks="$RUNNER_TEMP/mocks"
         mkdir -p "$mocks"
