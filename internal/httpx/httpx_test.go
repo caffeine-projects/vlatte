@@ -36,6 +36,21 @@ func TestIsToken(t *testing.T) {
 	}
 }
 
+func TestIsBaseURL_TakesAnAbsoluteURLWithNoQueryOrFragment(t *testing.T) {
+	// Paths are appended to a base URL: one without a host, or with a query or a fragment, even an empty one, would
+	// make URLs no client can reach.
+	for _, s := range []string{"https://id.example", "https://id.example/realms/demo", "https://id.example/realms/demo/"} {
+		require.True(t, IsBaseURL(s), s)
+	}
+
+	for _, s := range []string{
+		"", "id.example/realms", "/realms", "https:///realms",
+		"https://id.example/realms?x=1", "https://id.example/realms?", "https://id.example/realms#top", "https://id.example/realms#",
+	} {
+		require.False(t, IsBaseURL(s), s)
+	}
+}
+
 func TestListenAddr_TakesWhatAServerListensOn(t *testing.T) {
 	// A port alone listens on every interface, as a server in a container needs; a host alone has no port to listen on.
 	for _, addr := range []string{"", "8081", ":8081", "127.0.0.1:8081", "[::1]:8081"} {

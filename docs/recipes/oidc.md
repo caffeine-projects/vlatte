@@ -34,10 +34,12 @@ Each code is exchanged once, and PKCE takes S256 only. Every mock is a template,
 |---|---|---|
 | `ClientID(id)`, `ClientSecret(secret)` | The app's credentials. ID tokens have the client ID as `aud`. | `oidc.DefaultClientID`, `DefaultClientSecret` |
 | `KeyID(kid)` | The server's key ID tokens are signed with. Discovery announces its algorithm. | `DefaultKeyID` |
-| `Issuer(url)` | The `iss` of ID tokens, and the base URL of the endpoints. | The server's URL |
+| `Issuer(url)` | The `iss` of ID tokens, and the base URL of the endpoints. An absolute URL with no query or fragment. | The server's URL |
 | `Claims(map)` | The user's claims, in ID tokens and from userinfo. | `oidc.DefaultClaims()` |
 | `AccessToken(token)`, `TokenTTL(d)` | The access token issued, and how long tokens last. | `DefaultAccessToken`, `DefaultTokenTTL` (1h) |
-| `WithPaths(oidc.Paths{...})` | Where the endpoints are, such as Google's `/o/oauth2/v2/auth`. | `oidc.DefaultPaths()` |
+| `WithPaths(oidc.Paths{...})` | Where the endpoints are, under the issuer's path, such as Google's `/o/oauth2/v2/auth`. | `oidc.DefaultPaths()` |
+
+An issuer with a path serves every endpoint under it: with the issuer `http://localhost:8080/realms/demo`, discovery is at `/realms/demo/.well-known/openid-configuration`, and `oidc.Paths{JWKS: "/keys"}` serves the JWKS at `/realms/demo/keys`. A path without a leading `/` gets one.
 
 It covers the authorization code flow only: not the implicit or hybrid flows, refresh tokens, nor `client_secret_basic`.
 

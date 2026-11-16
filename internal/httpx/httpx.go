@@ -1,4 +1,5 @@
-// Package httpx holds the small HTTP helpers the mock servers and the webhook package share.
+// Package httpx holds the small HTTP helpers vlatte's packages share: the mock servers, the webhook package, the
+// recipes and the vlatte command.
 package httpx
 
 import (
@@ -7,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -93,6 +95,13 @@ func NewWebhookTransport(allow, deny []netip.Prefix) *http.Transport {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
+}
+
+// IsBaseURL reports whether s is a URL that others are made from by appending a path: absolute, with a host, and with
+// no query or fragment, not even an empty one.
+func IsBaseURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && u.IsAbs() && u.Host != "" && u.RawQuery == "" && !u.ForceQuery && !strings.Contains(s, "#")
 }
 
 // IsToken reports whether s is an HTTP token, as header names and methods are.

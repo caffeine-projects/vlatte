@@ -30,56 +30,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-func TestSplitArgs_GivesEachServerItsFlags(t *testing.T) {
-	// The flags of gRPC settings go to the gRPC server, with their values, the config file to each, and the rest to
-	// the HTTP server: each server reports a flag it doesn't know.
-	httpArgs, grpcArgs, recipeArgs := splitArgs([]string{
-		"--addr", ":8080",
-		"--grpc",
-		"--grpc-addr", ":50051",
-		"--grpc-mock-files=mocks/*.yaml",
-		"-c", "settings.yaml",
-		"--grpc-reflection=false",
-		"--grpc-admin-dir", "admin",
-		"--debug",
-	})
-
-	require.Equal(t, []string{"--addr", ":8080", "-c", "settings.yaml", "--debug"}, httpArgs)
-	require.Equal(t, []string{
-		"--grpc", "--grpc-addr", ":50051", "--grpc-mock-files=mocks/*.yaml", "--config=settings.yaml",
-		"--grpc-reflection=false", "--grpc-admin-dir", "admin",
-	}, grpcArgs, "the command's gRPC settings too")
-	require.Equal(t, []string{"--config=settings.yaml"}, recipeArgs)
-}
-
-func TestSplitArgs_FlagsEndAtTheTerminator(t *testing.T) {
-	// The HTTP server's parser stops at -- and rejects what follows: no gRPC flag after it configures the gRPC server.
-	httpArgs, grpcArgs, recipeArgs := splitArgs([]string{
-		"--addr", ":8080", "--grpc-addr", "--", "--", "--grpc-addr=:50051", "--grpc-descriptors=api.binpb", "-c", "x",
-	})
-
-	require.Equal(t, []string{
-		"--addr", ":8080", "--", "--grpc-addr=:50051", "--grpc-descriptors=api.binpb", "-c", "x",
-	}, httpArgs)
-	require.Equal(t, []string{"--grpc-addr", "--"}, grpcArgs, "a flag's value can be --")
-	require.Nil(t, recipeArgs)
-}
-
-func TestSplitArgs_GivesTheRecipesTheirFlags(t *testing.T) {
-	// Every --recipe* flag goes to the recipes, with its value, even --recipe, which names no setting: the recipe
-	// settings report it, with the recipe flags as suggestions.
-	httpArgs, grpcArgs, recipeArgs := splitArgs([]string{
-		"--addr", ":8080", "--recipe", "--recipe-oidc", "--recipe-oidc-client-id", "app", "--recipe-github-auth-token=t",
-		"-c", "s.yaml", "--grpc",
-	})
-
-	require.Equal(t, []string{"--addr", ":8080", "-c", "s.yaml"}, httpArgs)
-	require.Equal(t, []string{"--config=s.yaml", "--grpc"}, grpcArgs)
-	require.Equal(t, []string{
-		"--recipe", "--recipe-oidc", "--recipe-oidc-client-id", "app", "--recipe-github-auth-token=t", "--config=s.yaml",
-	}, recipeArgs)
-}
-
 // healthSet writes the descriptors of the health service, renamed into package pkg so that the program has no
 // generated code of it, as a descriptor set file, and returns the file and the descriptors.
 func healthSet(t *testing.T, pkg string) (string, protoreflect.FileDescriptor) {

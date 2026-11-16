@@ -15,12 +15,16 @@ package oidc
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
@@ -38,7 +42,7 @@ const (
 // then used once exchanged.
 const Scenario = "oidc-code"
 
-// Paths are where the provider serves its endpoints, from its issuer URL. An empty one is its default.
+// Paths are where the provider serves its endpoints, relative to its issuer URL's path. An empty one is its default.
 type Paths struct {
 	Discovery string // default /.well-known/openid-configuration, which OpenID Connect Discovery fixes
 	Authorize string // default /authorize
@@ -102,6 +106,8 @@ func KeyID(kid string) Option {
 
 // Issuer sets the issuer: the iss of ID tokens, and the base URL of the endpoints discovery announces. The default
 // is the URL of the server, so the recipe works on any port; set it when the app reaches the server by another name.
+// It is an absolute URL with no query or fragment, or [mockhttp.Server.Prep] fails. An issuer with a path serves
+// every endpoint under that path, discovery included.
 func Issuer(issuer string) Option {
 	return func(c *config) { c.issuer = issuer }
 }
@@ -125,7 +131,8 @@ func Claims(claims map[string]any) Option {
 	return func(c *config) { c.claims = maps.Clone(claims) }
 }
 
-// WithPaths sets where the endpoints are; the fields left empty keep their default.
+// WithPaths sets where the endpoints are, under the issuer's path; the fields left empty keep their default. A path
+// without a leading / gets one.
 func WithPaths(paths Paths) Option {
 	return func(c *config) { c.paths = paths }
 }
@@ -159,18 +166,35 @@ func New(opts ...Option) mockhttp.Recipe {
 
 	defaults := DefaultPaths()
 	c.paths = Paths{
-		Discovery: cmp.Or(c.paths.Discovery, defaults.Discovery),
-		Authorize: cmp.Or(c.paths.Authorize, defaults.Authorize),
-		Token:     cmp.Or(c.paths.Token, defaults.Token),
-		JWKS:      cmp.Or(c.paths.JWKS, defaults.JWKS),
-		UserInfo:  cmp.Or(c.paths.UserInfo, defaults.UserInfo),
+		Discovery: rooted(cmp.Or(c.paths.Discovery, defaults.Discovery)),
+		Authorize: rooted(cmp.Or(c.paths.Authorize, defaults.Authorize)),
+		Token:     rooted(cmp.Or(c.paths.Token, defaults.Token)),
+		JWKS:      rooted(cmp.Or(c.paths.JWKS, defaults.JWKS)),
+		UserInfo:  rooted(cmp.Or(c.paths.UserInfo, defaults.UserInfo)),
 	}
 
 	return vlatte.RecipeFunc[*mockhttp.Mock, *mockhttp.Server](func(
 		_ context.Context,
 		in *vlatte.RecipeInput[*mockhttp.Mock, *mockhttp.Server],
 	) error {
-		_, err := in.Server.Mock(c.mocks()...)
+		// The endpoints are on the issuer without its trailing /, and under its path.
+		base := strings.TrimRight(c.issuer, "/")
+
+		var prefix string
+
+		if c.issuer != "" {
+			if !httpx.IsBaseURL(c.issuer) {
+				return fmt.Errorf("oidc: expected the issuer to be an absolute URL with no query or fragment, such as "+
+					"https://id.example, not %q", c.issuer)
+			}
+
+			// A base URL still parses once its trailing / are trimmed.
+			u, _ := url.Parse(base)
+			prefix = u.Path
+		}
+
+		_, err := in.Server.Mock(c.mocks(base, prefix)...)
+
 		return err
 	})
 }
@@ -207,11 +231,11 @@ const _refusal = `{{ $u := .Request.URL.Query.Get "redirect_uri" }}{{ $u }}` +
 
 // discovery is the body of the discovery endpoint, which reads the algorithm of the signing key kid from its JWK.
 func discovery(kid string) string {
-	return `{{ $iss := or .Extra.issuer .Server.URL }}{"issuer": {{ toJSON $iss }},
-"authorization_endpoint": {{ print $iss .Extra.paths.authorize | toJSON }},
-"token_endpoint": {{ print $iss .Extra.paths.token | toJSON }},
-"jwks_uri": {{ print $iss .Extra.paths.jwks | toJSON }},
-"userinfo_endpoint": {{ print $iss .Extra.paths.userinfo | toJSON }},
+	return `{{ $iss := or .Extra.issuer .Server.URL }}{{ $base := or .Extra.base .Server.URL }}{"issuer": {{ toJSON $iss }},
+"authorization_endpoint": {{ print $base .Extra.paths.authorize | toJSON }},
+"token_endpoint": {{ print $base .Extra.paths.token | toJSON }},
+"jwks_uri": {{ print $base .Extra.paths.jwks | toJSON }},
+"userinfo_endpoint": {{ print $base .Extra.paths.userinfo | toJSON }},
 "response_types_supported": ["code"],
 "grant_types_supported": ["authorization_code"],
 "subject_types_supported": ["public"],
@@ -222,12 +246,21 @@ func discovery(kid string) string {
 }
 
 // authorize starts a mock of the authorize requests of a sign-in with the client of c.
-func authorize(c *config) *mockhttp.Builder {
-	return endpoint(http.MethodGet, c.paths.Authorize).
+func authorize(c *config, path string) *mockhttp.Builder {
+	return endpoint(http.MethodGet, path).
 		Query("response_type", match.StrictEqual("code")).
 		Query("client_id", match.StrictEqual(c.clientID)).
 		Query("redirect_uri", match.Present()).
 		Query("scope", match.Split(" ", match.Contain("openid")))
+}
+
+// rooted returns path with a leading /, as a path joined to a URL has.
+func rooted(path string) string {
+	if strings.HasPrefix(path, "/") {
+		return path
+	}
+
+	return "/" + path
 }
 
 // endpoint starts a mock of requests of method to path, exactly.
@@ -235,9 +268,21 @@ func endpoint(method, path string) *mockhttp.Builder {
 	return mockhttp.Request().Method(method).URLPath(match.StrictEqual(path))
 }
 
-func (c *config) mocks() []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
+// mocks returns the mocks of the provider, which announces its endpoints on base, the issuer without its trailing /,
+// and serves them under prefix, the issuer's path. An empty base announces them on the server's URL.
+func (c *config) mocks(base, prefix string) []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
+	// Where each endpoint is served: under the issuer's path.
+	at := Paths{
+		Discovery: prefix + c.paths.Discovery,
+		Authorize: prefix + c.paths.Authorize,
+		Token:     prefix + c.paths.Token,
+		JWKS:      prefix + c.paths.JWKS,
+		UserInfo:  prefix + c.paths.UserInfo,
+	}
+
 	data := map[string]any{
 		"issuer":       c.issuer,
+		"base":         base,
 		"client_id":    c.clientID,
 		"access_token": c.accessToken,
 		"ttl":          c.ttl.String(),
@@ -263,25 +308,25 @@ func (c *config) mocks() []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
 		`"id_token": "{{ jwt ` + strconv.Quote(c.kid) + ` $claims }}"}`
 
 	return []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server]{
-		endpoint(http.MethodGet, c.paths.Discovery).
+		endpoint(http.MethodGet, at.Discovery).
 			Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).BodyTemplate(discovery(c.kid)).SetTemplateData(data)),
 
-		endpoint(http.MethodGet, c.paths.JWKS).
+		endpoint(http.MethodGet, at.JWKS).
 			Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).BodyTemplate(`{{ jwks ` + strconv.Quote(c.kid) + ` }}`)),
 
-		authorize(c).
+		authorize(c, at.Authorize).
 			StartScenario(Scenario).
 			ScenarioKey(_authorizeKey).
 			ScenarioStateWillBe("issued").
 			Reply(mockhttp.Status(http.StatusFound).HeaderTemplate(mockhttp.HeaderLocation, _redirect)),
 		// A challenge without a method is plain (RFC 7636 §4.3).
-		authorize(c).
+		authorize(c, at.Authorize).
 			Query("code_challenge", match.Present()).
 			Query("code_challenge_method", match.Not(match.StrictEqual("S256"))).
 			Priority(-1).
 			Reply(mockhttp.Status(http.StatusFound).HeaderTemplate(mockhttp.HeaderLocation, _refusal)),
 
-		endpoint(http.MethodPost, c.paths.Token).
+		endpoint(http.MethodPost, at.Token).
 			FormField("grant_type", match.StrictEqual("authorization_code")).
 			FormField("client_id", match.StrictEqual(c.clientID)).
 			FormField("client_secret", match.StrictEqual(c.clientSecret)).
@@ -292,17 +337,17 @@ func (c *config) mocks() []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
 			ScenarioStateWillBe("used").
 			Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).Header(mockhttp.HeaderCacheControl, "no-store").
 				BodyTemplate(token).SetTemplateData(data)),
-		endpoint(http.MethodPost, c.paths.Token).
+		endpoint(http.MethodPost, at.Token).
 			Priority(1).
 			Reply(mockhttp.BadRequest().JSON(map[string]string{
 				"error":             "invalid_grant",
 				"error_description": "the code is unknown, used, or doesn't fit the code_verifier",
 			})),
 
-		endpoint(http.MethodGet, c.paths.UserInfo).
+		endpoint(http.MethodGet, at.UserInfo).
 			Header(mockhttp.HeaderAuthorization, match.StrictEqual("Bearer "+c.accessToken)).
 			Reply(mockhttp.OK().JSON(c.claims)),
-		endpoint(http.MethodGet, c.paths.UserInfo).
+		endpoint(http.MethodGet, at.UserInfo).
 			Priority(1).
 			Reply(mockhttp.Unauthorized().Header(mockhttp.HeaderWWWAuthenticate, `Bearer error="invalid_token"`)),
 	}

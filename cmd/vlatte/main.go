@@ -130,12 +130,14 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 
 // serve runs the mock server configured by args until ctx is done.
 func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stderr io.Writer) int {
-	s, code, ok := commandSettings(cmd, args, stdout, stderr)
+	parts := splitArgs(args)
+
+	s, code, ok := commandSettings(cmd, parts.settings, stdout, stderr)
 	if !ok {
 		return code
 	}
 
-	m, g, _, code := startServer(cmd, args, s, stdout, stdout, stderr)
+	m, g, _, code := startServer(cmd, parts, s, stdout, stdout, stderr)
 	if m == nil {
 		return code
 	}
@@ -151,7 +153,9 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 // serveMCP runs the mock server configured by args, and serves its admin API over MCP on stdin and stdout, until
 // stdin ends or ctx is done. stdout is MCP's alone: the server writes its banner and logs to stderr.
 func serveMCP(ctx context.Context, cmd *cobra.Command, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	s, code, ok := commandSettings(cmd, args, stdout, stderr)
+	parts := splitArgs(args)
+
+	s, code, ok := commandSettings(cmd, parts.settings, stdout, stderr)
 	if !ok {
 		return code
 	}
@@ -161,7 +165,7 @@ func serveMCP(ctx context.Context, cmd *cobra.Command, args []string, stdin io.R
 		return 2
 	}
 
-	m, g, api, code := startServer(cmd, args, s, stderr, stderr, stderr)
+	m, g, api, code := startServer(cmd, parts, s, stderr, stderr, stderr)
 	if m == nil {
 		return code
 	}
@@ -177,8 +181,8 @@ func serveMCP(ctx context.Context, cmd *cobra.Command, args []string, stdin io.R
 	return stopRecording(m, stderr)
 }
 
-// commandSettings loads the command's settings from args. On help, or settings with problems, it writes them and
-// returns the exit code, and false.
+// commandSettings loads the command's settings from args, the ones splitArgs gives them. On help, or settings with
+// problems, it writes them and returns the exit code, and false.
 func commandSettings(cmd *cobra.Command, args []string, stdout, stderr io.Writer) (settings, int, bool) {
 	s, err := loadSettings(args)
 	if err == nil {
@@ -192,7 +196,7 @@ func commandSettings(cmd *cobra.Command, args []string, stdout, stderr io.Writer
 // logOutput, and writes their banner and settings to out: the HTTP server, and the gRPC one, which serves only when
 // its settings turn it on. It returns the servers, which the caller closes, and the HTTP server's admin API, or nil
 // servers and the exit code.
-func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, stderr io.Writer) (*mockhttp.Server, *mockgrpc.Server, *admin.Admin, int) {
+func startServer(cmd *cobra.Command, args commandArgs, s settings, out, logOutput, stderr io.Writer) (*mockhttp.Server, *mockgrpc.Server, *admin.Admin, int) {
 	// Mock files name their on_complete listeners: webhook sends their webhooks, logging with the server's logger and
 	// waiting for their answers as long as the webhook.timeout setting says.
 	wh := cmp.Or(s.webhook, &webhook.WebHook{})
@@ -203,14 +207,12 @@ func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, 
 		return nil, nil, nil, failure(cmd, err, out, stderr)
 	}
 
-	httpArgs, grpcArgs, recipeArgs := splitArgs(args)
-
-	rs, err := loadRecipes(recipeArgs)
+	rs, err := loadRecipes(args.recipe)
 	if err != nil {
 		return nil, nil, nil, failure(cmd, err, out, stderr)
 	}
 
-	m, api, err := newHTTP(httpArgs, s, wh, kv, logOutput)
+	m, api, err := newHTTP(args.http, s, wh, kv, logOutput)
 	if err != nil {
 		return nil, nil, nil, failure(cmd, err, out, stderr)
 	}
@@ -220,7 +222,7 @@ func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, 
 		return nil, nil, nil, failure(cmd, err, out, stderr)
 	}
 
-	g, err := newGRPC(grpcArgs, s, m.Config(), wh, kv, logOutput)
+	g, err := newGRPC(args.grpc, s, m.Config(), wh, kv, logOutput)
 	if err != nil {
 		// Close releases what New opened, such as the journal.
 		m.Close()

@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -300,17 +301,122 @@ func TestOIDC_WorksWithAKeyFromTheSettings(t *testing.T) {
 	require.Equal(t, "RS256", tok.Alg)
 }
 
+func TestOIDC_ServesItsEndpointsUnderTheIssuersPath(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		suffix string
+	}{
+		{name: "without a trailing slash"},
+		{name: "with a trailing slash", suffix: "/"},
+		{name: "with trailing slashes", suffix: "//"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := serverWithKey(t)
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			issuer := m.URL("/realms/demo") + tt.suffix
+			require.NoError(t, m.Prep(t.Context(), oidc.New(oidc.Issuer(issuer))))
+
+			status, body := get(t, m.URL("/realms/demo/.well-known/openid-configuration"), "")
+			require.Equal(t, http.StatusOK, status)
+
+			var doc map[string]any
+			require.NoError(t, json.Unmarshal([]byte(body), &doc))
+			require.Equal(t, issuer, doc["issuer"])
+			require.Equal(t, m.URL("/realms/demo/jwks"), doc["jwks_uri"])
+
+			status, _ = get(t, doc["jwks_uri"].(string), "")
+			require.Equal(t, http.StatusOK, status)
+
+			res := do(t, http.MethodGet, doc["authorization_endpoint"].(string)+"?"+url.Values{
+				"response_type": {"code"}, "client_id": {oidc.DefaultClientID},
+				"redirect_uri": {"https://app.example/cb"}, "scope": {"openid"},
+			}.Encode(), "", nil)
+			require.Equal(t, http.StatusFound, res.StatusCode)
+
+			location, err := url.Parse(res.Header.Get(mockhttp.HeaderLocation))
+			require.NoError(t, err)
+
+			res = do(t, http.MethodPost, doc["token_endpoint"].(string), "", url.Values{
+				"grant_type": {"authorization_code"}, "client_id": {oidc.DefaultClientID},
+				"client_secret": {oidc.DefaultClientSecret}, "redirect_uri": {"https://app.example/cb"},
+				"code": {location.Query().Get("code")},
+			})
+			require.Equal(t, http.StatusOK, res.StatusCode)
+
+			var tokens map[string]any
+			require.NoError(t, json.UnmarshalRead(res.Body, &tokens))
+			require.Equal(t, issuer, verifyAt(t, doc["jwks_uri"].(string), tokens["id_token"].(string))["iss"])
+
+			status, _ = get(t, doc["userinfo_endpoint"].(string), "Bearer "+oidc.DefaultAccessToken)
+			require.Equal(t, http.StatusOK, status)
+		})
+	}
+}
+
+func TestOIDC_ExplicitPathsAreUnderTheIssuersPath(t *testing.T) {
+	// A path is joined to the issuer as to a URL: without a leading /, it still starts a segment of its own.
+	for _, tt := range []struct {
+		name string
+		jwks string
+	}{
+		{name: "a path with /", jwks: "/keys"},
+		{name: "a path without / gets one", jwks: "keys"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := serverWithKey(t)
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			require.NoError(t, m.Prep(t.Context(),
+				oidc.New(oidc.Issuer(m.URL("/realms/demo")), oidc.WithPaths(oidc.Paths{JWKS: tt.jwks}))))
+
+			_, body := get(t, m.URL("/realms/demo/.well-known/openid-configuration"), "")
+
+			var doc map[string]any
+			require.NoError(t, json.Unmarshal([]byte(body), &doc))
+			require.Equal(t, m.URL("/realms/demo/keys"), doc["jwks_uri"])
+
+			status, _ := get(t, m.URL("/realms/demo/keys"), "")
+			require.Equal(t, http.StatusOK, status)
+		})
+	}
+}
+
+func TestOIDC_PrepRefusesAnIssuerThatIsNotAnAbsoluteURL(t *testing.T) {
+	// OpenID Connect Discovery appends paths to the issuer: one without a host, or with a query or a fragment, would
+	// announce endpoints no client can reach.
+	for _, issuer := range []string{"id.example/realms", "https://id.example/realms?x=1", "https://id.example/realms#top", "https://id.example/realms#"} {
+		t.Run(issuer, func(t *testing.T) {
+			m := serverWithKey(t)
+
+			require.ErrorContains(t, m.Prep(t.Context(), oidc.New(oidc.Issuer(issuer))),
+				`oidc: expected the issuer to be an absolute URL with no query or fragment, such as https://id.example, not `+
+					strconv.Quote(issuer))
+		})
+	}
+}
+
 // Generators
 
-// newServer starts a server with an ES256 key as oidc.DefaultKeyID, prepared with the recipe.
-func newServer(t *testing.T, opts ...oidc.Option) *mockhttp.Server {
+// serverWithKey returns an unstarted silent server with an ES256 key as oidc.DefaultKeyID.
+func serverWithKey(t *testing.T) *mockhttp.Server {
 	t.Helper()
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
 	engine := vlatte.MustNewGoTemplateEngine(vlatte.WithSigningKey(oidc.DefaultKeyID, "ES256", key))
-	m := mockhttp.MustNew(mockhttp.Setup().Silent().TemplateEngine(engine))
+
+	return mockhttp.MustNew(mockhttp.Setup().Silent().TemplateEngine(engine))
+}
+
+// newServer starts a server with an ES256 key as oidc.DefaultKeyID, prepared with the recipe.
+func newServer(t *testing.T, opts ...oidc.Option) *mockhttp.Server {
+	t.Helper()
+
+	m := serverWithKey(t)
 	require.NoError(t, m.Prep(t.Context(), oidc.New(opts...)))
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -375,7 +481,14 @@ func exchangeTo(t *testing.T, m *mockhttp.Server, code, verifier, redirectURI st
 func verify(t *testing.T, m *mockhttp.Server, token string) map[string]any {
 	t.Helper()
 
-	_, jwks := get(t, m.URL("/jwks"), "")
+	return verifyAt(t, m.URL("/jwks"), token)
+}
+
+// verifyAt returns the claims of token once it verifies with the JWKS at jwksURL.
+func verifyAt(t *testing.T, jwksURL, token string) map[string]any {
+	t.Helper()
+
+	_, jwks := get(t, jwksURL, "")
 
 	ks, err := jose.ParseKeySet([]byte(jwks))
 	require.NoError(t, err)

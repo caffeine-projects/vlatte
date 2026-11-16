@@ -10,6 +10,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/internal/tmplfunc"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/caffeine-projects/vlatte/recipe/http/githubauth"
@@ -209,7 +210,7 @@ func oidcFields() []config.Field[oidcRecipe] {
 
 	path := func(key, what, def string, set func(p *oidc.Paths, s string)) config.Field[oidcRecipe] {
 		return config.Field[oidcRecipe]{
-			Key: "paths." + key, Kind: config.String, Usage: "Path of the " + what + " endpoint.", Default: def,
+			Key: "paths." + key, Kind: config.String, Usage: "Path of the " + what + " endpoint, under the issuer's path.", Default: def,
 			Set: func(r *oidcRecipe, v config.Value) error {
 				set(&r.paths, v.Str)
 				return nil
@@ -234,7 +235,20 @@ func oidcFields() []config.Field[oidcRecipe] {
 				return nil
 			},
 		},
-		text("issuer", "Issuer: the iss of ID tokens and the base URL of the endpoints discovery announces. Empty is the server's URL.", "", oidc.Issuer),
+		{
+			Key: "issuer", Kind: config.String,
+			Usage: "Issuer, an absolute URL with no query or fragment: the iss of ID tokens and the base URL of the endpoints discovery announces. Empty is the server's URL. An issuer with a path serves the endpoints under it.",
+			Set: func(r *oidcRecipe, v config.Value) error {
+				if v.Str != "" && !httpx.IsBaseURL(v.Str) {
+					return config.Invalid(v, v.Key+" must be an absolute URL with no query or fragment, such as https://id.example, not "+
+						strconv.Quote(v.Str), "")
+				}
+
+				r.opts = append(r.opts, oidc.Issuer(v.Str))
+
+				return nil
+			},
+		},
 		text("access_token", "Access token the token endpoint issues, and the only one userinfo accepts.", oidc.DefaultAccessToken, oidc.AccessToken),
 		{
 			Key: "token_ttl", Kind: config.Duration, Default: oidc.DefaultTokenTTL.String(),

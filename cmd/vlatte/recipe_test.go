@@ -428,6 +428,21 @@ func TestRun_RecipeSettingErrors(t *testing.T) {
 			want: "flag --recipe-oidc-key-id: invalid_value: recipe.oidc.key_id must not be empty; set the kid of a key template.keys sets, such as vlatte",
 		},
 		{
+			name: "issuer not an absolute URL",
+			args: []string{"--recipe-oidc-issuer=id.example/realms"},
+			want: `flag --recipe-oidc-issuer: invalid_value: recipe.oidc.issuer must be an absolute URL with no query or fragment, such as https://id.example, not "id.example/realms"`,
+		},
+		{
+			name: "issuer with an empty fragment",
+			args: []string{"--recipe-oidc-issuer=https://id.example/realms#"},
+			want: `flag --recipe-oidc-issuer: invalid_value: recipe.oidc.issuer must be an absolute URL with no query or fragment, such as https://id.example, not "https://id.example/realms#"`,
+		},
+		{
+			name: "issuer with a query",
+			args: []string{"--recipe-oidc-issuer=https://id.example/realms?x=1"},
+			want: `flag --recipe-oidc-issuer: invalid_value: recipe.oidc.issuer must be an absolute URL with no query or fragment, such as https://id.example, not "https://id.example/realms?x=1"`,
+		},
+		{
 			name: "mistyped flag",
 			args: []string{"--recipe-oidc-clientid=app"},
 			want: "unknown_key: --recipe-oidc-clientid is not a known flag; did you mean --recipe-oidc-client-id?",
@@ -465,4 +480,21 @@ func TestRun_RecipeSettingErrors(t *testing.T) {
 			require.Contains(t, stderr.String(), tt.want)
 		})
 	}
+}
+
+func TestCLI_AnEmptyOIDCIssuerIsTheServersURL(t *testing.T) {
+	// An empty issuer is no issuer: discovery announces the server's own URL, which any port reaches.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	addr := randomAddr(t)
+	start(t, "--addr", addr, "--log-level", "disabled", "--template-keys", "vlatte=RS256", "--recipe-oidc-issuer=")
+
+	status, body := firstAnswer(t, "http://"+addr+"/.well-known/openid-configuration")
+	require.Equal(t, http.StatusOK, status)
+
+	var discovery map[string]any
+	require.NoError(t, json.Unmarshal([]byte(body), &discovery))
+	require.Equal(t, "http://"+addr, discovery["issuer"])
+	require.Equal(t, "http://"+addr+"/jwks", discovery["jwks_uri"])
 }

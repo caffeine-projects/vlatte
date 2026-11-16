@@ -143,7 +143,7 @@ type catalog struct {
 	byFlag   map[string]*field   // long names and shorthands
 	secrets  map[string]*field   // the flag names secrets would have, which no flag takes
 	groups   map[string]struct{} // prefixes with no key of their own, such as "log"
-	loadOnly bool                // sources read only its keys, and let every other one through: see Schema.LoadOnly
+	loadOnly bool                // files and env read only its keys, letting others through; args stay strict: see Schema.LoadOnly
 
 	// skip and only name the top-level settings files and environment variables leave to other schemas, that read
 	// the same sources: those of skip, or all but those of only.

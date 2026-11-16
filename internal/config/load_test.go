@@ -169,11 +169,11 @@ func TestLoadOnly_LetsOtherSettingsThrough(t *testing.T) {
 	values, err := testSchema().LoadOnly(&c, []Source{
 		File("config", file),
 		Env("APP"),
-		Args([]string{"--other", "x", "--debug", "-o", "y", "--other-bool", "--tags", "a", "--more=z", "positional", "--log-level=info", "--", "--name=after"}),
+		Args([]string{"--debug", "--tags", "a", "--log-level=info"}),
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, "from-file", c.Name, "flags after -- are no flags")
+	require.Equal(t, "from-file", c.Name, "no flag sets name: the file's value stays")
 	require.Equal(t, int64(81), c.Port)
 	require.True(t, c.Debug)
 	require.Equal(t, []string{"a"}, c.Tags)
@@ -183,18 +183,29 @@ func TestLoadOnly_LetsOtherSettingsThrough(t *testing.T) {
 
 func TestLoadOnly_StillChecksItsOwnSettings(t *testing.T) {
 	var c testConfig
-	_, err := testSchema().LoadOnly(&c, []Source{Args([]string{"--other=1", "--port=eighty"})})
+	_, err := testSchema().LoadOnly(&c, []Source{Args([]string{"--port=eighty"})})
 
 	problems := requireProblems(t, err)
 	require.Len(t, problems, 1)
 	require.Equal(t, "port", problems[0].Key)
 }
 
+func TestLoadOnly_ReportsAnUnknownFlag(t *testing.T) {
+	// The caller passes only the schema's own flags: another flag is a mistake, not one of another schema's.
+	var c testConfig
+	_, err := testSchema().LoadOnly(&c, []Source{Args([]string{"--other=1"})})
+
+	problems := requireProblems(t, err)
+	require.Len(t, problems, 1)
+	require.Equal(t, CodeUnknownKey, problems[0].Code)
+	require.Equal(t, "flag --other", problems[0].Origin)
+}
+
 func TestLoadOnly_HelpStopsBeforeLowerSources(t *testing.T) {
 	// Help must work whatever the other sources hold, as Load's does.
 	for _, arg := range []string{"-h", "--help"} {
 		var c testConfig
-		_, err := testSchema().LoadOnly(&c, []Source{layer{{key: "port", raw: "eighty", origin: "file a.yaml"}}, Args([]string{"--other", arg})})
+		_, err := testSchema().LoadOnly(&c, []Source{layer{{key: "port", raw: "eighty", origin: "file a.yaml"}}, Args([]string{arg})})
 
 		require.ErrorIs(t, err, flag.ErrHelp, arg)
 	}
