@@ -30,7 +30,19 @@ proxy:
 cors: true
 ```
 
-Setting a key of a section (`cors`, `proxy`, `proxy_all`, `record`, `admin` or `journal`) turns the section on, and `false` turns it off.
+Setting a key of a section (`cors`, `proxy`, `proxy_all`, `record`, `admin`, `journal`, `recipe.github_auth` or `recipe.oidc`) turns the section on, and `false` turns it off.
+
+## Recipe settings
+
+The `vlatte` command prepares the built-in [recipes](/recipes/#from-the-vlatte-command) from the `recipe.github_auth` and `recipe.oidc` sections, as `--recipe-github-auth-*` and `--recipe-oidc-*` flags and `VLATTE_RECIPE_GITHUB_AUTH_*` and `VLATTE_RECIPE_OIDC_*` variables. They are the command's: a Go server ignores them. `recipe.oidc` needs `template.keys` to hold its key.
+
+```yaml
+template:
+  keys: [vlatte=RS256]
+recipe:
+  oidc:
+    client_id: my-app
+```
 
 ## HTTP read timeouts
 

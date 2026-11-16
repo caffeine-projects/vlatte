@@ -22,10 +22,6 @@ func Args(args []string) Source {
 
 func (s *argsSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 	args := s.args
-	if c.loadOnly {
-		args = knownArgs(c, args)
-	}
-
 	if len(args) == 0 {
 		return nil, nil, nil
 	}
@@ -98,52 +94,6 @@ func (s *argsSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 	}
 
 	return entries, problems, nil
-}
-
-// knownArgs returns the flags of args that c knows, with their values, and those that ask for help, for a load of
-// only the keys of c. A flag it doesn't know is skipped, with the next argument, its value, unless that is a flag too.
-// It stops at "--".
-func knownArgs(c *catalog, args []string) []string {
-	var known []string
-
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			break
-		}
-
-		name, hasValue := strings.CutPrefix(arg, "--")
-		if !hasValue {
-			name, hasValue = strings.CutPrefix(arg, "-")
-		}
-
-		if !hasValue || name == "" {
-			continue // not a flag: the value of an unknown one, or an argument another schema reports
-		}
-
-		name, _, inline := strings.Cut(name, "=")
-		if name == "h" || name == "help" {
-			known = append(known, arg) // asks for help, whatever the schema
-			continue
-		}
-
-		f := c.byFlag[name]
-		takesNext := !inline && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-")
-
-		switch {
-		case f == nil:
-			if takesNext {
-				i++
-			}
-		case f.kind != Bool && takesNext:
-			known = append(known, arg, args[i+1])
-			i++
-		default:
-			known = append(known, arg)
-		}
-	}
-
-	return known
 }
 
 // flagProblem describes an error of the flag package.

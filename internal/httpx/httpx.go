@@ -1,4 +1,5 @@
-// Package httpx holds the small HTTP helpers the mock servers and the webhook package share.
+// Package httpx holds the small HTTP helpers vlatte's packages share: the mock servers, the webhook package, the
+// recipes and the vlatte command.
 package httpx
 
 import (
@@ -7,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -93,6 +95,44 @@ func NewWebhookTransport(allow, deny []netip.Prefix) *http.Transport {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
+}
+
+// IsBaseURL reports whether s is a URL that others are made from by appending a path: absolute, with a host, and with
+// no query or fragment, not even an empty one.
+func IsBaseURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && u.IsAbs() && u.Host != "" && u.RawQuery == "" && !u.ForceQuery && !strings.Contains(s, "#")
+}
+
+// URLPath returns s as the path of a URL, with a leading / when s has none: path decoded, as a request's URL.Path
+// is, and escaped, as a URL holds it. ok is false when s holds a host, a query, a fragment or an invalid escape.
+func URLPath(s string) (path, escaped string, ok bool) {
+	if strings.ContainsAny(s, "?#") {
+		return "", "", false
+	}
+
+	// "://" before any / ends a scheme and starts a host, even one that doesn't parse, as in "https://id example/keys".
+	// After a /, as in "/cb/https://x", it is part of the path.
+	if i := strings.Index(s, "://"); i >= 0 && !strings.Contains(s[:i], "/") {
+		return "", "", false
+	}
+
+	// Only the host of a URL written whole matters here: "_keys:v1" fails to parse as one, and is a path.
+	if u, err := url.Parse(s); err == nil && u.Host != "" {
+		return "", "", false
+	}
+
+	if !strings.HasPrefix(s, "/") {
+		s = "/" + s
+	}
+
+	// The first parse refused a host: with its leading / added, s has none either.
+	u, err := url.Parse(s)
+	if err != nil {
+		return "", "", false
+	}
+
+	return u.Path, u.EscapedPath(), true
 }
 
 // IsToken reports whether s is an HTTP token, as header names and methods are.

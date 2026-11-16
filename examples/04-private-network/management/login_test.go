@@ -1,4 +1,4 @@
-package management_test
+package management
 
 import (
 	"context"
@@ -16,25 +16,19 @@ import (
 	"github.com/caffeine-projects/vlatte/mockgrpc"
 )
 
-var _ mockgrpc.RequestParser = (*loginParser)(nil)
-
-const _loginMethod = "/management.ManagementService/Login"
-
-type loginParser struct {
-	serverKey wgtypes.Key
-}
-
 func TestEncryptedLoginMatchesOnlyTheDecryptedSetupKeyAndRejectsTampering(t *testing.T) {
 	const setupKey = "example-setup-key"
 	const peerAddress = "100.64.0.10/16"
 
 	serverKey, err := wgtypes.GeneratePrivateKey()
 	require.NoError(t, err)
+
 	peerKey, err := wgtypes.GeneratePrivateKey()
 	require.NoError(t, err)
+
 	serverPublicKey := serverKey.PublicKey()
 
-	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory().Silent().RequestParsers(&loginParser{serverKey: serverKey}))
+	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory().Silent().RequestParsers(&LoginRequestParser{serverKey: serverKey}))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -53,6 +47,7 @@ func TestEncryptedLoginMatchesOnlyTheDecryptedSetupKeyAndRejectsTampering(t *tes
 			}
 			return call.Send(&nbproto.EncryptedMessage{WgPubKey: serverPublicKey.String(), Body: body})
 		})))
+
 	client := nbproto.NewManagementServiceClient(m.MustDial())
 
 	request := &nbproto.LoginRequest{SetupKey: setupKey}
@@ -77,38 +72,12 @@ func TestEncryptedLoginMatchesOnlyTheDecryptedSetupKeyAndRejectsTampering(t *tes
 
 	tampered := proto.CloneOf(first)
 	tampered.Body[len(tampered.Body)-1] ^= 1
+
 	_, err = client.Login(t.Context(), tampered)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 	require.Equal(t, "login: invalid request ciphertext", status.Convert(err).Message())
+
 	accepted.AssertNumberOfCalls(t, 2)
-}
-
-func (p *loginParser) CanParse(call *mockgrpc.Call, _ proto.Message) bool {
-	return call.Method() == _loginMethod
-}
-
-func (p *loginParser) Parse(_ context.Context, _ *mockgrpc.Call, msg proto.Message) (any, error) {
-	envelope, peerPublicKey, err := readEnvelope(msg)
-	if err != nil {
-		return nil, err
-	}
-	request := &nbproto.LoginRequest{}
-	if err := encryption.DecryptMessage(peerPublicKey, p.serverKey, envelope.GetBody(), request); err != nil {
-		return nil, status.Error(codes.InvalidArgument, "login: invalid request ciphertext")
-	}
-	return request, nil
-}
-
-func readEnvelope(msg proto.Message) (*nbproto.EncryptedMessage, wgtypes.Key, error) {
-	envelope, ok := msg.(*nbproto.EncryptedMessage)
-	if !ok {
-		return nil, wgtypes.Key{}, status.Error(codes.InvalidArgument, "login: expected an encrypted message")
-	}
-	peerPublicKey, err := wgtypes.ParseKey(envelope.GetWgPubKey())
-	if err != nil {
-		return nil, wgtypes.Key{}, status.Error(codes.InvalidArgument, "login: invalid peer public key")
-	}
-	return envelope, peerPublicKey, nil
 }
 
 func sealLogin(t *testing.T, request *nbproto.LoginRequest, serverPublicKey, peerKey wgtypes.Key) *nbproto.EncryptedMessage {
@@ -116,5 +85,6 @@ func sealLogin(t *testing.T, request *nbproto.LoginRequest, serverPublicKey, pee
 
 	body, err := encryption.EncryptMessage(serverPublicKey, peerKey, request)
 	require.NoError(t, err)
+
 	return &nbproto.EncryptedMessage{WgPubKey: peerKey.PublicKey().String(), Body: body}
 }

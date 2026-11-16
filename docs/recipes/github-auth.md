@@ -31,7 +31,27 @@ The code can be exchanged any number of times, unlike GitHub's.
 | `ClientID(id)`, `ClientSecret(secret)` | The OAuth app's credentials. | `githubauth.DefaultClientID`, `DefaultClientSecret` |
 | `Code(code)` | The code the authorize endpoint gives. | `DefaultCode` |
 | `Token(token)`, `Scope(scope)` | The token issued, and the scope it says it has. | `DefaultToken`, `DefaultScope` |
-| `WithUser(githubauth.User{...})` | The profile of `GET /user`. | octocat |
+| `WithUser(githubauth.User{...})` | The profile of `GET /user`. | `githubauth.DefaultUser()`: octocat |
 | `Emails(githubauth.Email{...})` | The addresses of `GET /user/emails`. | The profile's email, primary and verified, or none |
 
 Mock the rest of the API the app calls, such as `GET /user/repos`, as any other mock: the recipe's 401 answers `/user` and `/user/emails` only.
+
+## From the vlatte command
+
+The `recipe.github_auth` section sets the options above, such as `--recipe-github-auth-token` for `Token`, and `--recipe-github-auth-user-login` for the login of `WithUser`; the other `user.*` keys keep the octocat profile.
+
+```sh
+vlatte --recipe-github-auth-token gho_test --recipe-github-auth-user-login alice
+```
+
+```yaml
+# .vlatterc.yaml
+recipe:
+  github_auth:
+    client_id: my-app
+    token: gho_test
+    emails:
+      - {email: ana@example.com, primary: true, verified: true, visibility: public}
+```
+
+In a flag or a variable, `emails` is JSON text: `--recipe-github-auth-emails '[{"email":"ana@example.com","primary":true,"verified":true,"visibility":"public"}]'`.

@@ -243,11 +243,15 @@ func TestRun_HelpListsTheCommandsSettings(t *testing.T) {
 	var out bytes.Buffer
 	require.Equal(t, 0, run(context.Background(), []string{"--help"}, nil, &out, io.Discard))
 
-	for _, key := range []string{"admin", "admin.addr", "admin.dir", "admin.docs_version", "grpc.admin", "grpc.admin.addr", "grpc.admin.dir", "kv.file", "webhook.timeout"} {
+	for _, key := range []string{
+		"admin", "admin.addr", "admin.dir", "admin.docs_version", "grpc.admin", "grpc.admin.addr", "grpc.admin.dir", "kv.file", "webhook.timeout",
+		"recipe.github_auth", "recipe.github_auth.emails", "recipe.oidc", "recipe.oidc.client_id", "recipe.oidc.paths.token",
+	} {
 		require.Equal(t, 1, strings.Count(out.String(), "file key "+key+"\n"), key)
 	}
 
 	require.Equal(t, 2, strings.Count(out.String(), "file key config\n"), "the HTTP and the gRPC settings name the file")
+	require.Contains(t, out.String(), "admin, journal, recipe.github_auth or recipe.oidc section turns the section on")
 }
 
 func TestRun_SubcommandHelp(t *testing.T) {
@@ -291,6 +295,10 @@ func TestRun_Completion(t *testing.T) {
 
 	all := complete("--")
 	for _, f := range mockhttp.ConfigFlags() {
+		require.True(t, all["--"+f.Name], "--%s is not offered", f.Name)
+	}
+
+	for _, f := range _recipeSchema().Flags() {
 		require.True(t, all["--"+f.Name], "--%s is not offered", f.Name)
 	}
 

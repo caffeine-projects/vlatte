@@ -49,4 +49,4 @@ A policy change can take a moment to reach the peers, so retry if a probe fails.
 make example:private-network-test
 ```
 
-NetBird's control plane encrypts every gRPC payload. In [login_test.go](management/login_test.go), a `mockgrpc.RequestParser` decrypts each `EncryptedMessage`, so `Field("setupKey", ...)` can match on the plain request. The mock encrypts its reply for the peer. The test also checks that a different setup key misses and that a tampered ciphertext gets `InvalidArgument`. Use the same pattern for any tool whose protocol wraps its messages. The test runs in memory, with no NetBird deployment.
+NetBird's control plane encrypts every gRPC payload. In [login_test.go](management/login_test.go), a `mockgrpc.RequestParser` ([login.go](management/login.go)) decrypts each `EncryptedMessage`, so `Field("setupKey", ...)` can match on the plain request. The mock encrypts its reply for the peer. The test also checks that a different setup key misses and that a tampered ciphertext gets `InvalidArgument`. Use the same pattern for any tool whose protocol wraps its messages. The test runs in memory, with no NetBird deployment.

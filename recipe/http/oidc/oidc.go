@@ -15,12 +15,16 @@ package oidc
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
@@ -38,7 +42,8 @@ const (
 // then used once exchanged.
 const Scenario = "oidc-code"
 
-// Paths are where the provider serves its endpoints, from its issuer URL. An empty one is its default.
+// Paths are where the provider's endpoints are, relative to its issuer URL when it announces them, and to [Mount] when
+// it serves them. An empty one is its default.
 type Paths struct {
 	Discovery string // default /.well-known/openid-configuration, which OpenID Connect Discovery fixes
 	Authorize string // default /authorize
@@ -80,6 +85,7 @@ type config struct {
 	ttl          time.Duration
 	claims       map[string]any
 	paths        Paths
+	mount        string // the path the endpoints are served under, from Mount; empty is the root
 }
 
 // ClientID sets the client ID of the app: the authorize and token endpoints answer only requests that send it, and
@@ -100,8 +106,10 @@ func KeyID(kid string) Option {
 	return func(c *config) { c.kid = kid }
 }
 
-// Issuer sets the issuer: the iss of ID tokens, and the base URL of the endpoints discovery announces. The default
-// is the URL of the server, so the recipe works on any port; set it when the app reaches the server by another name.
+// Issuer sets the issuer: the iss of ID tokens, and the base URL of the endpoints discovery announces. The default is
+// the URL of the server, with [Mount]'s path, so the recipe works on any port; set it when the app reaches the server
+// by another name. It is an absolute URL with no query or fragment, or [mockhttp.Server.Prep] fails. The endpoints
+// are served at the server's root, unless [Mount] serves them under a path.
 func Issuer(issuer string) Option {
 	return func(c *config) { c.issuer = issuer }
 }
@@ -125,7 +133,17 @@ func Claims(claims map[string]any) Option {
 	return func(c *config) { c.claims = maps.Clone(claims) }
 }
 
-// WithPaths sets where the endpoints are; the fields left empty keep their default.
+// Mount serves every endpoint under path, such as /realms/demo, as a provider that the app reaches directly at an
+// issuer with that path does. Without it, the endpoints are at the root of the server, where a proxy that strips
+// the issuer's path forwards them. Without [Issuer], the provider announces the server's URL with path as its
+// issuer. A path that holds a host, a query, a fragment or an invalid escape fails [mockhttp.Server.Prep].
+func Mount(path string) Option {
+	return func(c *config) { c.mount = path }
+}
+
+// WithPaths sets where the endpoints are; the fields left empty keep their default. A path without a leading / gets
+// one. An escaped path, such as /keys%20and%20tokens, is announced as written and matches the request that decodes to
+// it. A path that holds a host, a query, a fragment or an invalid escape fails [mockhttp.Server.Prep].
 func WithPaths(paths Paths) Option {
 	return func(c *config) { c.paths = paths }
 }
@@ -157,22 +175,67 @@ func New(opts ...Option) mockhttp.Recipe {
 		opt(c)
 	}
 
-	defaults := DefaultPaths()
-	c.paths = Paths{
-		Discovery: cmp.Or(c.paths.Discovery, defaults.Discovery),
-		Authorize: cmp.Or(c.paths.Authorize, defaults.Authorize),
-		Token:     cmp.Or(c.paths.Token, defaults.Token),
-		JWKS:      cmp.Or(c.paths.JWKS, defaults.JWKS),
-		UserInfo:  cmp.Or(c.paths.UserInfo, defaults.UserInfo),
-	}
-
 	return vlatte.RecipeFunc[*mockhttp.Mock, *mockhttp.Server](func(
 		_ context.Context,
 		in *vlatte.RecipeInput[*mockhttp.Mock, *mockhttp.Server],
 	) error {
-		_, err := in.Server.Mock(c.mocks()...)
+		// The endpoints are on the issuer without its trailing /.
+		base := strings.TrimRight(c.issuer, "/")
+
+		if c.issuer != "" && !httpx.IsBaseURL(c.issuer) {
+			return fmt.Errorf("oidc: expected the issuer to be an absolute URL with no query or fragment, such as "+
+				"https://id.example, not %q", c.issuer)
+		}
+
+		// The mount is a path without its trailing /: an empty one, or /, is the root.
+		mount, _, ok := httpx.URLPath(c.mount)
+		if !ok {
+			return fmt.Errorf("oidc: expected the mount to be a URL path, such as /realms/demo, not %q", c.mount)
+		}
+
+		// The escaped mount is made from the trimmed one, so an escaped trailing / goes too.
+		mount = strings.TrimRight(mount, "/")
+		mountEscaped := (&url.URL{Path: mount}).EscapedPath()
+
+		served, announced, err := splitPaths(mount, c.paths)
+		if err != nil {
+			return err
+		}
+
+		_, err = in.Server.Mock(c.mocks(base, mountEscaped, served, announced)...)
+
 		return err
 	})
+}
+
+// splitPaths returns where the endpoints of paths are served, under mount and decoded, as requests match them,
+// and how discovery announces them, escaped. A path that is no URL path is an error that names it.
+func splitPaths(mount string, paths Paths) (served, announced Paths, err error) {
+	defaults := DefaultPaths()
+
+	for _, p := range []struct {
+		name    string
+		value   string
+		def     string
+		served  *string
+		escaped *string
+	}{
+		{"discovery", cmp.Or(paths.Discovery, defaults.Discovery), defaults.Discovery, &served.Discovery, &announced.Discovery},
+		{"authorize", cmp.Or(paths.Authorize, defaults.Authorize), defaults.Authorize, &served.Authorize, &announced.Authorize},
+		{"token", cmp.Or(paths.Token, defaults.Token), defaults.Token, &served.Token, &announced.Token},
+		{"jwks", cmp.Or(paths.JWKS, defaults.JWKS), defaults.JWKS, &served.JWKS, &announced.JWKS},
+		{"userinfo", cmp.Or(paths.UserInfo, defaults.UserInfo), defaults.UserInfo, &served.UserInfo, &announced.UserInfo},
+	} {
+		path, escaped, ok := httpx.URLPath(p.value)
+		if !ok {
+			return Paths{}, Paths{}, fmt.Errorf("oidc: expected the %s path to be a URL path, such as %s, not %q",
+				p.name, p.def, p.value)
+		}
+
+		*p.served, *p.escaped = mount+path, escaped
+	}
+
+	return served, announced, nil
 }
 
 // _code sets $code: the code of an authorize request. It is made from the request alone, as a scenario key must be,
@@ -181,17 +244,23 @@ func New(opts ...Option) mockhttp.Recipe {
 const _code = `{{ $code := printf "{\"id\":%s,\"nonce\":%s}" (toJSON .Request.ID) ` +
 	`(toJSON (.Request.URL.Query.Get "nonce")) | base64Encode }}`
 
-// _authorizeKey is the key of the scenario instance of an authorize request: its code_challenge, empty without one,
-// its code and its redirect_uri.
-const _authorizeKey = _code + `{{ .Request.URL.Query.Get "code_challenge" }}:{{ $code }}:` +
-	`{{ .Request.URL.Query.Get "redirect_uri" }}`
+// authorizeKey is the key of the scenario instance of an authorize request: id, which tells the recipe's codes from
+// another's, its code_challenge, empty without one, its code and its redirect_uri. id is a literal: a key renders
+// without the mock's template data.
+func authorizeKey(id string) string {
+	return "{{ " + strconv.Quote(id) + " }}:" + _code +
+		`{{ .Request.URL.Query.Get "code_challenge" }}:{{ $code }}:{{ .Request.URL.Query.Get "redirect_uri" }}`
+}
 
-// _tokenKey is the key of the scenario instance of a token request: the S256 of its code_verifier, empty without one,
-// its code and its redirect_uri. It is the key of the authorize request that issued the code only when the verifier
-// fits the challenge and the redirect_uri is the same (RFC 6749 §4.1.3), so PKCE, the redirect_uri and single use are
-// one check.
-const _tokenKey = `{{ with .Request.PostForm.Get "code_verifier" }}{{ hash "sha256" "base64url" . }}{{ end }}:` +
-	`{{ .Request.PostForm.Get "code" }}:{{ .Request.PostForm.Get "redirect_uri" }}`
+// tokenKey is the key of the scenario instance of a token request: id, the S256 of its code_verifier, empty without
+// one, its code and its redirect_uri. It is the key of the authorize request that issued the code only when the
+// recipe is the same, the verifier fits the challenge and the redirect_uri is the same (RFC 6749 §4.1.3), so PKCE, the
+// redirect_uri and single use are one check.
+func tokenKey(id string) string {
+	return "{{ " + strconv.Quote(id) + " }}:" +
+		`{{ with .Request.PostForm.Get "code_verifier" }}{{ hash "sha256" "base64url" . }}{{ end }}:` +
+		`{{ .Request.PostForm.Get "code" }}:{{ .Request.PostForm.Get "redirect_uri" }}`
+}
 
 // _redirect is the Location of the authorize endpoint's answer: redirect_uri with the code and the request's state.
 const _redirect = _code + `{{ $u := .Request.URL.Query.Get "redirect_uri" }}{{ $u }}` +
@@ -207,11 +276,11 @@ const _refusal = `{{ $u := .Request.URL.Query.Get "redirect_uri" }}{{ $u }}` +
 
 // discovery is the body of the discovery endpoint, which reads the algorithm of the signing key kid from its JWK.
 func discovery(kid string) string {
-	return `{{ $iss := or .Extra.issuer .Server.URL }}{"issuer": {{ toJSON $iss }},
-"authorization_endpoint": {{ print $iss .Extra.paths.authorize | toJSON }},
-"token_endpoint": {{ print $iss .Extra.paths.token | toJSON }},
-"jwks_uri": {{ print $iss .Extra.paths.jwks | toJSON }},
-"userinfo_endpoint": {{ print $iss .Extra.paths.userinfo | toJSON }},
+	return `{{ $iss := or .Extra.issuer (print .Server.URL .Extra.mount) }}{{ $base := or .Extra.base (print .Server.URL .Extra.mount) }}{"issuer": {{ toJSON $iss }},
+"authorization_endpoint": {{ print $base .Extra.paths.authorize | toJSON }},
+"token_endpoint": {{ print $base .Extra.paths.token | toJSON }},
+"jwks_uri": {{ print $base .Extra.paths.jwks | toJSON }},
+"userinfo_endpoint": {{ print $base .Extra.paths.userinfo | toJSON }},
 "response_types_supported": ["code"],
 "grant_types_supported": ["authorization_code"],
 "subject_types_supported": ["public"],
@@ -222,8 +291,8 @@ func discovery(kid string) string {
 }
 
 // authorize starts a mock of the authorize requests of a sign-in with the client of c.
-func authorize(c *config) *mockhttp.Builder {
-	return endpoint(http.MethodGet, c.paths.Authorize).
+func authorize(c *config, path string) *mockhttp.Builder {
+	return endpoint(http.MethodGet, path).
 		Query("response_type", match.StrictEqual("code")).
 		Query("client_id", match.StrictEqual(c.clientID)).
 		Query("redirect_uri", match.Present()).
@@ -235,19 +304,28 @@ func endpoint(method, path string) *mockhttp.Builder {
 	return mockhttp.Request().Method(method).URLPath(match.StrictEqual(path))
 }
 
-func (c *config) mocks() []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
+// mocks returns the mocks of the provider. Discovery announces the endpoints at announced, escaped, after base, the
+// issuer without its trailing /; with no issuer, after the server's URL and mount, the escaped mount. The server
+// serves them at served, which already holds the decoded mount.
+func (c *config) mocks(base, mount string, served, announced Paths) []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
+	// The recipe's codes are its own: those of its authorize endpoint, issuer and client. Each part is quoted, so the
+	// parts can't run into each other.
+	id := strconv.Quote(served.Authorize) + strconv.Quote(c.issuer) + strconv.Quote(c.clientID)
+
 	data := map[string]any{
 		"issuer":       c.issuer,
+		"base":         base,
+		"mount":        mount,
 		"client_id":    c.clientID,
 		"access_token": c.accessToken,
 		"ttl":          c.ttl.String(),
 		"expires_in":   int64(c.ttl / time.Second),
 		"claims":       c.claims,
 		"paths": map[string]string{
-			"authorize": c.paths.Authorize,
-			"token":     c.paths.Token,
-			"jwks":      c.paths.JWKS,
-			"userinfo":  c.paths.UserInfo,
+			"authorize": announced.Authorize,
+			"token":     announced.Token,
+			"jwks":      announced.JWKS,
+			"userinfo":  announced.UserInfo,
 		},
 	}
 
@@ -256,53 +334,53 @@ func (c *config) mocks() []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
 		`{{ $nonce := "null" }}{{ with $code.nonce }}{{ $nonce = toJSON . }}{{ end }}` +
 		`{{ $now := now }}` +
 		`{{ $claims := mergePatch (printf "{\"iss\":%s,\"aud\":%s,\"iat\":%s,\"exp\":%s,\"nonce\":%s}" ` +
-		`(toJSON (or .Extra.issuer .Server.URL)) (toJSON .Extra.client_id) ($now | formatTime "unix") ` +
+		`(toJSON (or .Extra.issuer (print .Server.URL .Extra.mount))) (toJSON .Extra.client_id) ($now | formatTime "unix") ` +
 		`($now | timeAdd .Extra.ttl | formatTime "unix") $nonce) .Extra.claims }}` +
 		`{"access_token": {{ toJSON .Extra.access_token }}, "token_type": "Bearer", ` +
 		`"expires_in": {{ .Extra.expires_in }}, "scope": "openid", ` +
 		`"id_token": "{{ jwt ` + strconv.Quote(c.kid) + ` $claims }}"}`
 
 	return []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server]{
-		endpoint(http.MethodGet, c.paths.Discovery).
+		endpoint(http.MethodGet, served.Discovery).
 			Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).BodyTemplate(discovery(c.kid)).SetTemplateData(data)),
 
-		endpoint(http.MethodGet, c.paths.JWKS).
+		endpoint(http.MethodGet, served.JWKS).
 			Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).BodyTemplate(`{{ jwks ` + strconv.Quote(c.kid) + ` }}`)),
 
-		authorize(c).
+		authorize(c, served.Authorize).
 			StartScenario(Scenario).
-			ScenarioKey(_authorizeKey).
+			ScenarioKey(authorizeKey(id)).
 			ScenarioStateWillBe("issued").
 			Reply(mockhttp.Status(http.StatusFound).HeaderTemplate(mockhttp.HeaderLocation, _redirect)),
 		// A challenge without a method is plain (RFC 7636 §4.3).
-		authorize(c).
+		authorize(c, served.Authorize).
 			Query("code_challenge", match.Present()).
 			Query("code_challenge_method", match.Not(match.StrictEqual("S256"))).
 			Priority(-1).
 			Reply(mockhttp.Status(http.StatusFound).HeaderTemplate(mockhttp.HeaderLocation, _refusal)),
 
-		endpoint(http.MethodPost, c.paths.Token).
+		endpoint(http.MethodPost, served.Token).
 			FormField("grant_type", match.StrictEqual("authorization_code")).
 			FormField("client_id", match.StrictEqual(c.clientID)).
 			FormField("client_secret", match.StrictEqual(c.clientSecret)).
 			FormField("redirect_uri", match.Present()).
 			ScenarioIs(Scenario).
-			ScenarioKey(_tokenKey).
+			ScenarioKey(tokenKey(id)).
 			ScenarioStateIs("issued").
 			ScenarioStateWillBe("used").
 			Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).Header(mockhttp.HeaderCacheControl, "no-store").
 				BodyTemplate(token).SetTemplateData(data)),
-		endpoint(http.MethodPost, c.paths.Token).
+		endpoint(http.MethodPost, served.Token).
 			Priority(1).
 			Reply(mockhttp.BadRequest().JSON(map[string]string{
 				"error":             "invalid_grant",
 				"error_description": "the code is unknown, used, or doesn't fit the code_verifier",
 			})),
 
-		endpoint(http.MethodGet, c.paths.UserInfo).
+		endpoint(http.MethodGet, served.UserInfo).
 			Header(mockhttp.HeaderAuthorization, match.StrictEqual("Bearer "+c.accessToken)).
 			Reply(mockhttp.OK().JSON(c.claims)),
-		endpoint(http.MethodGet, c.paths.UserInfo).
+		endpoint(http.MethodGet, served.UserInfo).
 			Priority(1).
 			Reply(mockhttp.Unauthorized().Header(mockhttp.HeaderWWWAuthenticate, `Bearer error="invalid_token"`)),
 	}

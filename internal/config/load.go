@@ -33,10 +33,9 @@ func (s *Schema[T]) Load(dst *T, sources []Source) (map[string]Value, error) {
 	return s.load(&s.catalog, dst, sources)
 }
 
-// LoadOnly is like Load, but reads only the settings of the schema from sources that hold others too, such as those
-// of another schema: an unknown key, environment variable or flag is no problem, and is skipped. A flag it doesn't
-// know is skipped with the argument that follows it, unless that argument is a flag: an unknown flag takes its value
-// after =, or as the next argument.
+// LoadOnly is like Load, but reads only the settings of the schema from files and environment variables that hold
+// others too, such as those of another schema: an unknown key or environment variable is no problem, and is skipped.
+// Its args must be its own: an unknown flag is a problem, as in Load.
 func (s *Schema[T]) LoadOnly(dst *T, sources []Source) (map[string]Value, error) {
 	only := s.catalog
 	only.loadOnly = true

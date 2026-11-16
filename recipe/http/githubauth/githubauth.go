@@ -94,7 +94,20 @@ func Scope(scope string) Option {
 	return func(c *config) { c.scope = scope }
 }
 
-// WithUser sets the profile GET /user answers. The default is the user octocat. It is not named User, the type of
+// DefaultUser returns the profile GET /user answers without [WithUser]: the user octocat.
+func DefaultUser() User {
+	return User{
+		ID:        1,
+		Login:     "octocat",
+		Name:      "The Octocat",
+		Email:     "octocat@github.com",
+		AvatarURL: "https://github.com/images/error/octocat_happy.gif",
+		HTMLURL:   "https://github.com/octocat",
+		Type:      "User",
+	}
+}
+
+// WithUser sets the profile GET /user answers. The default is [DefaultUser]. It is not named User, the type of
 // the profile.
 func WithUser(user User) Option {
 	return func(c *config) { c.user = user }
@@ -124,15 +137,7 @@ func New(opts ...Option) mockhttp.Recipe {
 		code:         DefaultCode,
 		token:        DefaultToken,
 		scope:        DefaultScope,
-		user: User{
-			ID:        1,
-			Login:     "octocat",
-			Name:      "The Octocat",
-			Email:     "octocat@github.com",
-			AvatarURL: "https://github.com/images/error/octocat_happy.gif",
-			HTMLURL:   "https://github.com/octocat",
-			Type:      "User",
-		},
+		user:         DefaultUser(),
 	}
 	for _, opt := range opts {
 		opt(c)

@@ -9,7 +9,8 @@
 // Without --addr, it listens on a random port and prints the URL. Settings can also come from a .vlatterc file or
 // VLATTE_* environment variables: run 'vlatte --help' to list them. It can proxy and record a service, and serves the
 // recordings on the next run. When a setting of the grpc section is set, such as --grpc-descriptors, it serves gRPC
-// mocks too.
+// mocks too. The recipe.github_auth and recipe.oidc sections, such as --recipe-oidc, add the mocks of a built-in
+// recipe.
 //
 // The commands are:
 //
