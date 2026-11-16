@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 	"sync"
 
@@ -126,8 +127,10 @@ func readFlag(args []string, i int, takesValue map[string]bool) (flagArg, bool) 
 // starts with grpc, to the recipes when it starts with recipe, and to the HTTP server otherwise, which reports it.
 //
 // A flag that takes a value, without =, takes the next argument as its value, whatever it looks like, -- included:
-// each owner gets it as -flag=value, in the spelling the flag had. The config file, --config or -c, goes to all of
-// them. The flags end at --: it and what follows go to the HTTP server, which rejects them as unexpected arguments.
+// each owner gets it as -flag=value, in the spelling the flag had. A bool flag without = keeps a bool that follows
+// it, as in --cors false, beside it, for its owners to reject with a hint. The config file, --config or -c, goes to
+// all of them. The flags end at --: it and what follows go to the HTTP server, which rejects them as unexpected
+// arguments.
 func splitArgs(args []string) commandArgs {
 	owners, takesValue := _flagTable()
 
@@ -172,6 +175,15 @@ func splitArgs(args []string) commandArgs {
 			send(_toGRPC|_toRecipe, long)
 		case owners[f.name] != 0:
 			send(owners[f.name], f.arg)
+
+			// "--cors false" leaves "false" behind: its owners report it, with a hint, rather than another's parser,
+			// whose flags it would end.
+			if !takesValue[f.name] && !f.hasValue && i+1 < len(args) {
+				if _, err := strconv.ParseBool(args[i+1]); err == nil {
+					i++
+					send(owners[f.name], args[i])
+				}
+			}
 		case strings.HasPrefix(f.name, "grpc"):
 			send(_toGRPC, f.arg)
 		case strings.HasPrefix(f.name, "recipe"):
