@@ -433,6 +433,16 @@ func TestConfigSources_Defaults(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "http", m.Config().Name, "the file's own settings still apply")
 	})
+
+	t.Run("the recipe section is the vlatte command's", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		require.NoError(t, os.WriteFile(".vlatterc.yaml", []byte("name: http\nrecipe: {oidc: {client_id: app}}\n"), 0o600))
+		t.Setenv("VLATTE_RECIPE_OIDC_CLIENT_ID", "app")
+
+		m, err := New()
+		require.NoError(t, err)
+		require.Equal(t, "http", m.Config().Name)
+	})
 }
 
 func TestConfigSources_FileFormatsAgree(t *testing.T) {

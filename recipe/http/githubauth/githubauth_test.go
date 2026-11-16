@@ -313,3 +313,14 @@ func TestEmails_AreNoneForAUserWithoutAnEmail(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 	require.JSONEq(t, `[]`, body)
 }
+
+func TestDefaultUser_IsTheProfileWithoutWithUser(t *testing.T) {
+	m := newServer(t)
+
+	status, body := get(t, m, githubauth.UserPath, "Bearer "+githubauth.DefaultToken)
+	require.Equal(t, http.StatusOK, status)
+
+	var user githubauth.User
+	require.NoError(t, json.Unmarshal([]byte(body), &user))
+	require.Equal(t, githubauth.DefaultUser(), user)
+}

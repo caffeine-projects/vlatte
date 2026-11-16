@@ -24,14 +24,15 @@ const (
 	_grpcAdminDir = mockhttp.WorkDirVar + "/_grpc_admin"
 )
 
-// splitArgs splits the command's arguments between its servers: the flags of gRPC settings, --grpc-*, go to the gRPC
-// server, with their values, and the others to the HTTP server. The config file, --config or -c, goes to both: the
-// gRPC server reads the grpc section of the file the HTTP server reads. The flags end at --, as the HTTP server's
-// parser reads them: -- and what follows go to the HTTP server, which rejects them as unexpected arguments.
-func splitArgs(args []string) (httpArgs, grpcArgs []string) {
+// splitArgs splits the command's arguments between its servers and its recipes: the flags of gRPC settings, --grpc-*,
+// go to the gRPC server, the flags of recipe settings, --recipe-*, to the command's recipes, each with their values,
+// and the others to the HTTP server. The config file, --config or -c, goes to all three: the gRPC server and the
+// recipes read their sections of the file the HTTP server reads. The flags end at --, as the HTTP server's parser
+// reads them: -- and what follows go to the HTTP server, which rejects them as unexpected arguments.
+func splitArgs(args []string) (httpArgs, grpcArgs, recipeArgs []string) {
 	// The command reads some gRPC settings itself, such as grpc.admin: the gRPC server accepts them too.
 	takesValue := make(map[string]bool)
-	for _, f := range slices.Concat(mockgrpc.ConfigFlags(), settingsSchema().Flags()) {
+	for _, f := range slices.Concat(mockgrpc.ConfigFlags(), settingsSchema().Flags(), _recipeSchema().Flags()) {
 		takesValue[f.Name] = !f.Bool
 	}
 
@@ -49,6 +50,17 @@ func splitArgs(args []string) (httpArgs, grpcArgs []string) {
 			continue
 		}
 
+		// take appends the flag to dst, with its value when that is the next argument.
+		take := func(dst []string) []string {
+			dst = append(dst, arg)
+			if takesValue[name] && !hasValue && i+1 < len(args) {
+				i++
+				dst = append(dst, args[i])
+			}
+
+			return dst
+		}
+
 		switch {
 		case name == "c" || name == "config":
 			httpArgs = append(httpArgs, arg)
@@ -60,19 +72,17 @@ func splitArgs(args []string) (httpArgs, grpcArgs []string) {
 			}
 
 			grpcArgs = append(grpcArgs, "--config="+value)
+			recipeArgs = append(recipeArgs, "--config="+value)
 		case strings.HasPrefix(name, "grpc"):
-			grpcArgs = append(grpcArgs, arg)
-
-			if takesValue[name] && !hasValue && i+1 < len(args) {
-				i++
-				grpcArgs = append(grpcArgs, args[i])
-			}
+			grpcArgs = take(grpcArgs)
+		case strings.HasPrefix(name, "recipe"):
+			recipeArgs = take(recipeArgs)
 		default:
 			httpArgs = append(httpArgs, arg)
 		}
 	}
 
-	return httpArgs, grpcArgs
+	return httpArgs, grpcArgs, recipeArgs
 }
 
 // newGRPC returns the command's gRPC server, as args and the shared sources set it, with the command's settings s,

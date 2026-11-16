@@ -203,10 +203,20 @@ func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, 
 		return nil, nil, nil, failure(cmd, err, out, stderr)
 	}
 
-	httpArgs, grpcArgs := splitArgs(args)
+	httpArgs, grpcArgs, recipeArgs := splitArgs(args)
+
+	rs, err := loadRecipes(recipeArgs)
+	if err != nil {
+		return nil, nil, nil, failure(cmd, err, out, stderr)
+	}
 
 	m, api, err := newHTTP(httpArgs, s, wh, kv, logOutput)
 	if err != nil {
+		return nil, nil, nil, failure(cmd, err, out, stderr)
+	}
+
+	if err = rs.prep(cmd.Context(), m); err != nil {
+		m.Close()
 		return nil, nil, nil, failure(cmd, err, out, stderr)
 	}
 
@@ -298,8 +308,8 @@ Examples:
 %s
 Settings apply in this order, each overriding the ones before: defaults, the %s.{json,yaml,yml} file
 in %s, %s_* environment variables, then flags. Setting a key of the cors, proxy, proxy_all, record,
-admin or journal section turns the section on. The server keeps its own files in its work directory, %s,
-or %s/<name> for a server --name names: --workdir sets another.
+admin, journal, recipe.github_auth or recipe.oidc section turns the section on. The server keeps its own
+files in its work directory, %s, or %s/<name> for a server --name names: --workdir sets another.
 The admin API is on, on a random local port: --admin=false turns it off.
 It serves AI agents over MCP too, at POST /mcp, and 'vlatte mcp' on stdin and stdout: --mcp=false turns it off.
 It keeps the mocks it adds in %s, across restarts: --admin-dir="" keeps them in memory.
@@ -318,7 +328,7 @@ gRPC settings:
 		root.Long, root.Use, root.Use, commands.String(), root.Example,
 		mockhttp.DefaultConfigFileName, strings.Join(mockhttp.DefaultConfigDirectories, " or "), mockhttp.EnvPrefix,
 		mockhttp.DefaultWorkDir, mockhttp.DefaultWorkDir, _adminDir, _journalDir, _grpcAddr, _grpcAdminDir,
-		settingsSchema().Usage(mockhttp.EnvPrefix)+mockhttp.ConfigUsage(), mockgrpc.ConfigUsage())
+		settingsSchema().Usage(mockhttp.EnvPrefix)+_recipeSchema().Usage(mockhttp.EnvPrefix)+mockhttp.ConfigUsage(), mockgrpc.ConfigUsage())
 }
 
 // registerCompletions declares the server flags to cobra, which completes their names.
@@ -328,7 +338,7 @@ func registerCompletions(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	values := make(map[string][]string)
 
-	for _, f := range slices.Concat(settingsSchema().Flags(), mockhttp.ConfigFlags(), mockgrpc.ConfigFlags()) {
+	for _, f := range slices.Concat(settingsSchema().Flags(), _recipeSchema().Flags(), mockhttp.ConfigFlags(), mockgrpc.ConfigFlags()) {
 		// The config file is a setting of both servers.
 		if flags.Lookup(f.Name) != nil {
 			continue

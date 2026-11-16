@@ -40,3 +40,28 @@ Each code is exchanged once, and PKCE takes S256 only. Every mock is a template,
 | `WithPaths(oidc.Paths{...})` | Where the endpoints are, such as Google's `/o/oauth2/v2/auth`. | `oidc.DefaultPaths()` |
 
 It covers the authorization code flow only: not the implicit or hybrid flows, refresh tokens, nor `client_secret_basic`.
+
+## From the vlatte command
+
+The `recipe.oidc` section sets the options above, and `recipe.oidc.paths.*` sets `WithPaths`. The key still comes from `template.keys`: `recipe.oidc` without it fails at startup, and the error says to set it.
+
+```sh
+vlatte --template-keys vlatte=RS256 --recipe-oidc --recipe-oidc-client-id my-app
+```
+
+```yaml
+# .vlatterc.yaml
+template:
+  keys: [vlatte=RS256]
+recipe:
+  oidc:
+    client_id: my-app
+    token_ttl: 5m
+    claims:
+      sub: ana
+      email: ana@example.com
+    paths:
+      token: /oauth/token
+```
+
+In a flag or a variable, `claims` is JSON text: `--recipe-oidc-claims '{"sub":"ana"}'`.
