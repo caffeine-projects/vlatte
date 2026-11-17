@@ -5,8 +5,8 @@
 <h1 align="center">VLatte</h1>
 
 <p align="center">
-  Mock HTTP and gRPC servers for Go tests,<br>
-  and a CLI that serves them from files.
+  Fast and Lightweight API Mocking Framework.</br>
+  Brewed in Go.
 </p>
 
 <p align="center">
@@ -17,7 +17,6 @@
 <p align="center">
   <a href="https://github.com/caffeine-projects/vlatte/releases"><img src="https://img.shields.io/github/v/release/caffeine-projects/vlatte?include_prereleases&sort=semver" alt="Release"></a>
   <a href="https://pkg.go.dev/github.com/caffeine-projects/vlatte"><img src="https://pkg.go.dev/badge/github.com/caffeine-projects/vlatte.svg" alt="Go Reference"></a>
-  <br>
   <br>
 </p>
 
