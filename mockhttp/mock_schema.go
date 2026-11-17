@@ -1814,7 +1814,7 @@ func (r *mcpResultDef) build() *MCPResult {
 	}
 
 	if r.templated {
-		result.Template().TemplateData(r.data)
+		result.Template().SetTemplateData(r.data)
 	}
 
 	return result

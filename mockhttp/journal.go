@@ -255,36 +255,61 @@ func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (verify.Patt
 	p := &requestPattern{app: app, evals: slices.Concat(builder.spec.expectations, params)}
 
 	// A pattern that reads the body can't tell whether a body the journal cut matched: the rest of the pattern runs
-	// first, as a miss there is a miss.
+	// first, as a miss there is a miss. The endpoint part of an MCP pattern reads the body of a POST to its path only:
+	// in the rest, its path check keeps its place, and the part goes last, as it can't tell a cut tool call either way.
+	var endpoint *expectation
+
 	for _, e := range p.evals {
-		if !readsBody(matchingScope(e.Target)) {
+		switch scope := matchingScope(e.Target); {
+		case scope == matchingScopeMCPEndpoint:
+			p.rest = append(p.rest, mcpPathPart(builder.spec.mcp.endpoint))
+			endpoint = e
+		case readsBody(scope):
+			p.readsBody = true
+		default:
 			p.rest = append(p.rest, e)
 		}
+	}
+
+	if endpoint != nil {
+		p.rest = append(p.rest, endpoint)
 	}
 
 	return p, nil
 }
 
-// requestPattern is the pattern of the request part of a mock: evals, and rest, those of them that read no body.
+// requestPattern is the pattern of the request part of a mock: evals, and rest, what runs in their place on an entry
+// whose body was cut: the parts that read no body, and the path check of an MCP endpoint part where that part was.
 type requestPattern struct {
-	app   *Server
-	evals vlatte.Evaluators[*Mock, *selectorInput]
-	rest  vlatte.Evaluators[*Mock, *selectorInput]
+	app       *Server
+	evals     vlatte.Evaluators[*Mock, *selectorInput]
+	rest      vlatte.Evaluators[*Mock, *selectorInput]
+	readsBody bool // a part of evals reads the body, which rest leaves out
 }
 
 // Match tells whether the pattern matches the request of e, as it came.
 func (p *requestPattern) Match(ctx context.Context, e *journal.Entry) (bool, error) {
-	if !e.BodyTruncated || len(p.rest) == len(p.evals) {
-		return p.app.matchEntry(ctx, e, p.evals)
+	evals := p.evals
+	if e.BodyTruncated {
+		evals = p.rest
 	}
 
-	ok, err := p.app.matchEntry(ctx, e, p.rest)
-	if err != nil || !ok {
-		return false, err
+	// The parts that read the body are left out of a cut one: the rest matching it can't tell either way.
+	cut := e.BodyTruncated && p.readsBody
+
+	ok, err := p.app.matchEntry(ctx, e, evals)
+
+	// A part that reads the body of some requests only, such as the endpoint part of an MCP pattern, tells by itself.
+	if errors.Is(err, journal.ErrBodyCut) || cut && ok {
+		return false, errPatternBodyCut(e)
 	}
 
-	return false, fmt.Errorf("http: %w: entry %d: %w, which the pattern reads", vlatte.ErrMatching, e.Seq,
-		journal.ErrBodyCut)
+	return ok, err
+}
+
+// errPatternBodyCut is why a pattern can't tell whether the request of e matched: it reads the body the journal cut.
+func errPatternBodyCut(e *journal.Entry) error {
+	return fmt.Errorf("http: %w: entry %d: %w, which the pattern reads", vlatte.ErrMatching, e.Seq, journal.ErrBodyCut)
 }
 
 // Explain tells which parts of the pattern the request of e passes, by the names a near miss gives them, such as
@@ -309,9 +334,14 @@ func (p *requestPattern) Explain(ctx context.Context, e *journal.Entry) (verify.
 			continue
 		}
 
+		ok, err := eval.Match(ctx, nil, in)
+		if errors.Is(err, journal.ErrBodyCut) {
+			continue
+		}
+
 		miss.Total++
 
-		if ok, err := eval.Match(ctx, nil, in); err == nil && ok {
+		if err == nil && ok {
 			miss.Passed++
 		} else {
 			miss.Failed = append(miss.Failed, describeExpectation(eval))
@@ -390,7 +420,10 @@ func (app *Server) entryInput(ctx context.Context, e *journal.Entry) (*selectorI
 		}
 	}
 
-	return newSelectorInput(req, rv, false), done, nil
+	in := newSelectorInput(req, rv, false)
+	in.bodyTruncated = e.BodyTruncated
+
+	return in, done, nil
 }
 
 // entryRequest rebuilds the request of e, with its target's URL: the server reads the scheme and host of a request to

@@ -297,6 +297,28 @@ func TestRequestPattern_ExplainsAnotherProtocolAndOmitsACutBody(t *testing.T) {
 	require.Equal(t, verify.Miss{Passed: 2, Total: 2}, miss)
 }
 
+func TestRequestPattern_ExplainOmitsTheMCPEndpointPartOfACutPost(t *testing.T) {
+	// The endpoint part tells a tool call apart by the body: on a POST the journal cut it is neither passed nor failed.
+	m := MustNew(Setup().Silent())
+	pattern, err := m.RequestPattern(MCP("/mcp").MCPServerInfo("s", "1"))
+	require.NoError(t, err)
+
+	entry := &journal.Entry{
+		Kind: Kind, Method: http.MethodPost, Path: "/mcp", Target: "http://example.org/mcp",
+		Body: []byte(`{"jsonrpc":"2.0","id":1,"method":"ping"}`),
+	}
+
+	miss, err := pattern.Explain(t.Context(), entry)
+	require.NoError(t, err)
+	require.Equal(t, verify.Miss{Passed: 1, Total: 1}, miss)
+
+	entry.Body, entry.BodyTruncated = []byte(`{"jsonrpc":"2.0","id":1,"me`), true
+
+	miss, err = pattern.Explain(t.Context(), entry)
+	require.NoError(t, err)
+	require.Equal(t, verify.Miss{}, miss)
+}
+
 func TestJournal_APatternMatchesItsPathParams(t *testing.T) {
 	// A pattern's path params are matchers a mock gets when it builds: a pattern took the builder's other matchers
 	// only, so a pattern of /users/{id} with id 7 counted /users/8 too.
@@ -1122,6 +1144,135 @@ func TestRequestPattern_MCPEndpointPatternSkipsCutRESTEntry(t *testing.T) {
 	require.Equal(t, http.StatusCreated, res.StatusCode)
 
 	mcpPost(t, m.URL("/mcp"), `{"jsonrpc":"2.0","id":1,"method":"ping"}`)
+
+	n, err := m.VerifyRequests().Matching(MCP("/mcp").MCPServerInfo("s", "1")).Count(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+}
+
+// cutJournalMCP starts an MCP server whose journal keeps 40 bytes of each body, while the server reads them whole.
+func cutJournalMCP(t *testing.T, mocks ...vlatte.Builder[*Mock, *Server]) *Server {
+	t.Helper()
+
+	m := journaledServer(t, Setup().ConfigSources(ConfigArgs([]string{"--journal-max-body-size", "40"})))
+	m.MustMock(MCP("/mcp").MCPServerInfo("s", "1"), MCP("/mcp").MCPTool("t", "").Reply(MCPText("tool reply")))
+	m.MustMock(mocks...)
+
+	return m
+}
+
+func TestRequestPattern_MCPEndpointPatternOnCutToolCallIsBodyCut(t *testing.T) {
+	// The endpoint mock tells a tool call apart by its body: a tool call the journal cut can't be counted, either way.
+	m := cutJournalMCP(t)
+
+	_, body := mcpPost(t, m.URL("/mcp"), toolCall("t", `{}`))
+	require.Equal(t, `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"tool reply"}]}}`, body)
+
+	n, err := m.VerifyRequests().Matching(MCP("/mcp").MCPServerInfo("s", "1")).Count(t.Context())
+	require.ErrorIs(t, err, journal.ErrBodyCut)
+	require.ErrorIs(t, err, vlatte.ErrMatching)
+	require.EqualError(t, err, "http: mock: matching: entry 1: journal: the journal kept part of the body, which the pattern reads")
+	require.Zero(t, n)
+}
+
+func TestRequestPattern_MCPEndpointPatternWithABodyPartOnCutToolCallIsBodyCut(t *testing.T) {
+	// With a part of its own that reads the body, the pattern fails on the cut tool call as one without does.
+	m := cutJournalMCP(t)
+
+	mcpPost(t, m.URL("/mcp"), toolCall("t", `{}`))
+
+	n, err := m.VerifyRequests().Matching(MCP("/mcp").MCPServerInfo("s", "1").Body(match.Contain("t"))).
+		Count(t.Context())
+	require.EqualError(t, err, "http: mock: matching: entry 1: journal: the journal kept part of the body, which the pattern reads")
+	require.Zero(t, n)
+}
+
+func TestRequestPattern_MCPEndpointPatternWhoseOtherPartMissesACutToolCallMisses(t *testing.T) {
+	// A part that misses makes the cut tool call a miss, whatever the endpoint part could tell: one large tool call in
+	// the journal doesn't fail every check of the endpoint's path.
+	m := cutJournalMCP(t)
+
+	mcpPost(t, m.URL("/mcp"), toolCall("t", `{}`))
+
+	n, err := m.VerifyRequests().Matching(MCP("/mcp").MCPServerInfo("s", "1").Header("X-Key", match.Equal("k"))).
+		Count(t.Context())
+	require.NoError(t, err)
+	require.Zero(t, n)
+}
+
+func TestRequestPattern_MCPEndpointPatternOnAToolCallTheServerCutIsBodyCut(t *testing.T) {
+	// A body the server read only part of is cut too: the endpoint mock answered the tool call as none, but the pattern
+	// can't tell what the call was.
+	m := journaledServer(t, Setup().MaxBodyParsingLimit(64))
+	m.MustMock(MCP("/mcp").MCPServerInfo("s", "1"), MCP("/mcp").MCPTool("t", "").Reply(MCPText("t")))
+
+	res, _ := mcpPost(t, m.URL("/mcp"), toolCall("t", `{"q":"`+strings.Repeat("a", 200)+`"}`))
+	require.Equal(t, http.StatusBadRequest, res.StatusCode)
+
+	n, err := m.VerifyRequests().Matching(MCP("/mcp").MCPServerInfo("s", "1")).Count(t.Context())
+	require.EqualError(t, err, "http: mock: matching: entry 1: journal: the journal kept part of the body, which the pattern reads")
+	require.Zero(t, n)
+}
+
+func TestRequestPattern_MCPEndpointPatternChecksItsPathFirstOnAWholeEntry(t *testing.T) {
+	// A pattern matches an entry as the mock matches the request: the endpoint's path rejects a request to another path
+	// before a part of its own that reads the body, which would fail on it, runs.
+	m := journaledServer(t, Setup())
+
+	endpoint := MCP("/mcp").MCPServerInfo("s", "1").RequestMatches(func(r *http.Request) (bool, error) {
+		var msg struct {
+			Method string `json:"method"`
+		}
+
+		if err := json.UnmarshalRead(r.Body, &msg); err != nil {
+			return false, err
+		}
+
+		return msg.Method == "initialize", nil
+	})
+	m.MustMock(endpoint, Getf("/health").Reply(OK()))
+
+	res, _ := do(t, http.MethodGet, m.URL("/health"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	n, err := m.VerifyRequests().Matching(endpoint).Count(t.Context())
+	require.NoError(t, err)
+	require.Zero(t, n)
+}
+
+func TestRequestPattern_MCPEndpointPatternChecksItsPathFirst(t *testing.T) {
+	// A request to another path misses the endpoint pattern before its other parts run, its body kept whole or cut, as
+	// it misses the mock: a part that fails whenever it runs never does.
+	failing := vlatte.MatcherFunc("failing", func(vlatte.MatcherArg) (bool, error) { return false, errors.New("ran") })
+	endpoint := MCP("/mcp").MCPServerInfo("s", "1").Header("X-Context", failing)
+
+	for _, limit := range []string{"0", "40"} {
+		t.Run("journal body limit "+limit, func(t *testing.T) {
+			m := journaledServer(t, Setup().ConfigSources(ConfigArgs([]string{"--journal-max-body-size", limit})))
+			m.MustMock(Postf("/upload").Reply(OK()))
+
+			res, _ := do(t, http.MethodPost, m.URL("/upload"), http.Header{HeaderContentType: {MIMEApplicationJSON}},
+				[]byte(`{"data":"`+strings.Repeat("a", 100)+`"}`))
+			require.Equal(t, http.StatusOK, res.StatusCode)
+
+			n, err := m.VerifyRequests().Matching(endpoint).Count(t.Context())
+			require.NoError(t, err)
+			require.Zero(t, n)
+		})
+	}
+}
+
+func TestRequestPattern_MCPEndpointPatternOnCutEntryStaysDefinite(t *testing.T) {
+	// The endpoint mock reads the body of a POST to its path only: a cut request to another path stays a miss, and a
+	// GET of its path a match.
+	m := cutJournalMCP(t, Postf("/users").Reply(Created()))
+
+	res, _ := do(t, http.MethodPost, m.URL("/users"), http.Header{HeaderContentType: {MIMEApplicationJSON}},
+		[]byte(`{"name":"`+strings.Repeat("a", 64)+`"}`))
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+
+	res, _ = do(t, http.MethodGet, m.URL("/mcp"), nil, nil)
+	require.Equal(t, http.StatusMethodNotAllowed, res.StatusCode)
 
 	n, err := m.VerifyRequests().Matching(MCP("/mcp").MCPServerInfo("s", "1")).Count(t.Context())
 	require.NoError(t, err)

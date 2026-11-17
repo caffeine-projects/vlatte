@@ -235,6 +235,18 @@
           ]
         }
       }
+    },
+    {
+      "if": { "required": [ "mcp" ], "properties": { "mcp": { "required": [ "tool" ] } } },
+      "then": {
+        "anyOf": [
+          { "required": [ "mcp_result" ] },
+          { "required": [ "response" ] },
+          { "required": [ "response_sequence" ] },
+          { "required": [ "response_random" ] },
+          { "required": [ "proxy" ] }
+        ]
+      }
     }
   ],
   "dependentRequired": { "mcp_result": [ "mcp" ] },

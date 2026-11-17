@@ -1,6 +1,9 @@
 package mockhttp
 
 import (
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -37,7 +40,7 @@ func startMCP(t *testing.T, opts []Option, mocks ...vlatte.Builder[*Mock, *Serve
 	return m
 }
 
-func TestMCP_BuildFails(t *testing.T) {
+func TestMCP_ContradictoryMocksFailToBuildWithTheFix(t *testing.T) {
 	// An MCP mock matches its own method and path, and is the endpoint or a tool: what contradicts that fails to build,
 	// saying how to fix it.
 	tests := []struct {
@@ -58,6 +61,18 @@ func TestMCP_BuildFails(t *testing.T) {
 		{name: "a tool without MCP", mock: Request().MCPTool("t", ""), want: errMCPNotStarted},
 		{name: "endpoint and tool", mock: MCP("/mcp").MCPServerInfo("s", "1").MCPTool("t", ""), want: errMCPKindSet},
 		{name: "an argument before the tool", mock: MCP("/mcp").MCPArgument("a", match.Equal(1)), want: errMCPNoTool},
+		{name: "a server after a tool", mock: MCP("/mcp").MCPTool("t", "").MCPServerInfo("s", "1"), want: errMCPKindSet},
+		{
+			name: "an input schema before the tool",
+			mock: MCP("/mcp").MCPInputSchema(map[string]any{"type": "object"}),
+			want: errMCPNoTool,
+		},
+		{name: "an argument without MCP", mock: Request().MCPArgument("a", match.Equal(1)), want: errMCPNotStarted},
+		{
+			name: "a path param",
+			mock: MCP("/mcp").MCPTool("t", "").PathParam("id", match.Equal("1")).Reply(MCPText("x")),
+			want: errMCPRequestLine,
+		},
 	}
 
 	for _, tt := range tests {
@@ -89,6 +104,20 @@ func TestMCP_BuildFailsForBadEndpointOrSchema(t *testing.T) {
 
 	_, err = MCP("/mcp").MCPTool("t", "").MCPInputSchema("x").Reply(MCPText("x")).Build(m)
 	require.EqualError(t, err, `mock: mcp: input schema: expected a JSON object, not "x"`)
+
+	_, err = MCP("/mcp").MCPTool("t", "").MCPInputSchema(make(chan int)).Reply(MCPText("x")).Build(m)
+	require.ErrorContains(t, err, "mock: mcp: input schema: json: ")
+
+	_, ok := errors.AsType[*json.SemanticError](err)
+	require.True(t, ok, "%v is no JSON encoding error", err)
+
+	// A schema is what the user wrote: one that isn't UTF-8 fails, rather than show something else in tools/list.
+	_, err = MCP("/mcp").MCPTool("t", "").MCPInputSchema(map[string]any{"description": "caf\xe9"}).
+		Reply(MCPText("x")).Build(m)
+	require.ErrorContains(t, err, "mock: mcp: input schema: ")
+
+	_, ok = errors.AsType[*jsontext.SyntacticError](err)
+	require.True(t, ok, "%v is no invalid UTF-8 error", err)
 }
 
 func TestMCP_OneBuilderBuildsTheSameMockTwice(t *testing.T) {
@@ -143,6 +172,53 @@ func TestMCP_ToolMockMatchesItsEndpointToolAndArguments(t *testing.T) {
 	res, body = mcpPost(t, m.URL("/mcp/y"), toolCall("get_user", `{"id":1}`))
 	require.Equal(t, StatusNoMatch, res.StatusCode)
 	require.NotContains(t, body, `"jsonrpc"`)
+}
+
+func TestMCP_LargeIntegerArgumentsMatchExactly(t *testing.T) {
+	// An integer past 2^53 keeps every digit, nested ones too: it matches its own mock, never its neighbor's.
+	m := startMCP(t, nil,
+		MCP("/mcp").MCPServerInfo("s", "1"),
+		MCP("/mcp").MCPTool("exact", "").MCPArgument("id", match.Equal(int64(9007199254740993))).Reply(MCPText("exact")),
+		MCP("/mcp").MCPTool("rounded", "").MCPArgument("id", match.Equal(int64(9007199254740992))).
+			Reply(MCPText("rounded")),
+		MCP("/mcp").MCPTool("nested", "").
+			MCPArgument("filter", match.Equal(map[string]any{"id": int64(9007199254740993)})).Reply(MCPText("nested")),
+	)
+
+	tests := []struct {
+		name string
+		call string
+		want string
+	}{
+		{
+			name: "the same integer",
+			call: toolCall("exact", `{"id":9007199254740993}`),
+			want: `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"exact"}]}}`,
+		},
+		{
+			name: "the neighbor",
+			call: toolCall("rounded", `{"id":9007199254740993}`),
+			want: `"message":"mcp: no mock of tool \"rounded\" matched the call"`,
+		},
+		{
+			name: "the same nested integer",
+			call: toolCall("nested", `{"filter":{"id":9007199254740993}}`),
+			want: `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"nested"}]}}`,
+		},
+		{
+			name: "the nested neighbor",
+			call: toolCall("nested", `{"filter":{"id":9007199254740992}}`),
+			want: `"message":"mcp: no mock of tool \"nested\" matched the call"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, body := mcpPost(t, m.URL("/mcp"), tt.call)
+			require.Equal(t, http.StatusOK, res.StatusCode)
+			require.Contains(t, body, tt.want)
+		})
+	}
 }
 
 func TestMCP_ArgumentNameWithDotMatches(t *testing.T) {

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 func TestMCPResult_EnvelopesEchoTheRequestID(t *testing.T) {
@@ -57,7 +59,7 @@ func TestMCPResult_EnvelopesEchoTheRequestID(t *testing.T) {
 func TestMCPResult_TemplateReadsArgumentsAndData(t *testing.T) {
 	m := startMCP(t, nil, MCP("/mcp").MCPTool("t", "").Reply(
 		MCPText(`{{ (fromJSON .Request.Body.String).params.arguments.owner }}-{{ .Extra.x }}`).
-			Template().TemplateData(map[string]any{"x": "y"})))
+			Template().SetTemplateData(map[string]any{"x": "y"})))
 
 	res, body := mcpPost(t, m.URL("/mcp"), toolCall("t", `{"owner":"octocat"}`))
 	require.Equal(t, http.StatusOK, res.StatusCode)
@@ -83,6 +85,35 @@ func TestMCPResult_JSONThatDoesntEncodeFails(t *testing.T) {
 	require.True(t, ok, "%v is no JSON encoding error", err)
 }
 
+func TestMCPResult_TemplateThatDoesntCompileFails(t *testing.T) {
+	m := MustNew(Setup().Silent())
+
+	_, err := m.Mock(MCP("/mcp").MCPTool("t", "").Reply(MCPText("{{ .X").Template()))
+	require.EqualError(t, err, "server: mock 0: mcp result: compiling the text: template: mcp_result.text:1: unclosed action")
+}
+
+func TestMCPResult_OnARequestThatIsntACallFails(t *testing.T) {
+	// A result given to a mock that isn't a tool mock has no call to answer, with a body that isn't one.
+	m := startMCP(t, nil, Postf("/x").Reply(MCPText("a")))
+
+	res, body := mcpPost(t, m.URL("/x"), "not json")
+	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
+	// The body names the server's port and the mock's ID first: its last line is the error.
+	_, last, _ := strings.CutLast(body, "\n")
+	require.Equal(t, "http: mcp result: decoding the call: mcpwire: the body is not JSON", last)
+}
+
+func TestMCPResult_TemplateThatFailsAnswersTheError(t *testing.T) {
+	m := startMCP(t, nil, MCP("/mcp").MCPTool("t", "").Reply(
+		MCPText("{{ .Extra.nmae }}").Template().SetTemplateData(make(map[string]any))))
+
+	res, body := mcpPost(t, m.URL("/mcp"), toolCall("t", `{}`))
+	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
+	_, last, _ := strings.CutLast(body, "\n")
+	require.Equal(t, `http: mcp result: rendering the text: template: mcp_result.text:1:9: executing "mcp_result.text" `+
+		`at <.Extra.nmae>: map has no entry for key "nmae"`, last)
+}
+
 func TestMCPResult_DescribeLoadsBack(t *testing.T) {
 	m := MustNew(Setup().Silent())
 
@@ -91,7 +122,7 @@ func TestMCPResult_DescribeLoadsBack(t *testing.T) {
 		MCPJSON(map[string]any{"a": 1}),
 		MCPToolError("bad"),
 		MCPError(-32000, "x"),
-		MCPText("{{ .Extra.x }}").Template().TemplateData(map[string]any{"x": "y"}),
+		MCPText("{{ .Extra.x }}").Template().SetTemplateData(map[string]any{"x": "y"}),
 	} {
 		mock, err := MCP("/mcp").ID("t").MCPTool("t", "").Reply(result).Build(m)
 		require.NoError(t, err)
@@ -129,4 +160,14 @@ func TestMCPResult_DescribeKeepsLargeIntegers(t *testing.T) {
 		require.Contains(t, string(desc), `"json":{"id":9007199254740993}`, format)
 		require.Contains(t, string(desc), `"maxProperties":9007199254740993`, format)
 	}
+}
+
+func TestMCPResult_InvalidUTF8StaysJSON(t *testing.T) {
+	// A text can hold bytes that aren't UTF-8, as a template renders them: the client still gets the JSON-RPC answer,
+	// with the replacement character in their place, not a failure.
+	m := startMCP(t, nil, MCP("/mcp").MCPTool("t", "").Reply(MCPText("caf\xe9")))
+
+	res, body := mcpPost(t, m.URL("/mcp"), toolCall("t", `{}`))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"caf�\"}]}}", body)
 }

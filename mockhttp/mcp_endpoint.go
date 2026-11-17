@@ -49,8 +49,15 @@ func (r *mcpEndpointReplier) Reply(ctx context.Context, in ReplyInput) (*Respons
 
 	switch {
 	case errors.Is(err, mcpwire.ErrParse):
-		return mcpResponse(http.StatusBadRequest,
-			mcpwire.Fail(nil, mcpwire.CodeParseError, "parse error: the body is not JSON", nil))
+		msg := "parse error: the body is not JSON"
+
+		rv := in.RequestValues
+		if bodyCut(r.app.config.MaxBodyParsingLimit, rv.RawRequest, rv.RawBodyBytes) {
+			msg = fmt.Sprintf("parse error: the server read %d bytes of the body: raise MaxBodyParsingLimit",
+				len(rv.RawBodyBytes))
+		}
+
+		return mcpResponse(http.StatusBadRequest, mcpwire.Fail(nil, mcpwire.CodeParseError, msg, nil))
 	case err != nil:
 		return mcpResponse(http.StatusBadRequest,
 			mcpwire.Fail(nil, mcpwire.CodeInvalidRequest, "invalid request: expected one JSON-RPC 2.0 object", nil))
@@ -158,7 +165,7 @@ func (h *mockHandler) answerMCPToolCall(w http.ResponseWriter, nm *NoMatch, stor
 		misses = make([]vlatte.NearMiss, 0)
 	}
 
-	body, err := mcpwire.Marshal(mcpwire.Fail(m.ID, mcpwire.CodeInvalidParams,
+	body, err := mcpwire.MarshalResponse(mcpwire.Fail(m.ID, mcpwire.CodeInvalidParams,
 		fmt.Sprintf("mcp: no mock of tool %q matched the call", m.ToolName()),
 		map[string]any{"near_misses": misses}))
 	if err != nil {

@@ -80,8 +80,9 @@ func (r *MCPResult) Template() *MCPResult {
 	return r
 }
 
-// TemplateData sets data that the template reads as .Extra. The result keeps data, without copying it.
-func (r *MCPResult) TemplateData(data any) *MCPResult {
+// SetTemplateData sets data that the template reads as .Extra, as [Reply.SetTemplateData] does. The result keeps data,
+// without copying it.
+func (r *MCPResult) SetTemplateData(data any) *MCPResult {
 	r.data = data
 	return r
 }
@@ -187,7 +188,7 @@ func (r *mcpResultReplier) Reply(_ context.Context, in ReplyInput) (*Response, e
 
 // mcpResponse returns the response with status that holds answer, as JSON.
 func mcpResponse(status int, answer mcpwire.Response) (*Response, error) {
-	body, err := mcpwire.Marshal(answer)
+	body, err := mcpwire.MarshalResponse(answer)
 	if err != nil {
 		return nil, fmt.Errorf("mcp: encoding the answer: %w", err)
 	}

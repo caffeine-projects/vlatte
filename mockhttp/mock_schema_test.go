@@ -124,6 +124,7 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"mcp endpoint with a response", "mcp: {endpoint: /mcp, server: {name: s, version: '1'}}\nresponse: {status: 200}\n", []want{{config.CodeInvalidValue, "mcp.server", "an endpoint mock answers on its own, not with response", "remove response"}}},
 		{"mcp tool without a reply", "mcp: {endpoint: /mcp, tool: {name: t}}\n", []want{{config.CodeMissingValue, "mcp.tool", "a tool mock needs a reply", "set mcp_result, response, response_sequence, response_random or proxy"}}},
 		{"mcp with proxy_all", "mcp: {endpoint: /mcp, tool: {name: t}}\nproxy_all: {target: 'http://a'}\n", []want{{config.CodeInvalidValue, "mcp", "mcp and proxy_all don't go together", "use proxy for a tool"}}},
+		{"mcp endpoint with proxy_all", "mcp: {endpoint: /mcp, server: {name: s, version: '1'}}\nproxy_all: {target: 'http://a'}\n", []want{{config.CodeInvalidValue, "mcp", "mcp and proxy_all don't go together", "use proxy for a tool"}}},
 		{"mcp with a path", "request: {path: /x}\nmcp: {endpoint: /mcp, tool: {name: t}}\nmcp_result: {text: x}\n", []want{{config.CodeInvalidValue, "request.path", "request.path is set by mcp", "remove request.path"}}},
 		{"mcp input schema not an object", "mcp: {endpoint: /mcp, tool: {name: t, input_schema: 5}}\nmcp_result: {text: x}\n", []want{{config.CodeInvalidValue, "mcp.tool.input_schema", "must be an object", ""}}},
 		{"mcp_result without mcp", "request: {path: /x}\nmcp_result: {text: x}\n", []want{{config.CodeInvalidValue, "mcp_result", "mcp_result needs mcp.tool", "add mcp.tool, or use response"}}},
@@ -3219,6 +3220,11 @@ func TestJSONSchema_RejectsMCPMocksTheDecoderRejects(t *testing.T) {
 				"mcp": tool, "mcp_result": map[string]any{"text": "hi"},
 				"request": map[string]any{"header": map[string]any{"x-a": "1"}},
 			},
+		},
+		{
+			name: "a tool mock without a reply",
+			bad:  map[string]any{"mcp": tool},
+			good: map[string]any{"mcp": tool, "proxy": map[string]any{"target": "http://a"}},
 		},
 		{
 			name: "is_error without text",

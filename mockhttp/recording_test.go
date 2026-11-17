@@ -2187,14 +2187,7 @@ func matchingMocks(t require.TestingT, m *Server, req *http.Request) []string {
 		defer req.MultipartForm.RemoveAll()
 	}
 
-	input := &selectorInput{
-		RawRequest: req,
-		URL:        rv.URL,
-		Query:      req.URL.Query(),
-		Form:       req.PostForm,
-		Files:      formFiles(req),
-		ParsedBody: rv.ParsedBodyData,
-	}
+	input := newSelectorInput(req, rv, false)
 
 	mocks, err := m.storage.List(context.Background())
 	require.NoError(t, err)

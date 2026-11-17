@@ -7,6 +7,8 @@ import (
 	json "encoding/json/v2"
 	"errors"
 	"slices"
+
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // Version is the JSON-RPC version of every message.
@@ -100,18 +102,17 @@ func (m *Message) ToolName() string {
 	return m.call.Name
 }
 
-// Argument returns the argument name of a tools/call, decoded anew on each call: numbers are float64, objects
-// map[string]any and lists []any. It is nil when the call hasn't the argument.
+// Argument returns the argument name of a tools/call, decoded anew on each call: a number is an int64 when it is whole
+// and fits, and a float64 otherwise, objects map[string]any and lists []any. It is nil when the call hasn't the
+// argument.
 func (m *Message) Argument(name string) any {
 	raw, ok := m.call.Arguments[name]
 	if !ok {
 		return nil
 	}
 
-	var v any
-	if json.Unmarshal(raw, &v) != nil {
-		return nil
-	}
+	// Decode checked that raw is JSON, which the lenient decoder takes whole.
+	v, _ := value.DecodeJSONLenient(raw)
 
 	return v
 }
@@ -209,9 +210,16 @@ func Fail(id jsontext.Value, code int64, message string, data any) Response {
 	return Response{JSONRPC: Version, ID: orNull(id), Error: &Error{Code: code, Message: message, Data: data}}
 }
 
-// Marshal encodes v as JSON, with the keys of maps in order, so equal values give equal bytes.
+// Marshal encodes v as JSON, with the keys of maps in order, so equal values give equal bytes. A string that isn't
+// UTF-8 is an error.
 func Marshal(v any) ([]byte, error) {
 	return json.Marshal(v, json.Deterministic(true))
+}
+
+// MarshalResponse encodes r as Marshal does, but a string that isn't UTF-8, such as a mock's name or a rendered text,
+// has the replacement character in place of its bad bytes: the client still gets an answer it can decode.
+func MarshalResponse(r Response) ([]byte, error) {
+	return json.Marshal(r, json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
 }
 
 // orNull returns id, or null when it is empty.

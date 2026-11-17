@@ -92,8 +92,8 @@ The `request` key matches requests as the Go builder does: see [Request matching
 
 A mock with `mcp` plays an [MCP](https://modelcontextprotocol.io) server over Streamable HTTP: `MCP(path)` in Go. It matches requests to exactly `mcp.endpoint`, so `/mcp` is neither `/mcp/` nor `/mcp/v2`, and REST mocks and other MCP servers, each at its own path, share the server. An MCP server takes two kinds of mocks:
 
-- **The endpoint mock**, with `mcp.server` (`MCPServerInfo` in Go). It answers every request to its path but a tool call: `initialize`, with the client's protocol version when it knows it; `ping`; notifications, with `202`; `tools/list`, with the tools of the enabled tool mocks of its path, one per name, as the first of them in match order describes it; another method with JSON-RPC error `-32601`; and another HTTP method than `POST` with `405`. It takes no response key.
-- **A tool mock**, with `mcp.tool` (`MCPTool` in Go). It answers the calls of one tool. `arguments` match the arguments of the call, by name, as `request.header` matches headers. Its reply is `mcp_result`, or any other response key, such as `proxy`.
+- **The endpoint mock**, with `mcp.server` (`MCPServerInfo` in Go). It answers every request to its path but a tool call: `initialize`, with the client's protocol version when it knows it; `ping`; notifications, with `202`; `tools/list`, with the tools of the enabled tool mocks of its path, one per name, as the first of them in match order describes it; another method with JSON-RPC error `-32601`; a body that isn't JSON with `-32700`, which names `MaxBodyParsingLimit` when the server read only part of the body; and another HTTP method than `POST` with `405`. It takes no response key.
+- **A tool mock**, with `mcp.tool` (`MCPTool` in Go). It answers the calls of one tool. `arguments` match the arguments of the call, by name, as `request.header` matches headers. A number compares by its exact value, so `[equal, 9007199254740993]` matches that integer and not its neighbor. Its reply is `mcp_result`, or any other response key, such as `proxy`.
 
 ```yaml
 id: weather

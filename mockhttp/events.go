@@ -71,7 +71,8 @@ type RequestValues struct {
 }
 
 // Clone returns a shallow copy of r: the copy shares the request, the body, the matched mock and the template data of r,
-// and setting one of its fields, such as RawRequest, leaves r as it was.
+// and setting one of its fields, such as RawRequest, leaves r as it was. MCP mocks decode the body once: a copy whose
+// RawBodyBytes is set may still read the JSON-RPC message of the body of r.
 func (r *RequestValues) Clone() *RequestValues {
 	c := &RequestValues{
 		ReqID:           r.ReqID,

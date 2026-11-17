@@ -59,6 +59,10 @@ type selectorInput struct {
 
 	// values are the values of the request, which the key of a scenario renders with.
 	values *RequestValues
+
+	// bodyTruncated is the BodyTruncated of the journal entry the request was rebuilt from: false for a request the
+	// server serves.
+	bodyTruncated bool
 }
 
 type expectation = vlatte.Eval[*selectorInput]
@@ -496,7 +500,8 @@ const (
 	matchingScopeMCP     // the path and method of an MCP mock: they read no body
 	matchingScopeMCPCall // the JSON-RPC message of an MCP mock: they read the body
 	// matchingScopeMCPEndpoint is the part of an endpoint mock: a request to its path but a tool call. It reads the body
-	// of a request to its path only, and takes a cut one, as the endpoint mock answers it, for no tool call.
+	// of a POST to its path only. The server answers a body it cut as no tool call; a pattern can't tell what a cut
+	// body was, and fails with journal.ErrBodyCut.
 	matchingScopeMCPEndpoint
 )
 

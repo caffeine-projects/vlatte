@@ -112,9 +112,20 @@ func TestToolNameAndArgument_ReadTheCallAsSentAndNeverChange(t *testing.T) {
 	require.Equal(t, []any{"bug"}, m.Argument("labels"))
 	m.Argument("labels").([]any)[0] = "changed"
 	require.Equal(t, []any{"bug"}, m.Argument("labels"))
-	require.Equal(t, float64(42), m.Argument("issue_number"))
+	require.Equal(t, int64(42), m.Argument("issue_number"))
 	require.Equal(t, []any{"bug"}, m.Argument("labels"))
 	require.Nil(t, m.Argument("missing"))
+}
+
+func TestArgument_KeepsEveryDigitOfAWholeNumber(t *testing.T) {
+	// A whole number past 2^53 would change as a float64: it stays an int64, nested ones too.
+	m, err := Decode([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"t",` +
+		`"arguments":{"id":9007199254740993,"nested":{"ids":[9007199254740993]},"ratio":1.5}}}`))
+	require.NoError(t, err)
+
+	require.Equal(t, int64(9007199254740993), m.Argument("id"))
+	require.Equal(t, map[string]any{"ids": []any{int64(9007199254740993)}}, m.Argument("nested"))
+	require.Equal(t, 1.5, m.Argument("ratio"))
 }
 
 func TestToolNameAndArgument_ParamsThatDontDecodeAreZero(t *testing.T) {

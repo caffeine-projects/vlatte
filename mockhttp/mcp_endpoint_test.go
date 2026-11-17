@@ -4,6 +4,7 @@ import (
 	json "encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -28,7 +29,7 @@ func startMCPEndpoints(t *testing.T) *Server {
 	)
 }
 
-func TestMCPEndpoint_Initialize(t *testing.T) {
+func TestMCPEndpoint_InitializeAgreesToAKnownVersionOrItsNewest(t *testing.T) {
 	// The endpoint agrees to a version it knows, and answers its latest to one it doesn't, which a client then checks.
 	m := startMCPEndpoints(t)
 
@@ -108,7 +109,7 @@ func TestMCPEndpoint_BadBodiesGet400(t *testing.T) {
 		`"message":"invalid request: expected one JSON-RPC 2.0 object"}}`, body)
 }
 
-func TestMCPEndpoint_ToolsList(t *testing.T) {
+func TestMCPEndpoint_ToolsListShowsEachEnabledToolOfItsPathOnce(t *testing.T) {
 	// Each name once, as its first mock describes it; disabled mocks and the tools of another endpoint left out.
 	m := startMCPEndpoints(t)
 
@@ -168,6 +169,29 @@ func TestMCPEndpoint_UnmatchedToolCallWithoutEndpointIsOrdinaryNoMatch(t *testin
 	res, body := mcpPost(t, m.URL("/mcp"), toolCall("other", `{}`))
 	require.Equal(t, StatusNoMatch, res.StatusCode)
 	require.NotContains(t, body, `"jsonrpc"`)
+}
+
+func TestMCPEndpoint_UnmatchedRequestThatIsntACallIsOrdinaryNoMatch(t *testing.T) {
+	// Only a tool call gets the JSON-RPC error: another request no mock matches, on an endpoint's path too, gets the
+	// server's no-match answer.
+	m := startMCP(t, nil, MCP("/mcp").MCPServerInfo("s", "1").Header("X-Key", match.Equal("k")))
+
+	res, body := mcpPost(t, m.URL("/mcp"), `{"jsonrpc":"2.0","id":1,"method":"ping"}`)
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+	require.NotContains(t, body, `"jsonrpc"`)
+}
+
+func TestMCPEndpoint_UnmatchedToolCallWithNearMissesOffListsNone(t *testing.T) {
+	// A server that ranks no near misses lists none, as an empty list: a client reading the data finds the key.
+	m := startMCP(t, []Option{Setup().NoNearMisses()},
+		MCP("/mcp").MCPServerInfo("s", "1"),
+		MCP("/mcp").MCPTool("t", "").MCPArgument("a", match.Equal(1)).Reply(MCPText("t")),
+	)
+
+	res, body := mcpPost(t, m.URL("/mcp"), toolCall("t", `{}`))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, `{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"mcp: no mock of tool \"t\" matched the call",`+
+		`"data":{"near_misses":[]}}}`, body)
 }
 
 func TestMCPEndpoint_ProxyAllTakesUnmatchedToolCall(t *testing.T) {
@@ -231,4 +255,32 @@ func TestMCPEndpoint_UnmatchedToolCallStatusIsConfigurable(t *testing.T) {
 	// A REST request no mock matches keeps the server's no-match status.
 	res, _ = do(t, http.MethodGet, m.URL("/users"), nil, nil)
 	require.Equal(t, StatusNoMatch, res.StatusCode)
+}
+
+func TestMCPEndpoint_UnmatchedToolCallWithInvalidUTF8NameStaysJSONRPC(t *testing.T) {
+	// A mock name can be invalid UTF-8: the near misses still go out in the JSON-RPC error, which the session needs.
+	m := startMCP(t, nil,
+		MCP("/mcp").MCPServerInfo("s", "1"),
+		MCP("/mcp").ID("bad").Name("caf\xe9").MCPTool("t", "").MCPArgument("a", match.Equal(1)).Reply(MCPText("t")),
+	)
+
+	res, body := mcpPost(t, m.URL("/mcp"), toolCall("t", `{"a":2}`))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602,"+
+		"\"message\":\"mcp: no mock of tool \\\"t\\\" matched the call\",\"data\":{\"near_misses\":[{\"mock_id\":\"bad\","+
+		"\"name\":\"caf�\",\"passed\":3,\"total\":4,\"failed\":[\"mcp arguments.a\"]}]}}}", body)
+}
+
+func TestMCPEndpoint_ToolCallPastTheBodyLimitNamesTheLimit(t *testing.T) {
+	// A tool call longer than the server reads isn't JSON to it: the answer says the server cut it and how to read more,
+	// rather than blame the client's JSON.
+	m := startMCP(t, []Option{Setup().MaxBodyParsingLimit(64)},
+		MCP("/mcp").MCPServerInfo("s", "1"),
+		MCP("/mcp").MCPTool("t", "").Reply(MCPText("t")),
+	)
+
+	res, body := mcpPost(t, m.URL("/mcp"), toolCall("t", `{"q":"`+strings.Repeat("a", 200)+`"}`))
+	require.Equal(t, http.StatusBadRequest, res.StatusCode)
+	require.Equal(t, `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,`+
+		`"message":"parse error: the server read 64 bytes of the body: raise MaxBodyParsingLimit"}}`, body)
 }

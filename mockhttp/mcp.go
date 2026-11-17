@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mcpwire"
 )
@@ -119,14 +120,19 @@ func (b *Builder) mcpAt(path string) *Builder {
 	}
 
 	b.spec.mcp = &mcpSpec{endpoint: path}
-	b.appendExpectation(&expectation{
+	b.appendExpectation(mcpPathPart(path))
+
+	return b
+}
+
+// mcpPathPart returns the part of an MCP mock that matches requests to its path, which reads no body.
+func mcpPathPart(path string) *expectation {
+	return &expectation{
 		Target:   int(matchingScopeMCP),
 		Key:      "endpoint",
 		Selector: selectURLPath,
 		Matcher:  match.Equal(path),
-	})
-
-	return b
+	}
 }
 
 // MCPServerInfo makes the mock the endpoint mock of its MCP server, named name, at version. It answers every request
@@ -155,7 +161,7 @@ func (b *Builder) MCPServerInfo(name, version string) *Builder {
 		Target:   int(matchingScopeMCPEndpoint),
 		Key:      "endpoint",
 		Selector: selectEndpointRequest(b.spec.mcp.endpoint),
-		Matcher:  match.Equal(true),
+		Matcher:  vlatte.MatcherFunc("MCPEndpoint", matchEndpointRequest),
 	}
 
 	return b
@@ -207,7 +213,8 @@ func (b *Builder) MCPInputSchema(schema any) *Builder {
 }
 
 // MCPArgument matches the argument name of the calls of the tool with m. An argument the call doesn't have is nil to
-// m. Numbers compare by value, so match.Equal(42) matches the 42 of a call.
+// m. m gets a whole number that fits as an int64 and another number as a float64, an object as a map[string]any and a
+// list as a []any. Numbers compare by value, so match.Equal(42) matches the 42 of a call.
 func (b *Builder) MCPArgument(name string, m vlatte.Matcher) *Builder {
 	if !b.mcpToolSet() {
 		return b
@@ -302,17 +309,14 @@ func (b *Builder) mcpReply(app *Server) (ReplierFactory, error) {
 
 // mcpToolCall decodes the body of the request in as a JSON-RPC message, and reports whether it is a tools/call.
 func mcpToolCall(in *selectorInput) (*mcpwire.Message, bool) {
-	if in.values == nil {
-		return nil, false
-	}
-
 	m, err := mcpMessageOf(in.values)
 
 	return m, err == nil && m.IsToolCall()
 }
 
 // selectEndpointRequest selects whether the request is one the endpoint mock at path answers: a request to path, but a
-// tool call. It reads no body for a request to another path.
+// tool call. It reads no body for a request to another path, and selects journal.ErrBodyCut for a POST to path of a
+// journal entry whose body was cut.
 func selectEndpointRequest(path string) vlatte.Selector[*selectorInput] {
 	return func(_ context.Context, in *selectorInput) any {
 		if in.URL.Path != path {
@@ -323,10 +327,27 @@ func selectEndpointRequest(path string) vlatte.Selector[*selectorInput] {
 			return true
 		}
 
+		// A body the journal cut can't tell a tool call apart.
+		if in.bodyTruncated {
+			return journal.ErrBodyCut
+		}
+
 		_, ok := mcpToolCall(in)
 
 		return !ok
 	}
+}
+
+// matchEndpointRequest matches what selectEndpointRequest selects: true for a request of the endpoint mock, and an
+// error for a request whose cut body can't tell.
+func matchEndpointRequest(arg vlatte.MatcherArg) (bool, error) {
+	if err, ok := arg.Value().(error); ok {
+		return false, err
+	}
+
+	ok, _ := arg.Value().(bool)
+
+	return ok, nil
 }
 
 // selectToolName selects the name of the tool a tool call calls, or nil for another request.
