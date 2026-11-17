@@ -1214,6 +1214,70 @@ func TestRequestPattern_MCPEndpointPatternOnAToolCallTheServerCutIsBodyCut(t *te
 	require.Zero(t, n)
 }
 
+func TestRequestPattern_ErrorPastACutBodyPartIsBodyCut(t *testing.T) {
+	// The mock stops at the first part that misses: had the body part missed, the failing part past it would never
+	// have run. On a body the journal cut, the pattern can't tell, rather than fail with that part's error.
+	failing := vlatte.MatcherFunc("failing", func(vlatte.MatcherArg) (bool, error) { return false, errors.New("ran") })
+	m := journaledServer(t, Setup().ConfigSources(ConfigArgs([]string{"--journal-max-body-size", "40"})))
+
+	_, _ = do(t, http.MethodPost, m.URL("/x"), http.Header{HeaderContentType: {MIMEApplicationJSON}},
+		[]byte(`{"data":"`+strings.Repeat("a", 100)+`"}`))
+
+	n, err := m.VerifyRequests().Matching(Postf("/x").Body(match.Contain("zzz")).Header("X-Context", failing)).
+		Count(t.Context())
+	require.ErrorIs(t, err, journal.ErrBodyCut)
+	require.EqualError(t, err, "http: mock: matching: entry 1: journal: the journal kept part of the body, which the pattern reads")
+	require.Zero(t, n)
+}
+
+func TestRequestPattern_ErrorBeforeACutBodyPartIsThePartsError(t *testing.T) {
+	// A part the mock runs before the body part fails whatever the body holds: the pattern fails with its error, as
+	// the mock would.
+	failing := vlatte.MatcherFunc("failing", func(vlatte.MatcherArg) (bool, error) { return false, errors.New("ran") })
+	m := journaledServer(t, Setup().ConfigSources(ConfigArgs([]string{"--journal-max-body-size", "40"})))
+
+	_, _ = do(t, http.MethodPost, m.URL("/x"), http.Header{HeaderContentType: {MIMEApplicationJSON}},
+		[]byte(`{"data":"`+strings.Repeat("a", 100)+`"}`))
+
+	n, err := m.VerifyRequests().Matching(Postf("/x").Header("X-Context", failing).Body(match.Contain("zzz"))).
+		Count(t.Context())
+	require.NotErrorIs(t, err, journal.ErrBodyCut)
+	require.EqualError(t, err, "http: mock: matching: entry 1: eval[2][5(X-Context)]: ran")
+	require.Zero(t, n)
+}
+
+func TestRequestPattern_MCPEndpointPatternErrorPastACutToolCallIsBodyCut(t *testing.T) {
+	// The endpoint mock misses a tool call before the parts past it run: on a tool call the journal cut, the pattern
+	// can't tell whether a failing part past the endpoint part would have run.
+	failing := vlatte.MatcherFunc("failing", func(vlatte.MatcherArg) (bool, error) { return false, errors.New("ran") })
+	m := cutJournalMCP(t)
+
+	mcpPost(t, m.URL("/mcp"), toolCall("t", `{}`))
+
+	n, err := m.VerifyRequests().Matching(MCP("/mcp").MCPServerInfo("s", "1").Header("X-Context", failing)).
+		Count(t.Context())
+	require.ErrorIs(t, err, journal.ErrBodyCut)
+	require.EqualError(t, err, "http: mock: matching: entry 1: journal: the journal kept part of the body, which the pattern reads")
+	require.Zero(t, n)
+}
+
+func TestRequestPattern_MCPEndpointPatternErrorPastACutGETIsThePartsError(t *testing.T) {
+	// The endpoint mock reads no body of a GET of its path: on a cut one it matches, and a failing part past it fails
+	// with its error, as it does in the mock.
+	failing := vlatte.MatcherFunc("failing", func(vlatte.MatcherArg) (bool, error) { return false, errors.New("ran") })
+	m := cutJournalMCP(t)
+
+	res, _ := do(t, http.MethodGet, m.URL("/mcp"), nil, []byte(strings.Repeat("a", 100)))
+	require.Equal(t, http.StatusMethodNotAllowed, res.StatusCode)
+	require.True(t, only(t, m, journal.Query{Path: match.Equal("/mcp")}).BodyTruncated)
+
+	n, err := m.VerifyRequests().Matching(MCP("/mcp").MCPServerInfo("s", "1").Header("X-Context", failing)).
+		Count(t.Context())
+	require.NotErrorIs(t, err, journal.ErrBodyCut)
+	require.EqualError(t, err, "http: mock: matching: entry 1: eval[1][5(X-Context)]: ran")
+	require.Zero(t, n)
+}
+
 func TestRequestPattern_MCPEndpointPatternChecksItsPathFirstOnAWholeEntry(t *testing.T) {
 	// A pattern matches an entry as the mock matches the request: the endpoint's path rejects a request to another path
 	// before a part of its own that reads the body, which would fail on it, runs.

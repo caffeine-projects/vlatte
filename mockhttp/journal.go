@@ -252,59 +252,22 @@ func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (verify.Patt
 		return nil, fmt.Errorf("http: request pattern: %w", err)
 	}
 
-	p := &requestPattern{app: app, evals: slices.Concat(builder.spec.expectations, params)}
-
-	// A pattern that reads the body can't tell whether a body the journal cut matched: the rest of the pattern runs
-	// first, as a miss there is a miss. The endpoint part of an MCP pattern reads the body of a POST to its path only:
-	// in the rest, its path check keeps its place, and the part goes last, as it can't tell a cut tool call either way.
-	var endpoint *expectation
-
-	for _, e := range p.evals {
-		switch scope := matchingScope(e.Target); {
-		case scope == matchingScopeMCPEndpoint:
-			p.rest = append(p.rest, mcpPathPart(builder.spec.mcp.endpoint))
-			endpoint = e
-		case readsBody(scope):
-			p.readsBody = true
-		default:
-			p.rest = append(p.rest, e)
-		}
-	}
-
-	if endpoint != nil {
-		p.rest = append(p.rest, endpoint)
-	}
-
-	return p, nil
+	return &requestPattern{app: app, evals: slices.Concat(builder.spec.expectations, params)}, nil
 }
 
-// requestPattern is the pattern of the request part of a mock: evals, and rest, what runs in their place on an entry
-// whose body was cut: the parts that read no body, and the path check of an MCP endpoint part where that part was.
+// requestPattern is the pattern of the request part of a mock: its parts, evals, in the order the mock runs them.
 type requestPattern struct {
-	app       *Server
-	evals     vlatte.Evaluators[*Mock, *selectorInput]
-	rest      vlatte.Evaluators[*Mock, *selectorInput]
-	readsBody bool // a part of evals reads the body, which rest leaves out
+	app   *Server
+	evals vlatte.Evaluators[*Mock, *selectorInput]
 }
 
 // Match tells whether the pattern matches the request of e, as it came.
 func (p *requestPattern) Match(ctx context.Context, e *journal.Entry) (bool, error) {
-	evals := p.evals
-	if e.BodyTruncated {
-		evals = p.rest
+	if !e.BodyTruncated {
+		return p.app.matchEntry(ctx, e, p.evals)
 	}
 
-	// The parts that read the body are left out of a cut one: the rest matching it can't tell either way.
-	cut := e.BodyTruncated && p.readsBody
-
-	ok, err := p.app.matchEntry(ctx, e, evals)
-
-	// A part that reads the body of some requests only, such as the endpoint part of an MCP pattern, tells by itself.
-	if errors.Is(err, journal.ErrBodyCut) || cut && ok {
-		return false, errPatternBodyCut(e)
-	}
-
-	return ok, err
+	return p.matchCut(ctx, e)
 }
 
 // errPatternBodyCut is why a pattern can't tell whether the request of e matched: it reads the body the journal cut.
@@ -349,6 +312,51 @@ func (p *requestPattern) Explain(ctx context.Context, e *journal.Entry) (verify.
 	}
 
 	return miss, nil
+}
+
+// matchCut tells whether the pattern matches the request of e, whose body the journal cut. The parts run in the
+// mock's order, as there: a part that misses makes a miss, and one that fails fails the pattern. A part that reads
+// the body can't tell, nor can the endpoint part of an MCP pattern on a POST to its path: past one, the mock might
+// have stopped there, so an error, or matching to the end, can't tell either.
+func (p *requestPattern) matchCut(ctx context.Context, e *journal.Entry) (bool, error) {
+	if e.Kind != Kind {
+		return false, nil
+	}
+
+	in, done, err := p.app.entryInput(ctx, e)
+	if err != nil {
+		return false, err
+	}
+
+	defer done()
+
+	unknown := false
+
+	for i, eval := range p.evals {
+		if readsBody(matchingScope(eval.Target)) {
+			unknown = true
+			continue
+		}
+
+		ok, err := eval.Match(ctx, nil, in)
+
+		switch {
+		case errors.Is(err, journal.ErrBodyCut):
+			unknown = true
+		case err != nil && unknown:
+			return false, errPatternBodyCut(e)
+		case err != nil:
+			return false, fmt.Errorf("http: %w: entry %d: eval[%d][%s]: %w", vlatte.ErrMatching, e.Seq, i, eval.String(), err)
+		case !ok:
+			return false, nil
+		}
+	}
+
+	if unknown {
+		return false, errPatternBodyCut(e)
+	}
+
+	return true, nil
 }
 
 // readsBody reports whether a matcher of scope reads the body of a request: one of the body or of a form does, and so
