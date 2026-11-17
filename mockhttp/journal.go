@@ -261,13 +261,30 @@ type requestPattern struct {
 	evals vlatte.Evaluators[*Mock, *selectorInput]
 }
 
-// Match tells whether the pattern matches the request of e, as it came.
+// Match tells whether the pattern matches the request of e, as it came. The request goes through the server's body
+// parsers, as it did.
 func (p *requestPattern) Match(ctx context.Context, e *journal.Entry) (bool, error) {
-	if !e.BodyTruncated {
-		return p.app.matchEntry(ctx, e, p.evals)
+	if e.Kind != Kind {
+		return false, nil
 	}
 
-	return p.matchCut(ctx, e)
+	in, done, err := p.app.entryInput(ctx, e)
+	if err != nil {
+		return false, err
+	}
+
+	defer done()
+
+	if e.BodyTruncated {
+		return p.matchCut(ctx, e, in)
+	}
+
+	ok, err := p.evals.Eval(ctx, vlatte.NewExplanation(), in)
+	if err != nil {
+		return false, fmt.Errorf("http: %w: entry %d: %w", vlatte.ErrMatching, e.Seq, err)
+	}
+
+	return ok, nil
 }
 
 // errPatternBodyCut is why a pattern can't tell whether the request of e matched: it reads the body the journal cut.
@@ -318,18 +335,7 @@ func (p *requestPattern) Explain(ctx context.Context, e *journal.Entry) (verify.
 // mock's order, as there: a part that misses makes a miss, and one that fails fails the pattern. A part that reads
 // the body can't tell, nor can the endpoint part of an MCP pattern on a POST to its path: past one, the mock might
 // have stopped there, so an error, or matching to the end, can't tell either.
-func (p *requestPattern) matchCut(ctx context.Context, e *journal.Entry) (bool, error) {
-	if e.Kind != Kind {
-		return false, nil
-	}
-
-	in, done, err := p.app.entryInput(ctx, e)
-	if err != nil {
-		return false, err
-	}
-
-	defer done()
-
+func (p *requestPattern) matchCut(ctx context.Context, e *journal.Entry, in *selectorInput) (bool, error) {
 	unknown := false
 
 	for i, eval := range p.evals {
@@ -388,28 +394,6 @@ func (app *Server) adminRequestPattern(v config.Value) (verify.Pattern, error) {
 	def.request.apply(b)
 
 	return app.RequestPattern(b)
-}
-
-// matchEntry tells whether evals match the request of e, an entry of the server's journal, as it came. The request
-// goes through the server's body parsers, as it did.
-func (app *Server) matchEntry(ctx context.Context, e *journal.Entry, evals vlatte.Evaluators[*Mock, *selectorInput]) (bool, error) {
-	if e.Kind != Kind {
-		return false, nil
-	}
-
-	in, done, err := app.entryInput(ctx, e)
-	if err != nil {
-		return false, err
-	}
-
-	defer done()
-
-	ok, err := evals.Eval(ctx, vlatte.NewExplanation(), in)
-	if err != nil {
-		return false, fmt.Errorf("http: %w: entry %d: %w", vlatte.ErrMatching, e.Seq, err)
-	}
-
-	return ok, nil
 }
 
 // entryInput returns what the matchers of a mock read of the request of e, through the server's body parsers, as it
