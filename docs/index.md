@@ -115,7 +115,7 @@ curl -k https://localhost:8443/payments \
 ::: code-group
 
 ```go [Go test]
-// go get github.com/caffeine-projects/vlatte@v1.3.0
+// go get github.com/caffeine-projects/vlatte@v1.3.1
 m := mockhttp.MustNew()
 m.MustStart()
 t.Cleanup(m.Close)
