@@ -1,0 +1,5 @@
+# The blog's MCP server at /mcp: initialize, ping, tools/list and the errors.
+id: blog
+mcp:
+  endpoint: /mcp
+  server: {name: blog, version: 1.0.0}

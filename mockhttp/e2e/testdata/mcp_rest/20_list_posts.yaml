@@ -1,0 +1,7 @@
+# list_posts answers no posts.
+id: list-posts
+mcp:
+  endpoint: /mcp
+  tool: {name: list_posts}
+mcp_result:
+  json: []

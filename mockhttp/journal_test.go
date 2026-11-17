@@ -1088,3 +1088,42 @@ func TestJournal_AFailureNamesThePartsOfAPatternTheClosestMissed(t *testing.T) {
 	require.Contains(t, report, "Expected exactly 1 request(s) with a pattern.\nGot 0.\n")
 	require.Contains(t, report, "unmatched POST "+m.URL("/orders?page=1")+" 418\n        missed 1 of 3: query page\n")
 }
+
+func TestRequestPattern_MCPToolPatternSkipsCutRESTEntry(t *testing.T) {
+	// Only the tool and argument parts of an MCP pattern read the body: an entry whose body the journal cut, on another
+	// path, is no match, not an error.
+	m := startMCP(t, []Option{Setup().Journal(t.TempDir()).MaxBodyParsingLimit(512)},
+		MCP("/mcp").MCPServerInfo("s", "1"),
+		MCP("/mcp").MCPTool("get_user", "").Reply(MCPText("ada")),
+		Postf("/users").Reply(Created()),
+	)
+
+	res, _ := do(t, http.MethodPost, m.URL("/users"), http.Header{HeaderContentType: {MIMEApplicationJSON}},
+		[]byte(`{"name":"`+strings.Repeat("a", 1024)+`"}`))
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+
+	mcpPost(t, m.URL("/mcp"), toolCall("get_user", `{}`))
+
+	n, err := m.VerifyRequests().Matching(MCP("/mcp").MCPTool("get_user", "")).Count(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+}
+
+func TestRequestPattern_MCPEndpointPatternSkipsCutRESTEntry(t *testing.T) {
+	// The endpoint mock reads the body of a request to its path only: as a pattern, an entry whose body the journal
+	// cut, on another path, is no match, not an error.
+	m := startMCP(t, []Option{Setup().Journal(t.TempDir()).MaxBodyParsingLimit(512)},
+		MCP("/mcp").MCPServerInfo("s", "1"),
+		Postf("/users").Reply(Created()),
+	)
+
+	res, _ := do(t, http.MethodPost, m.URL("/users"), http.Header{HeaderContentType: {MIMEApplicationJSON}},
+		[]byte(`{"name":"`+strings.Repeat("a", 1024)+`"}`))
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+
+	mcpPost(t, m.URL("/mcp"), `{"jsonrpc":"2.0","id":1,"method":"ping"}`)
+
+	n, err := m.VerifyRequests().Matching(MCP("/mcp").MCPServerInfo("s", "1")).Count(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+}

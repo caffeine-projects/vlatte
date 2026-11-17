@@ -114,26 +114,29 @@ type Config struct {
 	Listener                       net.Listener // in place of listening on Addr: see ConfigBuilder.Listener
 	UseHTTP2                       bool
 	RequestWasNotMatchedStatusCode int
-	ErrorStatusCode                int
-	RequestBodyParsers             []RequestBodyParser
-	MaxBodyParsingLimit            int64
-	NoBodyParsing                  bool
-	NoDebugHeaders                 bool
-	NoNearMisses                   bool
-	Middlewares                    []func(http.Handler) http.Handler
-	CORS                           *CORSConfig
-	BackendFactory                 BackendFactory
-	HandlerDecorator               func(handler http.Handler) http.Handler
-	MockFileSearchPatterns         []string
-	Loaders                        []Loader
-	Proxy                          *ProxyConfig
-	Record                         *RecordConfig
-	Admin                          AdminAPI
-	AdminStore                     AdminStore
-	Journal                        *JournalConfig
-	MockFileHandlers               []MockFileHandler
-	HeaderNamesToRedact            map[string]struct{}
-	UseHTTPS                       bool
+	// MCPRequestWasNotMatchedStatusCode is the status of the JSON-RPC error that answers an MCP tool call no tool mock
+	// matched, on the path of an endpoint mock. Zero is 200, which every MCP client reads the error of.
+	MCPRequestWasNotMatchedStatusCode int
+	ErrorStatusCode                   int
+	RequestBodyParsers                []RequestBodyParser
+	MaxBodyParsingLimit               int64
+	NoBodyParsing                     bool
+	NoDebugHeaders                    bool
+	NoNearMisses                      bool
+	Middlewares                       []func(http.Handler) http.Handler
+	CORS                              *CORSConfig
+	BackendFactory                    BackendFactory
+	HandlerDecorator                  func(handler http.Handler) http.Handler
+	MockFileSearchPatterns            []string
+	Loaders                           []Loader
+	Proxy                             *ProxyConfig
+	Record                            *RecordConfig
+	Admin                             AdminAPI
+	AdminStore                        AdminStore
+	Journal                           *JournalConfig
+	MockFileHandlers                  []MockFileHandler
+	HeaderNamesToRedact               map[string]struct{}
+	UseHTTPS                          bool
 
 	// NoMatchRenderer answers the requests no mock matches. Nil uses [DefaultNoMatchRenderer] in NoMatchFormat.
 	NoMatchRenderer NoMatchRenderer
@@ -208,6 +211,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.IdleTimeout = c.IdleTimeout
 	conf.UseHTTP2 = c.UseHTTP2
 	conf.RequestWasNotMatchedStatusCode = c.RequestWasNotMatchedStatusCode
+	conf.MCPRequestWasNotMatchedStatusCode = c.MCPRequestWasNotMatchedStatusCode
 	conf.ErrorStatusCode = c.ErrorStatusCode
 	conf.NoMatchRenderer = c.NoMatchRenderer
 	conf.NoMatchFormat = c.NoMatchFormat
@@ -310,20 +314,21 @@ type namedListener struct {
 
 func defaultConfig() *Config {
 	c := &Config{
-		RequestWasNotMatchedStatusCode: StatusNoMatch,
-		ErrorStatusCode:                StatusNoMatch,
-		MockFileSearchPatterns:         ConfigMockFilePattern,
-		RequestBodyParsers:             make([]RequestBodyParser, 0),
-		Middlewares:                    make([]func(http.Handler) http.Handler, 0),
-		Loaders:                        make([]Loader, 0),
-		MockFileHandlers:               make([]MockFileHandler, 0),
-		HeaderNamesToRedact:            make(map[string]struct{}),
-		UseHTTP2:                       true,
-		Listeners:                      vlatte.NewListener(),
-		LogPretty:                      true,
-		LogLevel:                       vlatte.LogLevelInfo,
-		LogVerbosity:                   vlatte.LogHeader,
-		Colors:                         true,
+		RequestWasNotMatchedStatusCode:    StatusNoMatch,
+		MCPRequestWasNotMatchedStatusCode: http.StatusOK,
+		ErrorStatusCode:                   StatusNoMatch,
+		MockFileSearchPatterns:            ConfigMockFilePattern,
+		RequestBodyParsers:                make([]RequestBodyParser, 0),
+		Middlewares:                       make([]func(http.Handler) http.Handler, 0),
+		Loaders:                           make([]Loader, 0),
+		MockFileHandlers:                  make([]MockFileHandler, 0),
+		HeaderNamesToRedact:               make(map[string]struct{}),
+		UseHTTP2:                          true,
+		Listeners:                         vlatte.NewListener(),
+		LogPretty:                         true,
+		LogLevel:                          vlatte.LogLevelInfo,
+		LogVerbosity:                      vlatte.LogHeader,
+		Colors:                            true,
 		DebugFn: func(string, any) {
 			// Debug logging is off unless a DebugFn is given.
 		},
@@ -392,6 +397,13 @@ func (cb *ConfigBuilder) WorkDir(dir string) *ConfigBuilder {
 // MockNotFoundStatusCode defines the status code to be used when no mock matches with an HTTP request.
 func (cb *ConfigBuilder) MockNotFoundStatusCode(code int) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.RequestWasNotMatchedStatusCode = code })
+}
+
+// MCPNotFoundStatusCode sets the status of the JSON-RPC error that answers an MCP tool call no tool mock matches, on
+// the path of an endpoint mock: 200 by default. An MCP client may take another status as a failure of the transport
+// and drop the error, near misses included.
+func (cb *ConfigBuilder) MCPNotFoundStatusCode(code int) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.MCPRequestWasNotMatchedStatusCode = code })
 }
 
 // ErrorStatusCode defines the status code of a response vlatte makes when serving a request fails, such as a reply

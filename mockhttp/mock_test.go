@@ -1125,3 +1125,28 @@ func TestDescribe_DelayConfigurationRoundTripsWithoutSampling(t *testing.T) {
 		require.JSONEq(t, string(first), string(second))
 	}
 }
+
+func TestMock_DescribeMCPMockLoadsBack(t *testing.T) {
+	// An MCP mock describes under mcp, not under request, and its description builds the same mock: the matchers of an
+	// argument given twice go together under all.
+	m := MustNew(Setup().Silent())
+
+	mock, err := MCP("/mcp").ID("t").MCPTool("search", "Search").
+		MCPInputSchema(map[string]any{"type": "object"}).
+		MCPArgument("q", match.HasPrefix("a")).MCPArgument("q", match.HasSuffix("z")).
+		Reply(MCPJSON([]any{1, 2})).Build(m)
+	require.NoError(t, err)
+
+	desc, err := mock.MarshalJSON()
+	require.NoError(t, err)
+	require.JSONEq(t, `{"id":"t","mcp":{"endpoint":"/mcp","tool":{"name":"search","description":"Search",`+
+		`"input_schema":{"type":"object"},"arguments":{"q":["all",[["hasPrefix","a"],["hasSuffix","z"]]]}}},`+
+		`"mcp_result":{"json":[1,2]}}`, string(desc))
+
+	back, err := FromBytes(desc, "json").Build(m)
+	require.NoError(t, err)
+
+	again, err := back.MarshalJSON()
+	require.NoError(t, err)
+	require.JSONEq(t, string(desc), string(again))
+}

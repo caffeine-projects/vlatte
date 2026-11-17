@@ -10,9 +10,47 @@ This is vlatte playing an MCP server that your code calls. For vlatte serving MC
 
 An MCP client sends each JSON-RPC message as a `POST` to one endpoint, `/mcp` here. The server answers a request with JSON, or with an event stream that sends messages, such as progress, before the answer. It starts a session in its answer to `initialize`, with an `Mcp-Session-Id` header, which the client sends with every later request. The client also listens on a `GET` of the endpoint for what the server sends on its own, and ends the session with a `DELETE`.
 
-Each message is a mock that matches the method of the JSON-RPC body with `jsonpath`, so every mock gets its own requests at the one endpoint.
+## With MCP mocks
+
+[MCP mocks](/http/mock-files#mcp-server-mocks) answer the protocol themselves: an endpoint mock answers `initialize`, `ping`, notifications and `tools/list`, and a mock per tool answers that tool's calls. Their answers are JSON:
+
+```yaml
+# testdata/mcp/weather.yaml
+id: weather
+mcp:
+  endpoint: /mcp
+  server: {name: weather, version: 1.0.0}
+---
+id: forecast
+mcp:
+  endpoint: /mcp
+  tool:
+    name: forecast
+    input_schema: {type: object, properties: {city: {type: string}}}
+    arguments: {city: [equal, Lisbon]}
+mcp_result:
+  text: Sunny in Lisbon
+```
+
+In Go, the same mocks are:
+
+```go
+m.MustMock(
+	mockhttp.MCP("/mcp").ID("weather").MCPServerInfo("weather", "1.0.0"),
+	mockhttp.MCP("/mcp").ID("forecast").MCPTool("forecast", "").
+		MCPInputSchema(map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"type": "string"}}}).
+		MCPArgument("city", match.Equal("Lisbon")).
+		Reply(mockhttp.MCPText("Sunny in Lisbon")),
+)
+```
+
+A call no tool mock matches, such as the forecast of another city, gets JSON-RPC error `-32602`, with status `200`, which lists the mocks that came closest. The client keeps its session and gets the error as the call's.
+
+To stream progress before a result, which MCP mocks don't, write the messages as plain HTTP mocks, as the rest of this guide does.
 
 ## The mock files
+
+Each message is a mock that matches the method of the JSON-RPC body with `jsonpath`, so every mock gets its own requests at the one endpoint.
 
 `initialize` answers with an event stream. Its one event is the result, a template that takes the request's `id` and agrees to the protocol version the client asked for:
 

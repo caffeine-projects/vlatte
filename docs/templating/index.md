@@ -48,6 +48,7 @@ Templates read:
 | `.Data` | The map set with `m.SetData`. |
 | `.Provided.<key>` | What `Setup().TemplateDataProviders(providers)` provide. |
 | `.Extra` | The reply's `template.data`, or `SetTemplateData` in Go. Webhooks don't have it. |
+| `(fromJSON .Request.Body.String).params.arguments.<name>` | An argument of an MCP tool call, in the text of an [`mcp_result`](/http/mock-files#mcp-server-mocks). |
 | `.Scenarios.State "name"` | The state of a [scenario](/scenarios/). |
 | `.Scenarios.StateOf "name" "key"` | The state of the instance of a [scenario](/scenarios/) of a key. |
 | `range .Explanation.Messages` | What the matchers of the mock recorded when it matched, such as why the matcher under a `not` didn't match. Their wording may change between releases. gRPC doesn't have it. |

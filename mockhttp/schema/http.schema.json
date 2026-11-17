@@ -129,9 +129,81 @@
       "description": "Forward what no other mock matches to a target, as proxy does: any request but a CONNECT, and the ones in absolute form a forward proxy sends on to their hosts. It comes last, at the highest priority, unless priority says otherwise, and needs no request.",
       "$ref": "#/properties/proxy"
     },
+    "mcp": {
+      "description": "Make the mock an MCP mock: the endpoint mock of an MCP server, with server, or the mock of one of its tools, with tool. It matches the method and path itself.",
+      "type": "object",
+      "properties": {
+        "endpoint": { "description": "Path of the MCP server, such as /mcp: the mock matches requests to exactly it.", "type": "string", "pattern": "^/" },
+        "server": {
+          "description": "The MCP server, which initialize answers: the mock is its endpoint mock.",
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": "string" }
+          },
+          "required": [ "name", "version" ],
+          "additionalProperties": false
+        },
+        "tool": {
+          "description": "The tool whose calls the mock answers.",
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "description": { "description": "Description of the tool, which tools/list shows.", "type": "string" },
+            "input_schema": { "description": "JSON Schema of the arguments of the tool, which tools/list shows.", "type": "object" },
+            "arguments": { "description": "Arguments of the call to match, by name.", "$ref": "#/$defs/keyed_matcher" }
+          },
+          "required": [ "name" ],
+          "additionalProperties": false
+        }
+      },
+      "required": [ "endpoint" ],
+      "oneOf": [ { "required": [ "server" ] }, { "required": [ "tool" ] } ],
+      "additionalProperties": false
+    },
+    "mcp_result": {
+      "description": "Answer a tool call of an MCP tool mock: a text, a JSON value or a JSON-RPC error, in the JSON-RPC envelope.",
+      "type": "object",
+      "properties": {
+        "text": { "description": "Text of the result: one text content.", "type": "string" },
+        "json": { "description": "Value of the result, as JSON in one text content." },
+        "is_error": { "description": "Make the text the tool's own error: isError is true.", "$ref": "#/$defs/bool" },
+        "error": {
+          "description": "A JSON-RPC error, in place of a result.",
+          "type": "object",
+          "properties": {
+            "code": { "type": "integer" },
+            "message": { "type": "string" }
+          },
+          "required": [ "code", "message" ],
+          "additionalProperties": false
+        },
+        "template": {
+          "description": "Render the text as a template.",
+          "type": "object",
+          "properties": {
+            "enabled": { "$ref": "#/$defs/bool" },
+            "data": { "description": "Data the template reads as .Extra." }
+          },
+          "additionalProperties": false
+        }
+      },
+      "oneOf": [ { "required": [ "text" ] }, { "required": [ "json" ] }, { "required": [ "error" ] } ],
+      "allOf": [
+        {
+          "if": { "required": [ "is_error" ], "properties": { "is_error": { "const": true } } },
+          "then": { "required": [ "text" ] }
+        },
+        {
+          "if": { "required": [ "template" ], "properties": { "template": { "required": [ "enabled" ], "properties": { "enabled": { "const": true } } } } },
+          "then": { "required": [ "text" ] }
+        }
+      ],
+      "additionalProperties": false
+    },
     "ext": { "description": "Settings for the MockFileHandlers of the server.", "type": "object" }
   },
-  "anyOf": [ { "required": [ "request" ] }, { "required": [ "proxy_all" ] } ],
+  "anyOf": [ { "required": [ "request" ] }, { "required": [ "proxy_all" ] }, { "required": [ "mcp" ] } ],
   "additionalProperties": false,
   "allOf": [
     { "not": { "required": [ "response", "response_sequence" ] } },
@@ -143,8 +215,46 @@
     { "not": { "required": [ "response_sequence", "proxy_all" ] } },
     { "not": { "required": [ "response_random", "proxy" ] } },
     { "not": { "required": [ "response_random", "proxy_all" ] } },
-    { "not": { "required": [ "proxy", "proxy_all" ] } }
+    { "not": { "required": [ "proxy", "proxy_all" ] } },
+    { "not": { "required": [ "mcp_result", "response" ] } },
+    { "not": { "required": [ "mcp_result", "response_sequence" ] } },
+    { "not": { "required": [ "mcp_result", "response_random" ] } },
+    { "not": { "required": [ "mcp_result", "proxy" ] } },
+    { "not": { "required": [ "mcp_result", "proxy_all" ] } },
+    { "not": { "required": [ "mcp", "proxy_all" ] } },
+    {
+      "if": { "required": [ "mcp" ], "properties": { "mcp": { "required": [ "server" ] } } },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": [ "response" ] },
+            { "required": [ "response_sequence" ] },
+            { "required": [ "response_random" ] },
+            { "required": [ "proxy" ] },
+            { "required": [ "mcp_result" ] }
+          ]
+        }
+      }
+    }
   ],
+  "dependentRequired": { "mcp_result": [ "mcp" ] },
+  "if": { "required": [ "mcp" ] },
+  "then": {
+    "properties": {
+      "request": {
+        "not": {
+          "anyOf": [
+            { "required": [ "method" ] },
+            { "required": [ "url" ] },
+            { "required": [ "url_match" ] },
+            { "required": [ "path" ] },
+            { "required": [ "path_template" ] },
+            { "required": [ "path_params" ] }
+          ]
+        }
+      }
+    }
+  },
   "$defs": {
     "delay": {
       "description": "A duration shorthand or a delay distribution. Duration parameters are whole milliseconds or Go duration strings; bounds and representability are checked when loading.",

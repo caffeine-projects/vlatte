@@ -149,6 +149,10 @@ func New(config ...Option) (*Server, error) {
 		conf.RequestWasNotMatchedStatusCode = StatusNoMatch
 	}
 
+	if conf.MCPRequestWasNotMatchedStatusCode == 0 {
+		conf.MCPRequestWasNotMatchedStatusCode = http.StatusOK
+	}
+
 	if conf.ErrorStatusCode == 0 {
 		conf.ErrorStatusCode = StatusNoMatch
 	}

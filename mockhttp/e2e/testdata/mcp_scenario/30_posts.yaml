@@ -1,0 +1,10 @@
+# The REST route that creates a post moves the scenario on.
+id: posts
+scenario: {name: posts, required_state: started, new_state: created}
+request:
+  method: POST
+  path: /posts
+response:
+  status: 201
+  header: {content-type: application/json}
+  body: {id: 7}

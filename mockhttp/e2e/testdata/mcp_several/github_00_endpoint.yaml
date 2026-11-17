@@ -1,0 +1,5 @@
+# The github MCP server at /github/mcp.
+id: github
+mcp:
+  endpoint: /github/mcp
+  server: {name: github, version: 1.0.0}

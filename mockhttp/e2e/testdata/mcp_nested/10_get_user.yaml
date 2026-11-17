@@ -1,0 +1,7 @@
+# get_user of the MCP server under /api.
+id: get-user
+mcp:
+  endpoint: /api/mcp
+  tool: {name: get_user}
+mcp_result:
+  json: {id: 1, name: Ada}

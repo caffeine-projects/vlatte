@@ -106,7 +106,7 @@ func (l *fileLoader) load(app *Server, swap vlatte.Swap[*Mock]) error {
 	}
 
 	// A reload replaces the mocks of the last load, so edited and removed files take effect.
-	scope, err := app.RemockWith(context.Background(), l.scope, swap, builders...)
+	scope, err := app.RemockWith(context.Background(), l.scope, checkMCPEndpoints(swap), builders...)
 	if err != nil {
 		return fmt.Errorf("loader: %w", err)
 	}
@@ -145,4 +145,39 @@ func isMockFile(name string) bool {
 	}
 
 	return false
+}
+
+// checkMCPEndpoints returns a swap that fails when two enabled MCP endpoint mocks of built, the mocks of the mock files,
+// share a path, and otherwise calls next. A nil next swaps nothing more.
+func checkMCPEndpoints(next vlatte.Swap[*Mock]) vlatte.Swap[*Mock] {
+	return func(built, gone []*Mock) ([]*Mock, []*Mock, error) {
+		endpoints := make(map[string]*Mock)
+
+		for _, m := range built {
+			endpoint, ok := isMCPEndpoint(m)
+			if !ok {
+				continue
+			}
+
+			first, ok := endpoints[endpoint]
+			if !ok {
+				endpoints[endpoint] = m
+				continue
+			}
+
+			if first.Origin() == m.Origin() {
+				return nil, nil, fmt.Errorf("mcp: endpoint %s is declared twice in %s: keep one endpoint mock per path",
+					endpoint, m.Origin())
+			}
+
+			return nil, nil, fmt.Errorf("mcp: endpoint %s is declared by %s and %s: keep one endpoint mock per path",
+				endpoint, first.Origin(), m.Origin())
+		}
+
+		if next == nil {
+			return nil, nil, nil
+		}
+
+		return next(built, gone)
+	}
 }

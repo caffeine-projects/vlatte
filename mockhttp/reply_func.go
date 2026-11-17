@@ -56,9 +56,8 @@ type funcReplier func(http.ResponseWriter, *RequestValues) (*Response, error)
 func (f funcReplier) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
 	r := input.RequestValues
 	if raw := r.RawRequest; raw != nil && raw.Context() != ctx {
-		values := *r
-		values.RawRequest = raw.WithContext(ctx)
-		r = &values
+		r = r.Clone()
+		r.RawRequest = raw.WithContext(ctx)
 	}
 
 	return f(input.Writer, r)

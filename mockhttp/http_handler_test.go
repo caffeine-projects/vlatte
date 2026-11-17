@@ -2310,3 +2310,11 @@ func BenchmarkServeHTTP_MocksTried(b *testing.B) {
 		})
 	}
 }
+
+func TestHTTPHandler_NearMissNamesMCPParts(t *testing.T) {
+	// Without an endpoint mock the answer is the server's no-match problem, whose near misses name the MCP parts.
+	m := startMCP(t, nil, MCP("/mcp").ID("get-user").MCPTool("get_user", "").Reply(MCPText("ada")))
+
+	_, body := mcpPost(t, m.URL("/mcp"), toolCall("other", `{}`))
+	require.Contains(t, body, "mcp tool")
+}

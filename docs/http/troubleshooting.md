@@ -102,7 +102,7 @@ m := mockhttp.MustNew(mockhttp.Setup().
 	NoMatchRenderer(apiNoMatch{fallback: mockhttp.DefaultNoMatchRenderer(mockhttp.NoMatchAuto)}))
 ```
 
-The server calls a renderer for many requests at once. One that writes nothing answers with the no-match status and no body. A renderer and a format other than `auto` don't go together: the format configures the default renderer, and building the server fails.
+The server calls a renderer for many requests at once. One that writes nothing answers with the no-match status and no body. A tool call on the path of an [MCP endpoint mock](/http/mock-files#mcp-server-mocks) gets a JSON-RPC error instead, whatever the renderer: an MCP client drops its session on an error answer of another shape. A renderer and a format other than `auto` don't go together: the format configures the default renderer, and building the server fails.
 
 ## Debug headers
 

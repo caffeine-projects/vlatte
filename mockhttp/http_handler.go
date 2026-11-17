@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"maps"
 	"mime/multipart"
 	"net"
@@ -520,7 +521,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case h.app.proxyAll != nil && r.Method != http.MethodConnect:
 			h.serveUpstream(w, reqValues, h.app.proxyAll, capture)
 		default:
-			h.onNoMatches(w, reqValues, misses)
+			h.onNoMatches(w, reqValues, stored, misses)
 		}
 
 		return
@@ -1218,7 +1219,15 @@ func (h *mockHandler) renderFailed(r *RequestValues, proxied bool, err error) {
 
 // onNoMatches answers a request no mock matched through the server's NoMatchRenderer, with the mocks that came
 // closest, of misses, unless the server reports none: misses is nil then. Its journal entry lists them too.
-func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, misses *vlatte.Misses[*Mock, *selectorInput]) {
+//
+// A tool call on the path of an enabled MCP endpoint mock of stored gets a JSON-RPC error instead, whatever the
+// renderer: an MCP client fails its whole session on an error answer whose body is no JSON-RPC message.
+func (h *mockHandler) onNoMatches(
+	w http.ResponseWriter,
+	r *RequestValues,
+	stored iter.Seq[*Mock],
+	misses *vlatte.Misses[*Mock, *selectorInput],
+) {
 	defer h.lifecycle.OnNoMatch(r)
 
 	if misses != nil {
@@ -1233,6 +1242,10 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, misse
 
 	w.Header().Set(HeaderVlatteError, vlatte.FailureNoMatch)
 	w.Header().Set(HeaderXContentTypeOptions, _noSniff)
+
+	if h.answerMCPToolCall(w, nm, stored) {
+		return
+	}
 
 	h.app.noMatch.RenderNoMatch(w, nm)
 
@@ -1334,7 +1347,8 @@ func describeExpectation(e *expectation) string {
 
 	switch scope {
 	case matchingScopeHeader, matchingScopeQuery, matchingScopeQueries, matchingScopeFormField, matchingScopeFormFile,
-		matchingScopeHeaders, matchingScopeFormFields, matchingScopeCookie, matchingScopePathParam:
+		matchingScopeHeaders, matchingScopeFormFields, matchingScopeCookie, matchingScopePathParam, matchingScopeMCP,
+		matchingScopeMCPCall, matchingScopeMCPEndpoint:
 		return name + " " + e.Key
 	}
 

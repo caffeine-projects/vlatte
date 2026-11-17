@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"net/http"
 	"net/url"
+	"sync/atomic"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
@@ -64,6 +65,36 @@ type RequestValues struct {
 	// answer: see answerWriter. A request the server doesn't serve, such as one rebuilt from the journal, has none, and
 	// reaches no lifecycle.
 	answer *answerWriter
+
+	// mcp is the JSON-RPC message of the body, once an MCP mock read it: see mcpMessageOf.
+	mcp atomic.Pointer[mcpDecoded]
+}
+
+// Clone returns a shallow copy of r: the copy shares the request, the body, the matched mock and the template data of r,
+// and setting one of its fields, such as RawRequest, leaves r as it was.
+func (r *RequestValues) Clone() *RequestValues {
+	c := &RequestValues{
+		ReqID:           r.ReqID,
+		StartedAtTime:   r.StartedAtTime,
+		RawRequest:      r.RawRequest,
+		URL:             r.URL,
+		URLPathSegments: r.URLPathSegments,
+		RawBodyBytes:    r.RawBodyBytes,
+		ParsedBodyData:  r.ParsedBodyData,
+		App:             r.App,
+		Mock:            r.Mock,
+		Explanation:     r.Explanation,
+		Data:            r.Data,
+		bodyParser:      r.bodyParser,
+		nearMisses:      r.nearMisses,
+		scenarioMoves:   r.scenarioMoves,
+		journal:         r.journal,
+		answer:          r.answer,
+	}
+
+	c.mcp.Store(r.mcp.Load())
+
+	return c
 }
 
 // ID returns the ID the server gave the request, as its logs and journal name it.

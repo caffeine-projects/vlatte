@@ -241,6 +241,14 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		{
+			Key: "no_match_mcp_status_code", Kind: config.Int, Default: strconv.Itoa(d.MCPRequestWasNotMatchedStatusCode),
+			Usage: "Status code of the JSON-RPC error that answers an MCP tool call no tool mock matches.",
+			Set: func(c *Config, v config.Value) error {
+				c.MCPRequestWasNotMatchedStatusCode = int(v.Int)
+				return checkStatus(v.Int)
+			},
+		},
+		{
 			Key: "no_match_format", Kind: config.Int, Choices: _noMatchFormats, Default: choiceName(_noMatchFormats, int64(d.NoMatchFormat)),
 			Usage: "Format of the response to a request that matches no mock. auto follows its Accept header.",
 			Set:   func(c *Config, v config.Value) error { c.NoMatchFormat = NoMatchFormat(v.Int); return nil },

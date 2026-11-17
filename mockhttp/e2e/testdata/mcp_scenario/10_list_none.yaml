@@ -1,0 +1,8 @@
+# list_posts before a post is created.
+id: list-none
+scenario: {name: posts, required_state: started}
+mcp:
+  endpoint: /mcp
+  tool: {name: list_posts}
+mcp_result:
+  json: []

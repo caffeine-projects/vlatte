@@ -4,6 +4,10 @@
 example\:petstore: ## run the Pet Store mock API on 127.0.0.1:8080
 	@go run ./cmd/vlatte --addr=127.0.0.1:8080 --admin-addr=127.0.0.1:8081 --workdir=.local/petstore --mock-files='examples/01-petstore/testdata/*.mock.yaml'
 
+.PHONY: example\:mcp-github
+example\:mcp-github: ## run the GitHub MCP server mock on 127.0.0.1:8080/mcp/
+	@go run ./cmd/vlatte --addr=127.0.0.1:8080 --admin-addr=127.0.0.1:8081 --workdir=.local/mcp-github --mock-files='examples/05-mcp-github/testdata/github.mock.yaml'
+
 LAB_ADDR ?= 127.0.0.1:8080
 
 .PHONY: example\:private-network

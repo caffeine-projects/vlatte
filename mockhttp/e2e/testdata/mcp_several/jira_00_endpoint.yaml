@@ -1,0 +1,5 @@
+# The jira MCP server at /jira/mcp.
+id: jira
+mcp:
+  endpoint: /jira/mcp
+  server: {name: jira, version: 1.0.0}

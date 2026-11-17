@@ -586,3 +586,56 @@ func clearDir(t require.TestingT, dir string) {
 		require.NoError(t, os.RemoveAll(filepath.Join(dir, e.Name())))
 	}
 }
+
+// writeMockFiles writes files, by name, into dir.
+func writeMockFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+
+	for name, content := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
+	}
+}
+
+const _mcpEndpointDoc = "mcp: {endpoint: /mcp, server: {name: s, version: '1'}}\n"
+
+func TestLoader_TwoEndpointFilesOnOnePathFail(t *testing.T) {
+	// Two endpoint mocks on one path would answer as one server: the files fail to load, naming both.
+	dir := t.TempDir()
+	writeMockFiles(t, dir, map[string]string{"a.mock.yaml": _mcpEndpointDoc, "b.mock.yaml": _mcpEndpointDoc})
+
+	m := MustNew(Setup().Silent().MockFilePatterns(filepath.Join(dir, "*.yaml")))
+	t.Cleanup(m.Close)
+
+	err := m.Start()
+	require.ErrorContains(t, err, "loader: server: mcp: endpoint /mcp is declared by "+filepath.Join(dir, "a.mock.yaml")+
+		" and "+filepath.Join(dir, "b.mock.yaml")+": keep one endpoint mock per path")
+}
+
+func TestLoader_TwoEndpointDocumentsInOneFileFail(t *testing.T) {
+	dir := t.TempDir()
+	writeMockFiles(t, dir, map[string]string{"a.mock.yaml": _mcpEndpointDoc + "---\n" + _mcpEndpointDoc})
+
+	m := MustNew(Setup().Silent().MockFilePatterns(filepath.Join(dir, "*.yaml")))
+	t.Cleanup(m.Close)
+
+	err := m.Start()
+	require.ErrorContains(t, err, "loader: server: mcp: endpoint /mcp is declared twice in "+
+		filepath.Join(dir, "a.mock.yaml")+": keep one endpoint mock per path")
+}
+
+func TestLoader_ReloadIntoDuplicateEndpointsKeepsMocks(t *testing.T) {
+	// A reload that fails changes nothing: the endpoint loaded first still answers.
+	dir := t.TempDir()
+	writeMockFiles(t, dir, map[string]string{"a.mock.yaml": _mcpEndpointDoc})
+
+	m := MustNew(Setup().Silent().MockFilePatterns(filepath.Join(dir, "*.yaml")))
+	t.Cleanup(m.Close)
+	require.NoError(t, m.Start())
+
+	writeMockFiles(t, dir, map[string]string{"b.mock.yaml": _mcpEndpointDoc})
+	require.ErrorContains(t, m.Reload(), "mcp: endpoint /mcp is declared by")
+
+	res, body := mcpPost(t, m.URL("/mcp"), `{"jsonrpc":"2.0","id":1,"method":"ping"}`)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, `{"jsonrpc":"2.0","id":1,"result":{}}`, body)
+}

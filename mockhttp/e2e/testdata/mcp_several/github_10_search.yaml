@@ -1,0 +1,7 @@
+# search of github, which answers its server's name.
+id: github-search
+mcp:
+  endpoint: /github/mcp
+  tool: {name: search}
+mcp_result:
+  text: github

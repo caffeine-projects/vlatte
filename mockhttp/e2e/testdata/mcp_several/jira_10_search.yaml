@@ -1,0 +1,7 @@
+# search of jira, which answers its server's name.
+id: jira-search
+mcp:
+  endpoint: /jira/mcp
+  tool: {name: search}
+mcp_result:
+  text: jira

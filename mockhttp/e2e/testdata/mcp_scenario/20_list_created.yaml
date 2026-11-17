@@ -1,0 +1,8 @@
+# list_posts once POST /posts created one.
+id: list-created
+scenario: {name: posts, required_state: created}
+mcp:
+  endpoint: /mcp
+  tool: {name: list_posts}
+mcp_result:
+  json: [{id: 7}]

@@ -115,6 +115,24 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"url_match that doesn't compile", "request: {url_match: '('}\n", []want{{config.CodeInvalidValue, "request.url_match", `request.url_match must be a regular expression, not "("`, "error parsing regexp"}}},
 		{"url matcher that doesn't build", "request: {url: [regex, '(']}\n", []want{{config.CodeInvalidValue, "request.url", "regex takes a regular expression", ""}}},
 		{"url and path", "request: {url: /x, path: /y}\n", []want{{config.CodeConflict, "request.path", "request.path is set with request.url", "keep one of them"}}},
+		{"mcp without an endpoint", "mcp: {server: {name: s, version: '1'}}\n", []want{{config.CodeMissingValue, "mcp.endpoint", "mcp.endpoint is required", ""}}},
+		{"mcp endpoint not a path", "mcp: {endpoint: mcp, server: {name: s, version: '1'}}\n", []want{{config.CodeInvalidValue, "mcp.endpoint", `mcp.endpoint must start with /, not "mcp"`, "write the path, such as /mcp"}}},
+		{"mcp neither server nor tool", "mcp: {endpoint: /mcp}\n", []want{{config.CodeMissingValue, "mcp", "mcp sets neither server nor tool", "set server for the endpoint mock or tool for a tool mock"}}},
+		{"mcp server and tool", "mcp: {endpoint: /mcp, server: {name: s, version: '1'}, tool: {name: t}}\nmcp_result: {text: x}\n", []want{{config.CodeInvalidValue, "mcp", "mcp sets both server and tool", "keep one"}}},
+		{"mcp server without a version", "mcp: {endpoint: /mcp, server: {name: s}}\n", []want{{config.CodeMissingValue, "mcp.server.version", "mcp.server.version is required", ""}}},
+		{"mcp tool without a name", "mcp: {endpoint: /mcp, tool: {description: d}}\nmcp_result: {text: x}\n", []want{{config.CodeMissingValue, "mcp.tool.name", "mcp.tool.name is required", ""}}},
+		{"mcp endpoint with a response", "mcp: {endpoint: /mcp, server: {name: s, version: '1'}}\nresponse: {status: 200}\n", []want{{config.CodeInvalidValue, "mcp.server", "an endpoint mock answers on its own, not with response", "remove response"}}},
+		{"mcp tool without a reply", "mcp: {endpoint: /mcp, tool: {name: t}}\n", []want{{config.CodeMissingValue, "mcp.tool", "a tool mock needs a reply", "set mcp_result, response, response_sequence, response_random or proxy"}}},
+		{"mcp with proxy_all", "mcp: {endpoint: /mcp, tool: {name: t}}\nproxy_all: {target: 'http://a'}\n", []want{{config.CodeInvalidValue, "mcp", "mcp and proxy_all don't go together", "use proxy for a tool"}}},
+		{"mcp with a path", "request: {path: /x}\nmcp: {endpoint: /mcp, tool: {name: t}}\nmcp_result: {text: x}\n", []want{{config.CodeInvalidValue, "request.path", "request.path is set by mcp", "remove request.path"}}},
+		{"mcp input schema not an object", "mcp: {endpoint: /mcp, tool: {name: t, input_schema: 5}}\nmcp_result: {text: x}\n", []want{{config.CodeInvalidValue, "mcp.tool.input_schema", "must be an object", ""}}},
+		{"mcp_result without mcp", "request: {path: /x}\nmcp_result: {text: x}\n", []want{{config.CodeInvalidValue, "mcp_result", "mcp_result needs mcp.tool", "add mcp.tool, or use response"}}},
+		{"mcp_result with text and json", "mcp: {endpoint: /mcp, tool: {name: t}}\nmcp_result: {text: x, json: 1}\n", []want{{config.CodeConflict, "mcp_result.json", "mcp_result.json is set with mcp_result.text", "keep one of them"}}},
+		{"mcp_result with nothing", "mcp: {endpoint: /mcp, tool: {name: t}}\nmcp_result: {is_error: false}\n", []want{{config.CodeMissingValue, "mcp_result", "mcp_result sets none of text, json and error", "set one"}}},
+		{"mcp_result is_error without text", "mcp: {endpoint: /mcp, tool: {name: t}}\nmcp_result: {json: 1, is_error: true}\n", []want{{config.CodeInvalidValue, "mcp_result.is_error", "is_error goes with text", "remove is_error or use text"}}},
+		{"mcp_result template without text", "mcp: {endpoint: /mcp, tool: {name: t}}\nmcp_result: {json: 1, template: {enabled: true}}\n", []want{{config.CodeInvalidValue, "mcp_result.template", "only a text result is a template", "use text with toJSON"}}},
+		{"mcp_result error without a message", "mcp: {endpoint: /mcp, tool: {name: t}}\nmcp_result: {error: {code: 1}}\n", []want{{config.CodeMissingValue, "mcp_result.error.message", "mcp_result.error.message is required", ""}}},
+		{"mcp_result with response", "mcp: {endpoint: /mcp, tool: {name: t}}\nmcp_result: {text: x}\nresponse: {status: 200}\n", []want{{config.CodeConflict, "mcp_result", "mcp_result is set with response", "keep one of them"}}},
 		{"path_template without its /", "request: {path_template: 'users/{id}'}\n", []want{{config.CodeInvalidValue, "request.path_template", `request.path_template="users/{id}" is not a path template: a path template starts with /`, "a parameter is a whole segment"}}},
 		{"path_template with a parameter in a segment", "request: {path_template: '/users/a{id}'}\n", []want{{config.CodeInvalidValue, "request.path_template", `segment "a{id}": a parameter is a whole segment`, "such as /users/{id}"}}},
 		{"path_template naming a parameter twice", "request: {path_template: '/a/{id}/b/{id}'}\n", []want{{config.CodeInvalidValue, "request.path_template", `parameter "id" is named twice`, ""}}},
@@ -991,6 +1009,8 @@ func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 	require.Equal(t, _sequenceSchema.Keys(), keys(props(raw)["response_sequence"]), "response_sequence")
 	require.Equal(t, _randomSchema.Keys(), keys(props(raw)["response_random"]), "response_random")
 	require.Equal(t, _proxySchema.Keys(), keys(props(raw)["proxy"]), "proxy")
+	require.Equal(t, _mcpSchema.Keys(), keys(props(raw)["mcp"], "server", "tool"), "mcp")
+	require.Equal(t, _mcpResultSchema.Keys(), keys(props(raw)["mcp_result"], "error", "template"), "mcp_result")
 	require.Equal(t, _eventSchema.Keys(), keys(defs["on_complete_event"]), "on_complete")
 	require.Equal(t, _filePatternSchema.Keys(), keys(defs["file_pattern"]), "form_file")
 	require.Equal(t, _basicAuthSchema.Keys(), keys(props(props(raw)["request"])["basic_auth"]), "basic_auth")
@@ -1113,6 +1133,28 @@ var _scalarKeys = []struct {
 	{"proxy.ssl_verify", true, inProxy("ssl_verify")},
 	{"proxy.x_forwarded", true, inProxy("x_forwarded")},
 	{"proxy.preserve_host", true, inProxy("preserve_host")},
+	{"mcp.endpoint", "/mcp", func(v any) map[string]any {
+		return map[string]any{"mcp": map[string]any{"endpoint": v, "server": map[string]any{"name": "s", "version": "1"}}}
+	}},
+	{"mcp.server.name", "s", func(v any) map[string]any {
+		return map[string]any{"mcp": map[string]any{"endpoint": "/mcp", "server": map[string]any{"name": v, "version": "1"}}}
+	}},
+	{"mcp.server.version", "1", func(v any) map[string]any {
+		return map[string]any{"mcp": map[string]any{"endpoint": "/mcp", "server": map[string]any{"name": "s", "version": v}}}
+	}},
+	{"mcp.tool.name", "t", inMCPTool(func(v any) map[string]any { return map[string]any{"name": v} })},
+	{"mcp.tool.description", "d", inMCPTool(func(v any) map[string]any { return map[string]any{"name": "t", "description": v} })},
+	{"mcp_result.text", "x", inMCPResult(func(v any) map[string]any { return map[string]any{"text": v} })},
+	{"mcp_result.is_error", true, inMCPResult(func(v any) map[string]any { return map[string]any{"text": "x", "is_error": v} })},
+	{"mcp_result.error.code", int64(-32000), inMCPResult(func(v any) map[string]any {
+		return map[string]any{"error": map[string]any{"code": v, "message": "m"}}
+	})},
+	{"mcp_result.error.message", "m", inMCPResult(func(v any) map[string]any {
+		return map[string]any{"error": map[string]any{"code": int64(1), "message": v}}
+	})},
+	{"mcp_result.template.enabled", true, inMCPResult(func(v any) map[string]any {
+		return map[string]any{"text": "x", "template": map[string]any{"enabled": v}}
+	})},
 	{"on_complete.name", "hook", func(v any) map[string]any {
 		return withRequest(map[string]any{"on_complete": []any{map[string]any{"name": v}}})
 	}},
@@ -1159,6 +1201,26 @@ func topLevel(key string) func(v any) map[string]any {
 
 func inReply(key string) func(v any) map[string]any {
 	return func(v any) map[string]any { return withRequest(map[string]any{"response": map[string]any{key: v}}) }
+}
+
+// inMCPTool returns a tool mock whose mcp.tool is tool(v), with a text result.
+func inMCPTool(tool func(v any) map[string]any) func(v any) map[string]any {
+	return func(v any) map[string]any {
+		return map[string]any{
+			"mcp":        map[string]any{"endpoint": "/mcp", "tool": tool(v)},
+			"mcp_result": map[string]any{"text": "x"},
+		}
+	}
+}
+
+// inMCPResult returns a tool mock whose mcp_result is result(v).
+func inMCPResult(result func(v any) map[string]any) func(v any) map[string]any {
+	return func(v any) map[string]any {
+		return map[string]any{
+			"mcp":        map[string]any{"endpoint": "/mcp", "tool": map[string]any{"name": "t"}},
+			"mcp_result": result(v),
+		}
+	}
 }
 
 func inProxy(key string) func(v any) map[string]any {
@@ -1221,7 +1283,11 @@ func TestJSONSchema_ScalarTypesAgreeWithTheDecoder(t *testing.T) {
 		"response_sequence.": func() ([]string, func(string) (config.Kind, bool)) {
 			return _sequenceSchema.Keys(), _sequenceSchema.KindOf
 		},
-		"proxy.":       func() ([]string, func(string) (config.Kind, bool)) { return _proxySchema.Keys(), _proxySchema.KindOf },
+		"proxy.": func() ([]string, func(string) (config.Kind, bool)) { return _proxySchema.Keys(), _proxySchema.KindOf },
+		"mcp.":   func() ([]string, func(string) (config.Kind, bool)) { return _mcpSchema.Keys(), _mcpSchema.KindOf },
+		"mcp_result.": func() ([]string, func(string) (config.Kind, bool)) {
+			return _mcpResultSchema.Keys(), _mcpResultSchema.KindOf
+		},
 		"on_complete.": func() ([]string, func(string) (config.Kind, bool)) { return _eventSchema.Keys(), _eventSchema.KindOf },
 		"request.form_file.f.": func() ([]string, func(string) (config.Kind, bool)) {
 			return _filePatternSchema.Keys(), _filePatternSchema.KindOf
@@ -3086,4 +3152,94 @@ func encodeMock(t *rapid.T, doc map[string]any, format string) []byte {
 	}
 
 	return b
+}
+
+func TestMockSchema_MCPDocumentsBuild(t *testing.T) {
+	// The endpoint document, and a tool document with each way to reply, build.
+	m := MustNew(Setup().Silent())
+
+	tests := []struct {
+		name string
+		doc  string
+	}{
+		{"endpoint", "mcp: {endpoint: /mcp, server: {name: s, version: '1'}}\n"},
+		{"tool with text", "mcp: {endpoint: /mcp, tool: {name: t}}\nmcp_result: {text: x}\n"},
+		{"tool with json", "mcp: {endpoint: /mcp, tool: {name: t, input_schema: {type: object}}}\nmcp_result: {json: {a: 1}}\n"},
+		{"tool with an error", "mcp: {endpoint: /mcp, tool: {name: t}}\nmcp_result: {error: {code: -32000, message: m}}\n"},
+		{"tool with arguments and a header", "request: {header: {x-team: a}}\n" +
+			"mcp: {endpoint: /mcp, tool: {name: t, arguments: {id: [equal, 1]}}}\nmcp_result: {text: x}\n"},
+		{"tool with proxy", "mcp: {endpoint: /mcp, tool: {name: t}}\nproxy: {target: 'http://a'}\n"},
+		{"tool with response", "mcp: {endpoint: /mcp, tool: {name: t}}\nresponse: {status: 200}\n"},
+		{"text with template data, not enabled", "mcp: {endpoint: /mcp, tool: {name: t}}\nmcp_result: {text: x, template: {data: {a: 1}}}\n"},
+		{"json with a disabled template", "mcp: {endpoint: /mcp, tool: {name: t}}\nmcp_result: {json: 1, template: {enabled: false}}\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := FromBytes([]byte(tt.doc), "yaml").Build(m)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestJSONSchema_RejectsMCPMocksTheDecoderRejects(t *testing.T) {
+	// An editor marks what fails to load. Each case has a twin without the fault, which the schema accepts, so the
+	// rule the case names is what rejects it.
+	schema, _ := loadJSONSchema(t)
+
+	endpoint := map[string]any{"endpoint": "/mcp", "server": map[string]any{"name": "s", "version": "1"}}
+	tool := map[string]any{"endpoint": "/mcp", "tool": map[string]any{"name": "t"}}
+
+	tests := []struct {
+		name string
+		bad  map[string]any
+		good map[string]any
+	}{
+		{
+			name: "a result without an MCP tool",
+			bad:  map[string]any{"request": map[string]any{"path": "/x"}, "mcp_result": map[string]any{"text": "hi"}},
+			good: map[string]any{"mcp": tool, "mcp_result": map[string]any{"text": "hi"}},
+		},
+		{
+			name: "an endpoint mock with a response",
+			bad:  map[string]any{"mcp": endpoint, "response": map[string]any{"status": int64(200)}},
+			good: map[string]any{"mcp": endpoint},
+		},
+		{
+			name: "an endpoint mock with a result",
+			bad:  map[string]any{"mcp": endpoint, "mcp_result": map[string]any{"text": "hi"}},
+			good: map[string]any{"mcp": tool, "mcp_result": map[string]any{"text": "hi"}},
+		},
+		{
+			name: "an MCP mock with a request path",
+			bad: map[string]any{
+				"mcp": tool, "mcp_result": map[string]any{"text": "hi"}, "request": map[string]any{"path": "/x"},
+			},
+			good: map[string]any{
+				"mcp": tool, "mcp_result": map[string]any{"text": "hi"},
+				"request": map[string]any{"header": map[string]any{"x-a": "1"}},
+			},
+		},
+		{
+			name: "is_error without text",
+			bad:  map[string]any{"mcp": tool, "mcp_result": map[string]any{"json": int64(1), "is_error": true}},
+			good: map[string]any{"mcp": tool, "mcp_result": map[string]any{"text": "x", "is_error": true}},
+		},
+		{
+			name: "an enabled template without text",
+			bad: map[string]any{
+				"mcp": tool, "mcp_result": map[string]any{"json": int64(1), "template": map[string]any{"enabled": true}},
+			},
+			good: map[string]any{
+				"mcp": tool, "mcp_result": map[string]any{"json": int64(1), "template": map[string]any{"enabled": false}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, schema.Validate(instance(t, tt.good)))
+			require.Error(t, schema.Validate(instance(t, tt.bad)))
+		})
+	}
 }

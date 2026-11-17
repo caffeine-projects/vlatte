@@ -78,6 +78,7 @@ type mockSpec struct {
 	upPipes      []vlatte.Pipe
 	fallback     bool          // a ProxyAll mock's: its description holds its reply under proxy_all
 	pathTemplate *pathTemplate // set with URLPathTemplate; it never changes, so the mocks share it
+	mcp          *mcpSpec      // set with MCP: the endpoint, and the server or the tool of an MCP mock
 }
 
 // clone returns a copy of s that shares no slice with it, so changing one doesn't change the other.
@@ -89,6 +90,10 @@ func (s mockSpec) clone() mockSpec {
 	s.pipes = slices.Clone(s.pipes)
 	s.wirePipes = slices.Clone(s.wirePipes)
 	s.upPipes = slices.Clone(s.upPipes)
+
+	if s.mcp != nil {
+		s.mcp = s.mcp.clone()
+	}
 
 	return s
 }
@@ -219,12 +224,6 @@ func (m *Mock) Describe() vlatte.Descriptor {
 	mockExpectations := m.spec.expectations
 	data := make(map[string]any)
 	request := make(map[string]any)
-	counters := make(map[matchingScope]int)
-
-	for _, v := range mockExpectations {
-		counters[matchingScope(v.Target)]++
-	}
-
 	expectationsByTarget := make(map[matchingScope][]*expectation)
 	for _, v := range mockExpectations {
 		t := matchingScope(v.Target)
@@ -244,45 +243,17 @@ func (m *Mock) Describe() vlatte.Descriptor {
 
 	for target, expectations := range expectationsByTarget {
 		switch target {
+		case matchingScopeMCP, matchingScopeMCPCall, matchingScopeMCPEndpoint:
+			// The mcp key describes them.
+			continue
+
 		case matchingScopeQuery, matchingScopeQueries, matchingScopeHeader, matchingScopeHeaders, matchingScopeFormField,
 			matchingScopeFormFields, matchingScopeCookie, matchingScopeBasicAuth, matchingScopePathParam:
-			keys := make(map[string]any, counters[target])
+			keys := describeKeyed(expectations, func(e *expectation) string { return e.Key })
 
-			if len(expectations) == 1 {
-				if sd, ok := expectations[0].Matcher.(vlatte.SelfDescriptive); ok {
-					keys[expectations[0].Key] = sd.Describe()
-					request[target.FieldName()] = keys
-				}
-
+			// A part whose one matcher can't describe itself is left out.
+			if len(expectations) == 1 && len(keys) == 0 {
 				continue
-			}
-
-			byKey := make(map[string][]*expectation, counters[target])
-			for _, e := range expectations {
-				byKey[e.Key] = append(byKey[e.Key], e)
-			}
-
-			for _, e := range expectations {
-				size := len(byKey[e.Key])
-				if size == 0 {
-					continue
-				}
-
-				if size == 1 {
-					if sd, ok := e.Matcher.(vlatte.SelfDescriptive); ok {
-						keys[e.Key] = sd.Describe()
-					}
-				} else {
-					matchers := make([]vlatte.Matcher, 0, size)
-					for _, e := range byKey[e.Key] {
-						matchers = append(matchers, e.Matcher)
-					}
-
-					all := match.All(matchers...)
-					if sd, ok := vlatte.Matcher(all).(vlatte.SelfDescriptive); ok {
-						keys[e.Key] = sd.Describe()
-					}
-				}
 			}
 
 			request[target.FieldName()] = keys
@@ -363,6 +334,10 @@ func (m *Mock) Describe() vlatte.Descriptor {
 		}
 	}
 
+	if m.spec.mcp != nil {
+		data["mcp"] = m.spec.mcp.describe(m.spec.expectations)
+	}
+
 	if m.spec.delay != nil {
 		data["delay"] = delay.Doc(m.spec.delay)
 	}
@@ -417,6 +392,30 @@ func (m *Mock) Describe() vlatte.Descriptor {
 	}
 
 	return vlatte.DescribeRoot(data)
+}
+
+// describeKeyed describes expectations by key, as a mock file writes headers or queries: the matchers of a key given
+// more than once go together under all, and a key whose matcher can't describe itself is left out.
+func describeKeyed(expectations []*expectation, key func(*expectation) string) map[string]any {
+	byKey := make(map[string][]vlatte.Matcher, len(expectations))
+	for _, e := range expectations {
+		k := key(e)
+		byKey[k] = append(byKey[k], e.Matcher)
+	}
+
+	keys := make(map[string]any, len(byKey))
+	for k, matchers := range byKey {
+		m := matchers[0]
+		if len(matchers) > 1 {
+			m = match.All(matchers...)
+		}
+
+		if sd, ok := m.(vlatte.SelfDescriptive); ok {
+			keys[k] = sd.Describe()
+		}
+	}
+
+	return keys
 }
 
 // describeEvents describes events as a mock file writes them, but those that carry their listener, such as callbacks,
@@ -494,6 +493,11 @@ const (
 	matchingScopePathParam
 	matchingScopeRepeat
 	matchingScopeCustom
+	matchingScopeMCP     // the path and method of an MCP mock: they read no body
+	matchingScopeMCPCall // the JSON-RPC message of an MCP mock: they read the body
+	// matchingScopeMCPEndpoint is the part of an endpoint mock: a request to its path but a tool call. It reads the body
+	// of a request to its path only, and takes a cut one, as the endpoint mock answers it, for no tool call.
+	matchingScopeMCPEndpoint
 )
 
 func (t matchingScope) FieldName() string {
@@ -542,6 +546,8 @@ func (t matchingScope) FieldName() string {
 		return "repeat"
 	case matchingScopeCustom:
 		return "custom"
+	case matchingScopeMCP, matchingScopeMCPCall, matchingScopeMCPEndpoint:
+		return "mcp"
 	default:
 		return ""
 	}

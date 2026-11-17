@@ -1,0 +1,5 @@
+# The MCP server under the REST API's prefix.
+id: blog
+mcp:
+  endpoint: /api/mcp
+  server: {name: blog, version: 1.0.0}

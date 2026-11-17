@@ -1,0 +1,9 @@
+# A REST route beside both MCP servers.
+id: users
+request:
+  method: GET
+  path: /users/1
+response:
+  status: 200
+  header: {content-type: application/json}
+  body: {id: 1, name: Ada}

@@ -678,9 +678,9 @@ func (b *Builder) Map(mapper Mapper) *Builder {
 }
 
 // Reply sets what the mock replies with. Build asks f for a new Replier for each mock, so f can serve many mocks.
-// Reply, SequentialReply, RandomReply, ProxyReply, FuncReply and EchoReply are factories, and Shared turns any Replier
-// into one. The mock owns the Replier f makes: when it implements io.Closer, the mock closes it when it leaves the
-// server. A Replier that Shared gives to many mocks is never closed by them.
+// Reply, SequentialReply, RandomReply, ProxyReply, FuncReply, EchoReply and MCPResult are factories, and Shared turns
+// any Replier into one. The mock owns the Replier f makes: when it implements io.Closer, the mock closes it when it
+// leaves the server. A Replier that Shared gives to many mocks is never closed by them.
 func (b *Builder) Reply(f ReplierFactory) *Builder {
 	b.reply = f
 	return b
@@ -710,6 +710,15 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		return nil, fmt.Errorf("mock: %w", b.err)
 	}
 
+	// An MCP mock replies with what mcpReply returns: the endpoint mock has a reply of its own.
+	factory := b.reply
+	if b.spec.mcp != nil {
+		var err error
+		if factory, err = b.mcpReply(app); err != nil {
+			return nil, err
+		}
+	}
+
 	params, err := b.pathParamExpectations()
 	if err != nil {
 		return nil, fmt.Errorf("mock: %w", err)
@@ -721,12 +730,12 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		return nil, ErrNoExpectations
 	}
 
-	if b.reply == nil {
+	if factory == nil {
 		return nil, ErrNoReplies
 	}
 
 	// Mappers read the whole body, and an event stream may not end. One a sequence holds fails at its request.
-	if rep, ok := b.reply.(*Reply); ok && rep.bodyType == _bodyEventStream && len(b.spec.mappers) > 0 {
+	if rep, ok := factory.(*Reply); ok && rep.bodyType == _bodyEventStream && len(b.spec.mappers) > 0 {
 		return nil, errors.New("mock: response mappers read the whole body, and an event stream doesn't end: remove the mappers")
 	}
 
@@ -782,14 +791,14 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 	}
 
 	// Last, so a failure above makes nothing for the mock, such as the HTTP client of a proxy.
-	reply, err := newReplier(b.reply, app)
+	reply, err := newReplier(factory, app)
 	if err != nil {
 		return nil, err
 	}
 
-	desc, _ := vlatte.IsSelfDescriptive(b.reply)
+	desc, _ := vlatte.IsSelfDescriptive(factory)
 
-	return &Mock{spec: spec, reply: reply, replyDesc: desc, closer: owned(b.reply, reply), enabled: b.enabled}, nil
+	return &Mock{spec: spec, reply: reply, replyDesc: desc, closer: owned(factory, reply), enabled: b.enabled}, nil
 }
 
 // pathParamExpectations returns the matchers of the path parameters. A path parameter reads the segment its template

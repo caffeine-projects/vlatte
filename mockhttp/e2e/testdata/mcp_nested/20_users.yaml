@@ -1,0 +1,9 @@
+# A REST route under the same prefix.
+id: users
+request:
+  method: GET
+  path: /api/users
+response:
+  status: 200
+  header: {content-type: application/json}
+  body: []

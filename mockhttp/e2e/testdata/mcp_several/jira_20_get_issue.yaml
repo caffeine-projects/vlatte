@@ -1,0 +1,7 @@
+# get_issue of jira only.
+id: jira-get-issue
+mcp:
+  endpoint: /jira/mcp
+  tool: {name: get_issue}
+mcp_result:
+  text: issue

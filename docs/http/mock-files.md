@@ -65,6 +65,7 @@ Empty documents are skipped. A file with only empty documents contributes no moc
 | `response` | The [reply](/http/replies). |
 | `response_sequence`, `response_random` | [Sequences](/http/replies#sequences) and [random replies](/http/replies#random-replies). |
 | `proxy`, `proxy_all` | [Proxy replies](/http/proxying#proxy-replies) and [proxy all](/http/proxying#proxy-all). |
+| `mcp`, `mcp_result` | An [MCP server mock](#mcp-server-mocks): its endpoint mock, or a tool mock and what it answers. |
 | `delay`, `repeat` | A delay before replying, and how many requests the mock serves: see [Mock lifecycle](/more/mock-lifecycle). |
 | `scenario` | A [scenario](/scenarios/). |
 | `on_complete` | [Events such as webhooks](/webhooks/). |
@@ -86,6 +87,40 @@ A reply's `body` is text as is, and any other value as JSON. A body that isn't U
 ## Matching
 
 The `request` key matches requests as the Go builder does: see [Request matching](/http/matching) for every key, and [Matchers](/matchers/) for the matcher lists, such as `[contains, x]` or `[jsonpath, $.id, [gt, 1]]`, and [Custom matchers](/matchers/custom) for matchers of your own, in `request.custom`.
+
+## MCP server mocks
+
+A mock with `mcp` plays an [MCP](https://modelcontextprotocol.io) server over Streamable HTTP: `MCP(path)` in Go. It matches requests to exactly `mcp.endpoint`, so `/mcp` is neither `/mcp/` nor `/mcp/v2`, and REST mocks and other MCP servers, each at its own path, share the server. An MCP server takes two kinds of mocks:
+
+- **The endpoint mock**, with `mcp.server` (`MCPServerInfo` in Go). It answers every request to its path but a tool call: `initialize`, with the client's protocol version when it knows it; `ping`; notifications, with `202`; `tools/list`, with the tools of the enabled tool mocks of its path, one per name, as the first of them in match order describes it; another method with JSON-RPC error `-32601`; and another HTTP method than `POST` with `405`. It takes no response key.
+- **A tool mock**, with `mcp.tool` (`MCPTool` in Go). It answers the calls of one tool. `arguments` match the arguments of the call, by name, as `request.header` matches headers. Its reply is `mcp_result`, or any other response key, such as `proxy`.
+
+```yaml
+id: weather
+mcp:
+  endpoint: /mcp
+  server: {name: weather, version: 1.0.0}
+---
+id: forecast-lisbon
+request:
+  header:
+    authorization: [hasprefix, "Bearer "]
+mcp:
+  endpoint: /mcp
+  tool:
+    name: forecast
+    description: The forecast of a city
+    input_schema: {type: object, properties: {city: {type: string}}, required: [city]}
+    arguments: {city: [equal, Lisbon]}
+mcp_result:
+  json: {city: Lisbon, sky: clear}
+```
+
+`mcp_result` takes one of `text`, `json`, which answers the value as JSON text, and `error`, a JSON-RPC error with `code` and `message`. `is_error: true` makes a `text` the tool's own error. A `text` can be a template, with `template`: the arguments of the call are `{{ (fromJSON .Request.Body.String).params.arguments.city }}`.
+
+A tool call that no tool mock matches gets JSON-RPC error `-32602` on the path of an endpoint mock, with status `200` and `VLatte-Error: no-match`, and the journal records it as a request no mock matched. Its `data.near_misses` lists the mocks that came closest and the parts that didn't match, such as `mcp arguments.city`. The setting `no_match_mcp_status_code` (`Setup().MCPNotFoundStatusCode(code)` in Go) sets another status; an MCP client may take any status but `2xx` as a failure of the transport, and drop the error. A `proxy_all` forwards the call instead.
+
+An MCP mock sets its own method and path: `request.method`, `url`, `url_match`, `path`, `path_template` and `path_params` don't go with `mcp`, and neither does `proxy_all`. Other `request` keys, such as `header`, match as on any mock, and so do `scenario`, `repeat` and `delay`. Two endpoint mocks at one path in mock files fail to load. A server with `NoBodyParsing` builds no MCP mock: MCP mocks read the body.
 
 ## Proxy replies
 

@@ -1,0 +1,5 @@
+# The MCP server at exactly /mcp.
+id: blog
+mcp:
+  endpoint: /mcp
+  server: {name: blog, version: 1.0.0}

@@ -1,0 +1,11 @@
+# get_user answers user 1 only.
+id: get-user
+mcp:
+  endpoint: /mcp
+  tool:
+    name: get_user
+    description: Get a user
+    input_schema: {type: object, properties: {id: {type: number}}, required: [id]}
+    arguments: {id: [equal, 1]}
+mcp_result:
+  json: {id: 1, name: Ada}

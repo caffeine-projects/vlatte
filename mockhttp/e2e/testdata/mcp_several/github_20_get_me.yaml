@@ -1,0 +1,7 @@
+# get_me of github only.
+id: github-get-me
+mcp:
+  endpoint: /github/mcp
+  tool: {name: get_me}
+mcp_result:
+  text: me

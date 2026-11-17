@@ -1,0 +1,5 @@
+# The blog's MCP server.
+id: blog
+mcp:
+  endpoint: /mcp
+  server: {name: blog, version: 1.0.0}

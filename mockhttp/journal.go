@@ -326,7 +326,7 @@ func (p *requestPattern) Explain(ctx context.Context, e *journal.Entry) (verify.
 func readsBody(scope matchingScope) bool {
 	switch scope {
 	case matchingScopeBody, matchingScopeFormField, matchingScopeFormFields, matchingScopeFormFile, matchingScopeNone,
-		matchingScopeCustom:
+		matchingScopeCustom, matchingScopeMCPCall:
 		return true
 	}
 

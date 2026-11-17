@@ -22,6 +22,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/fault"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
@@ -784,4 +785,48 @@ func TestFileStore_KeepsAMockOfFaults(t *testing.T) {
 		map[string]any{"type": "bandwidth", "rate": float64(fault.Bandwidth3G)},
 	}, got["pipes"])
 	require.Equal(t, []any{map[string]any{"type": "connection_reset_by_peer"}}, got["wire_pipes"])
+}
+
+func TestAdminStore_MCPMocksRoundTrip(t *testing.T) {
+	// The admin API stores a mock as its mock file: an MCP endpoint mock and a tool mock load back as they were.
+	m := MustNew(Setup().Silent())
+
+	for _, b := range []*Builder{
+		MCP("/mcp").ID("endpoint").MCPServerInfo("s", "1.0.0"),
+		MCP("/mcp").ID("tool").MCPTool("issue_read", "Get issue details").
+			MCPInputSchema(map[string]any{"type": "object", "properties": map[string]any{"n": map[string]any{"maximum": 100}}}).
+			MCPArgument("n", match.Equal(42)).
+			Reply(MCPJSON(map[string]any{"number": 42})),
+	} {
+		for _, format := range []string{"json", "yaml"} {
+			mock, err := b.Build(m)
+			require.NoError(t, err)
+
+			data, err := EncodeMock(mock, format)
+			require.NoError(t, err)
+
+			back, err := DecodeMock(m, data, format)
+			require.NoError(t, err)
+
+			want, err := mock.MarshalJSON()
+			require.NoError(t, err)
+			got, err := back.MarshalJSON()
+			require.NoError(t, err)
+			require.JSONEq(t, string(want), string(got), format)
+		}
+	}
+}
+
+func TestFileStore_RefusesASequenceOfMCPResults(t *testing.T) {
+	// A sequence's replies load back as response objects, which an MCP result isn't: the store refuses the mock.
+	m := MustNew(Setup().Silent())
+
+	store, err := FileStore(t.TempDir())(m)
+	require.NoError(t, err)
+
+	mock, err := MCP("/mcp").ID("seq").MCPTool("t", "").Reply(Seq(MCPText("1"), MCPText("2"))).Build(m)
+	require.NoError(t, err)
+
+	err = store.Store(t.Context(), mock)
+	require.ErrorContains(t, err, `server: mock "seq" can't be stored: its description doesn't load back: `)
 }

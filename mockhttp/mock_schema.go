@@ -36,6 +36,8 @@ type (
 	sequenceField    = config.Field[sequenceDef]
 	randomField      = config.Field[randomDef]
 	proxyField       = config.Field[proxyDef]
+	mcpField         = config.Field[mcpDef]
+	mcpResultField   = config.Field[mcpResultDef]
 	eventField       = config.Field[vlatte.EventConfig]
 )
 
@@ -60,6 +62,8 @@ type mockDef struct {
 	random      *randomDef
 	proxy       *proxyDef
 	proxyAll    *proxyDef
+	mcp         *mcpDef
+	mcpResult   *mcpResultDef
 	ext         map[string]any
 	dir         string // where relative files open from: the mock file's directory; "" is the working directory
 }
@@ -165,7 +169,7 @@ type proxyDef struct {
 }
 
 // _responseKeys are the ways to reply, in the order conflicts are reported.
-var _responseKeys = []string{"response", "response_sequence", "response_random", "proxy", "proxy_all"}
+var _responseKeys = []string{"response", "response_sequence", "response_random", "proxy", "proxy_all", "mcp_result"}
 
 // _urlKeys are the ways to match the URL, in the order conflicts are reported.
 var _urlKeys = []string{"url", "url_match", "path"}
@@ -486,6 +490,23 @@ var _mockSchema = config.NewSchema(
 		},
 	},
 	mockField{
+		Key: "mcp", Kind: config.Any,
+		Usage: "Make the mock an MCP mock: the endpoint mock of an MCP server, with server, or the mock of one of its tools, " +
+			"with tool. It matches the method and path itself.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.mcp = &mcpDef{matchers: d.request.matchers}
+			return d.mcp.decode(v)
+		},
+	},
+	mockField{
+		Key: "mcp_result", Kind: config.Any,
+		Usage: "Answer a tool call of an MCP tool mock: a text, a JSON value or a JSON-RPC error, in the JSON-RPC envelope.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.mcpResult = new(mcpResultDef)
+			return d.mcpResult.decode(v)
+		},
+	},
+	mockField{
 		Key: "ext", Kind: config.Any, Usage: "Settings for the MockFileHandlers of the server, as an object.",
 		Set: func(d *mockDef, v config.Value) error {
 			obj, ok := v.Any.(map[string]any)
@@ -792,13 +813,16 @@ func newReplyDef() *replyDef {
 // decoding already found: a request key that failed to decode still counts as a matcher.
 func (d *mockDef) check(origin string, found []config.Problem) []config.Problem {
 	var set []string
-	for i, present := range []bool{d.reply != nil, d.sequence != nil, d.random != nil, d.proxy != nil, d.proxyAll != nil} {
+	for i, present := range []bool{
+		d.reply != nil, d.sequence != nil, d.random != nil, d.proxy != nil, d.proxyAll != nil, d.mcpResult != nil,
+	} {
 		if present {
 			set = append(set, _responseKeys[i])
 		}
 	}
 
 	problems := conflicts(origin, "", set)
+	problems = append(problems, d.checkMCP(origin, set)...)
 	problems = append(problems, d.request.conflicts(origin)...)
 	problems = append(problems, d.request.checkPathParams(origin, found)...)
 
@@ -806,8 +830,8 @@ func (d *mockDef) check(origin string, found []config.Problem) []config.Problem 
 		return p.Key == "request" || strings.HasPrefix(p.Key, "request.")
 	})
 
-	// proxy_all matches any request on its own.
-	if len(d.request.keys) == 0 && !requestFailed && d.proxyAll == nil {
+	// proxy_all matches any request on its own, and an MCP mock its endpoint.
+	if len(d.request.keys) == 0 && !requestFailed && d.proxyAll == nil && d.mcp == nil {
 		problems = append(problems, config.Problem{
 			Code: config.CodeMissingValue, Origin: origin, Key: "request",
 			Message: "request sets no matcher", Hint: `to match every request, write request: {path: "*"}`,
@@ -1370,7 +1394,21 @@ func (d *mockDef) apply(b *Builder, dir string) {
 
 	b.Pipe(d.pipes...).WirePipe(d.wirePipes...).UpstreamPipe(d.upPipes...)
 
+	// An MCP mock checks its path first, as MCP does in Go: a request to another path stops there.
+	if d.mcp != nil {
+		b.mcpAt(d.mcp.endpoint)
+	}
+
 	d.request.apply(b)
+
+	if d.mcp != nil {
+		d.mcp.apply(b)
+
+		// The endpoint mock answers on its own.
+		if d.mcp.hasServer() {
+			return
+		}
+	}
 
 	if d.proxyAll != nil {
 		proxyAll(b, d.proxyAll.build())
@@ -1461,6 +1499,8 @@ func (d *mockDef) replier(dir string) ReplierFactory {
 		return random
 	case d.proxy != nil:
 		return d.proxy.build()
+	case d.mcpResult != nil:
+		return d.mcpResult.build()
 	default:
 		return OK()
 	}
@@ -1565,4 +1605,294 @@ func (p *proxyDef) build() *ProxyReply {
 	}
 
 	return proxy
+}
+
+// mcpDef is a decoded mcp key: the endpoint, and the server of an endpoint mock or the tool of a tool mock.
+type mcpDef struct {
+	matchers    *matchbuild.Registry // builds the matchers of the arguments: the server's
+	endpoint    string
+	hasEndpoint bool
+	server      mcpServerDef
+	tool        mcpToolDef
+}
+
+// mcpServerDef is a decoded mcp.server.
+type mcpServerDef struct {
+	name       string
+	hasName    bool
+	version    string
+	hasVersion bool
+}
+
+// mcpToolDef is a decoded mcp.tool.
+type mcpToolDef struct {
+	name           string
+	hasName        bool
+	description    string
+	hasDescription bool
+	inputSchema    any
+	hasInputSchema bool
+	arguments      []func(*Builder)
+	hasArguments   bool
+}
+
+// mcpResultDef is a decoded mcp_result.
+type mcpResultDef struct {
+	text      string
+	hasText   bool
+	json      any
+	hasJSON   bool
+	isError   bool
+	code      int64
+	hasCode   bool
+	message   string
+	hasMsg    bool
+	templated bool
+	data      any
+}
+
+var _mcpSchema = config.NewSchema(
+	mcpField{
+		Key: "endpoint", Kind: config.String, Usage: "Path of the MCP server, such as /mcp: the mock matches requests to exactly it.",
+		Set: func(m *mcpDef, v config.Value) error {
+			m.endpoint, m.hasEndpoint = v.Str, true
+			if !strings.HasPrefix(v.Str, "/") {
+				return config.Invalid(v, fmt.Sprintf("%s must start with /, not %q", v.Key, v.Str), "write the path, such as /mcp")
+			}
+
+			return nil
+		},
+	},
+	mcpField{
+		Key: "server.name", Kind: config.String, Usage: "Name of the MCP server, which initialize answers.",
+		Set: func(m *mcpDef, v config.Value) error { m.server.name, m.server.hasName = v.Str, true; return nil },
+	},
+	mcpField{
+		Key: "server.version", Kind: config.String, Usage: "Version of the MCP server, which initialize answers.",
+		Set: func(m *mcpDef, v config.Value) error { m.server.version, m.server.hasVersion = v.Str, true; return nil },
+	},
+	mcpField{
+		Key: "tool.name", Kind: config.String, Usage: "Name of the tool whose calls the mock answers.",
+		Set: func(m *mcpDef, v config.Value) error { m.tool.name, m.tool.hasName = v.Str, true; return nil },
+	},
+	mcpField{
+		Key: "tool.description", Kind: config.String, Usage: "Description of the tool, which tools/list shows.",
+		Set: func(m *mcpDef, v config.Value) error {
+			m.tool.description, m.tool.hasDescription = v.Str, true
+			return nil
+		},
+	},
+	mcpField{
+		Key: "tool.input_schema", Kind: config.Any, Usage: "JSON Schema of the arguments of the tool, which tools/list shows.",
+		Set: func(m *mcpDef, v config.Value) error {
+			if _, ok := v.Any.(map[string]any); !ok {
+				return config.Mismatch(v, "an object")
+			}
+
+			m.tool.inputSchema, m.tool.hasInputSchema = v.Any, true
+
+			return nil
+		},
+	},
+	mcpField{
+		Key: "tool.arguments", Kind: config.Any, Usage: "Arguments of the call to match, by name: text or a matcher list each.",
+		Set: func(m *mcpDef, v config.Value) error {
+			m.tool.hasArguments = true
+			return matchEach(m.matchers, v, &m.tool.arguments, func(b *Builder, name string, mt vlatte.Matcher) {
+				b.MCPArgument(name, mt)
+			})
+		},
+	},
+)
+
+var _mcpResultSchema = config.NewSchema(
+	mcpResultField{
+		Key: "text", Kind: config.String, Usage: "Text of the result: one text content.",
+		Set: func(r *mcpResultDef, v config.Value) error { r.text, r.hasText = v.Str, true; return nil },
+	},
+	mcpResultField{
+		Key: "json", Kind: config.Any, Usage: "Value of the result, as JSON in one text content.",
+		Set: func(r *mcpResultDef, v config.Value) error { r.json, r.hasJSON = v.Any, true; return nil },
+	},
+	mcpResultField{
+		Key: "is_error", Kind: config.Bool, Usage: "Make the text the tool's own error: isError is true.",
+		Set: func(r *mcpResultDef, v config.Value) error { r.isError = v.Bool; return nil },
+	},
+	mcpResultField{
+		Key: "error.code", Kind: config.Int, Usage: "Code of a JSON-RPC error, in place of a result.",
+		Set: func(r *mcpResultDef, v config.Value) error { r.code, r.hasCode = v.Int, true; return nil },
+	},
+	mcpResultField{
+		Key: "error.message", Kind: config.String, Usage: "Message of a JSON-RPC error, in place of a result.",
+		Set: func(r *mcpResultDef, v config.Value) error { r.message, r.hasMsg = v.Str, true; return nil },
+	},
+	mcpResultField{
+		Key: "template.enabled", Kind: config.Bool, Usage: "Render the text as a template.",
+		Set: func(r *mcpResultDef, v config.Value) error { r.templated = v.Bool; return nil },
+	},
+	mcpResultField{
+		Key: "template.data", Kind: config.Any, Usage: "Data the template reads as .Extra.",
+		Set: func(r *mcpResultDef, v config.Value) error { r.data = v.Any; return nil },
+	},
+)
+
+// decode decodes v, an mcp key, into m, with a problem for each key it needs and doesn't have.
+func (m *mcpDef) decode(v config.Value) error {
+	err := withRequired(_mcpSchema.Decode(m, v), m.hasEndpoint, v, "endpoint")
+
+	if m.hasServer() {
+		err = withRequired(err, m.server.hasName, v, "server.name")
+		err = withRequired(err, m.server.hasVersion, v, "server.version")
+	}
+
+	if m.hasTool() {
+		err = withRequired(err, m.tool.hasName, v, "tool.name")
+	}
+
+	return err
+}
+
+// hasServer reports whether a key under mcp.server is set.
+func (m *mcpDef) hasServer() bool {
+	return m.server.hasName || m.server.hasVersion
+}
+
+// hasTool reports whether a key under mcp.tool is set.
+func (m *mcpDef) hasTool() bool {
+	t := m.tool
+	return t.hasName || t.hasDescription || t.hasInputSchema || t.hasArguments
+}
+
+// apply makes b, an MCP mock at the endpoint of m, the endpoint mock or the tool mock m describes.
+func (m *mcpDef) apply(b *Builder) {
+	if m.hasServer() {
+		b.MCPServerInfo(m.server.name, m.server.version)
+		return
+	}
+
+	b.MCPTool(m.tool.name, m.tool.description)
+
+	if m.tool.hasInputSchema {
+		b.MCPInputSchema(m.tool.inputSchema)
+	}
+
+	for _, set := range m.tool.arguments {
+		set(b)
+	}
+}
+
+// decode decodes v, an mcp_result key, into r, with a problem for each key of an error it doesn't have.
+func (r *mcpResultDef) decode(v config.Value) error {
+	err := _mcpResultSchema.Decode(r, v)
+
+	if r.isRPCError() {
+		err = withRequired(err, r.hasCode, v, "error.code")
+		err = withRequired(err, r.hasMsg, v, "error.message")
+	}
+
+	return err
+}
+
+// isRPCError reports whether r is a JSON-RPC error: a key under error is set.
+func (r *mcpResultDef) isRPCError() bool {
+	return r.hasCode || r.hasMsg
+}
+
+// build returns the result r describes.
+func (r *mcpResultDef) build() *MCPResult {
+	var result *MCPResult
+
+	switch {
+	case r.hasJSON:
+		result = MCPJSON(r.json)
+	case r.isRPCError():
+		result = MCPError(r.code, r.message)
+	case r.isError:
+		result = MCPToolError(r.text)
+	default:
+		result = MCPText(r.text)
+	}
+
+	if r.templated {
+		result.Template().TemplateData(r.data)
+	}
+
+	return result
+}
+
+// checkMCP reports the problems of the mcp and mcp_result keys of d, which set, the response keys of d, completes.
+func (d *mockDef) checkMCP(origin string, set []string) []config.Problem {
+	var problems []config.Problem
+
+	problem := func(code, key, message, hint string) {
+		problems = append(problems, config.Problem{Code: code, Origin: origin, Key: key, Message: message, Hint: hint})
+	}
+
+	if m := d.mcp; m != nil {
+		switch {
+		case !m.hasServer() && !m.hasTool():
+			problem(config.CodeMissingValue, "mcp", "mcp sets neither server nor tool",
+				"set server for the endpoint mock or tool for a tool mock")
+		case m.hasServer() && m.hasTool():
+			problem(config.CodeInvalidValue, "mcp", "mcp sets both server and tool",
+				"keep one: a mock is the endpoint or one tool")
+		case m.hasServer():
+			for _, k := range set {
+				// proxy_all has its own problem below.
+				if k == "proxy_all" {
+					continue
+				}
+
+				problem(config.CodeInvalidValue, "mcp.server", "an endpoint mock answers on its own, not with "+k,
+					"remove "+k)
+			}
+		case len(set) == 0:
+			problem(config.CodeMissingValue, "mcp.tool", "a tool mock needs a reply",
+				"set mcp_result, response, response_sequence, response_random or proxy")
+		}
+
+		if d.proxyAll != nil {
+			problem(config.CodeInvalidValue, "mcp", "mcp and proxy_all don't go together",
+				"use proxy for a tool, or remove mcp")
+		}
+
+		for _, k := range slices.Concat([]string{"method"}, _urlKeys, []string{"path_template", "path_params"}) {
+			if slices.Contains(d.request.keys, k) {
+				problem(config.CodeInvalidValue, "request."+k, "request."+k+" is set by mcp", "remove request."+k)
+			}
+		}
+	}
+
+	r := d.mcpResult
+	if r == nil {
+		return problems
+	}
+
+	if d.mcp == nil {
+		problem(config.CodeInvalidValue, "mcp_result", "mcp_result needs mcp.tool", "add mcp.tool, or use response")
+	}
+
+	var kinds []string
+	for i, has := range []bool{r.hasText, r.hasJSON, r.isRPCError()} {
+		if has {
+			kinds = append(kinds, []string{"text", "json", "error"}[i])
+		}
+	}
+
+	if len(kinds) == 0 {
+		problem(config.CodeMissingValue, "mcp_result", "mcp_result sets none of text, json and error", "set one")
+	}
+
+	problems = append(problems, conflicts(origin, "mcp_result", kinds)...)
+
+	if r.isError && !r.hasText {
+		problem(config.CodeInvalidValue, "mcp_result.is_error", "is_error goes with text", "remove is_error or use text")
+	}
+
+	if r.templated && !r.hasText {
+		problem(config.CodeInvalidValue, "mcp_result.template", "only a text result is a template",
+			"use text with toJSON")
+	}
+
+	return problems
 }

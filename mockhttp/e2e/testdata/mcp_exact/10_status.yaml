@@ -1,0 +1,8 @@
+# A REST route under the MCP server's path.
+id: status
+request:
+  method: GET
+  path: /mcp/v2/status
+response:
+  status: 200
+  body: ok

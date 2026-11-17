@@ -1,0 +1,9 @@
+# The REST route that creates a post.
+id: posts
+request:
+  method: POST
+  path: /posts
+response:
+  status: 201
+  header: {content-type: application/json}
+  body: {id: 7}
