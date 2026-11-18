@@ -28,11 +28,12 @@ import (
 const _standInValue = "vlatte:example"
 
 // _openAPI32Fields are the fields OpenAPI 3.2 adds that kin-openapi doesn't read and would reject as unknown: those of
-// the document, components, encodings, examples, media types, OAuth flows, responses, security schemes, servers and
-// tags. kin-openapi allows them by name, on any object. No mock needs what they say but for the values of examples.
+// the document, components, discriminators, encodings, examples, media types, OAuth flows, responses, security
+// schemes, servers and tags. kin-openapi allows them by name, on any object. No mock needs what they say but for the
+// values of examples.
 var _openAPI32Fields = []string{
-	"$self", "dataValue", "deprecated", "deviceAuthorization", "encoding", "itemEncoding", "kind", "mediaTypes", "name",
-	"oauth2MetadataUrl", "parent", "prefixEncoding", "serializedValue", "summary",
+	"$self", "dataValue", "defaultMapping", "deprecated", "deviceAuthorization", "encoding", "itemEncoding", "kind",
+	"mediaTypes", "name", "oauth2MetadataUrl", "parent", "prefixEncoding", "serializedValue", "summary",
 }
 
 // _componentsPrefix starts a reference to a shared schema, which the model writes under $defs.
