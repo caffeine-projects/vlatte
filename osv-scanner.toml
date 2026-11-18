@@ -7,4 +7,4 @@ reason = "golang.org/x/crypto/openpgp is unmaintained and has no fixed version. 
 
 [[IgnoredVulns]]
 id = "GHSA-fc5q-39xc-vjpf"
-reason = "picomatch has no fixed version. It is a dev-only dependency of the docs site, through vitepress and vite, and runs only while CI builds it, on globs from vite's own config, never user input. Nothing from docs/ ships."
+reason = "picomatch has no fixed version. It is a dev-only dependency of the docs site, through vitepress and vite, and runs only while the docs site is built or served, in CI or locally, on globs from vite, vitepress and the repo's docs config, never user input. picomatch is not bundled into the published site, and no Go module depends on it."
