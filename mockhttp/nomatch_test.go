@@ -95,7 +95,7 @@ func TestNoMatch_JSONIsProblemDetailsWithTheNearMisses(t *testing.T) {
 			require.Equal(t, accept, res.Header.Get(HeaderContentType))
 
 			want, err := json.Marshal(map[string]any{
-				"type":       "https://caffeine-projects.github.io/vlatte/http/troubleshooting#near-misses",
+				"type":       "https://vlatte.dev/http/troubleshooting#near-misses",
 				"title":      "Request did not match",
 				"status":     StatusNoMatch,
 				"detail":     "No mock matched GET " + m.URL("/users") + ".",

@@ -20,7 +20,7 @@ var _ NoMatchRenderer = noMatchRenderer{}
 
 // _noMatchProblemType is the type of the problem details the default renderer answers a request no mock matched with:
 // the page that explains the answer.
-const _noMatchProblemType = "https://caffeine-projects.github.io/vlatte/http/troubleshooting#near-misses"
+const _noMatchProblemType = "https://vlatte.dev/http/troubleshooting#near-misses"
 
 // errNoMatchFormatWithRenderer says a server has both a NoMatchRenderer and a no-match format, which configures the
 // renderer the server makes without one.

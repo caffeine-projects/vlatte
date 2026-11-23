@@ -66,7 +66,7 @@ Problem details are [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) members, 
 
 ```json
 {
-  "type": "https://caffeine-projects.github.io/vlatte/http/troubleshooting#near-misses",
+  "type": "https://vlatte.dev/http/troubleshooting#near-misses",
   "title": "Request did not match",
   "status": 418,
   "detail": "No mock matched GET http://127.0.0.1:8080/users.",
