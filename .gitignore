@@ -48,6 +48,7 @@ CLAUDE.local.md
 .local/
 
 docs/.ai/
+graphify-out/
 out/
 bin/
 /dist/

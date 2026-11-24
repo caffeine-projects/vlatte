@@ -16,6 +16,7 @@ bin/
 out/
 dist/
 docs/.ai/
+graphify-out/
 *.test
 *.out
 coverage.txt

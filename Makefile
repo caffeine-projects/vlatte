@@ -164,6 +164,12 @@ docs-check-external-links: ## check external links after make docs-build (requir
 # Miscellaneous
 # --
 
+.PHONY: graph
+graph: ## open the graphify knowledge graph in a browser (build it first with /graphify .)
+	@f=graphify-out/graph.html; \
+	[ -f "$$f" ] || { echo "$$f not found: build it first with /graphify ."; exit 1; }; \
+	if command -v open >/dev/null 2>&1; then open "$$f"; else xdg-open "$$f"; fi
+
 .PHONY: help
 help: ## show help
 	@awk 'BEGIN {FS = ": ## "} /^[a-zA-Z0-9_\\:-]+: ## / {gsub(/\\:/, ":", $$1); printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
