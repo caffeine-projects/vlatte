@@ -4,7 +4,7 @@
   "ignorePresets": [":ignoreModulesAndTests"],
   "enabledManagers": ["gomod", "github-actions", "npm", "dockerfile"],
   "timezone": "Europe/Berlin",
-  "schedule": ["* * * * 1"],
+  "schedule": ["* 0-6 * * *"],
   "minimumReleaseAge": "1 day",
   "prHourlyLimit": 3,
   "prConcurrentLimit": 10,
