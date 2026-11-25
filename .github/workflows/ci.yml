@@ -44,7 +44,7 @@ jobs:
     # The exact go.mod version: golangci-lint supports only Go versions up to the one it was
     # built with, and type-checking against the minimum supported Go catches too-new APIs.
     - name: Set up Go
-      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       with:
         go-version-file: 'go.mod'
 
@@ -90,7 +90,7 @@ jobs:
         fetch-depth: 0 # SonarCloud reads the history to find new code
 
     - name: Set up Go
-      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       with:
         go-version: ${{ matrix.go-version }}
         go-version-file: ${{ matrix.go-version-file }}
@@ -113,7 +113,7 @@ jobs:
     # Settings are in sonar-project.properties. Runs only where SONAR_TOKEN is given: not for Dependabot or forks.
     - name: SonarCloud
       if: matrix.go-version == 'stable' && github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
+      uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 # v8.5.0
       env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
