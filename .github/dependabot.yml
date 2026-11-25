@@ -1,7 +1,12 @@
 version: 2
 updates:
   - package-ecosystem: "gomod"
-    directory: "/"
+    directories:
+      - "/"
+      - "/examples"
+      - "/examples/**/*"
+    allow:
+      - dependency-type: "all"
     schedule:
       interval: "weekly"
     cooldown:
@@ -10,6 +15,7 @@ updates:
       prefix: "chore(deps)"
     groups:
       go-modules:
+        group-by: "dependency-name"
         patterns:
           - "*"
         update-types:
