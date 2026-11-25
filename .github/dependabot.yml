@@ -7,6 +7,7 @@ updates:
       - "/examples/**/*"
     allow:
       - dependency-type: "all"
+    open-pull-requests-limit: 0
     schedule:
       interval: "weekly"
     cooldown:
@@ -24,6 +25,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    open-pull-requests-limit: 0
     schedule:
       interval: "weekly"
     cooldown:
@@ -37,6 +39,7 @@ updates:
 
   - package-ecosystem: "npm"
     directory: "/docs"
+    open-pull-requests-limit: 0
     schedule:
       interval: "weekly"
     cooldown:
@@ -50,6 +53,7 @@ updates:
 
   - package-ecosystem: "docker"
     directory: "/"
+    open-pull-requests-limit: 0
     schedule:
       interval: "weekly"
     cooldown:

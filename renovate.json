@@ -1,0 +1,46 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommits", ":semanticCommitTypeAll(chore)"],
+  "ignorePresets": [":ignoreModulesAndTests"],
+  "enabledManagers": ["gomod", "github-actions", "npm", "dockerfile"],
+  "timezone": "Europe/Berlin",
+  "schedule": ["* 0-6 * * *"],
+  "minimumReleaseAge": "1 day",
+  "prHourlyLimit": 3,
+  "prConcurrentLimit": 10,
+  "rebaseWhen": "conflicted",
+  "platformAutomerge": false,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true
+  },
+  "vulnerabilityAlerts": {
+    "enabled": true
+  },
+  "semanticCommitScope": "deps",
+  "separateMajorMinor": false,
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "groupName": "Go dependencies",
+      "groupSlug": "go-dependencies",
+      "postUpdateOptions": ["gomodTidyAll"]
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "groupSlug": "github-actions"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchFileNames": ["docs/package.json"],
+      "groupName": "docs dependencies",
+      "groupSlug": "docs-dependencies"
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "groupName": "Docker images",
+      "groupSlug": "docker-images"
+    }
+  ]
+}
