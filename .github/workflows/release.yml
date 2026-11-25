@@ -45,7 +45,7 @@ jobs:
     - name: Lint
       uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
       with:
-        version: v2.14.0 # keep in sync with GOLANGCI_LINT_VERSION in the Makefile
+        version: v2.15.0 # keep in sync with GOLANGCI_LINT_VERSION in the Makefile
 
     - name: Test
       run: make testci
@@ -84,10 +84,10 @@ jobs:
         go-version: 'stable'
 
     - name: Install cosign
-      uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
 
     - name: Install syft
-      uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      uses: anchore/sbom-action/download-syft@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
 
     # The tag before a release candidate, even another release candidate, which .goreleaser.yaml's ignore_tags skips.
     - name: Pin the previous tag of a release candidate
@@ -101,7 +101,7 @@ jobs:
       uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
       with:
         distribution: goreleaser
-        version: v2.20.0 # keep in sync with GORELEASER_VERSION in the Makefile
+        version: v2.20.3 # keep in sync with GORELEASER_VERSION in the Makefile
         args: release --clean
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -200,7 +200,7 @@ jobs:
         provenance: mode=max
 
     - name: Install cosign
-      uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
 
     - name: Sign
       env:
