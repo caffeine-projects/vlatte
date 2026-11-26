@@ -22,9 +22,20 @@
   "packageRules": [
     {
       "matchManagers": ["gomod"],
-      "groupName": "Go dependencies",
-      "groupSlug": "go-dependencies",
+      "separateMajorMinor": true,
       "postUpdateOptions": ["gomodTidyAll"]
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "Go dependencies",
+      "groupSlug": "go-dependencies"
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "groupName": null
     },
     {
       "matchManagers": ["github-actions"],
@@ -36,6 +47,22 @@
       "matchFileNames": ["docs/package.json"],
       "groupName": "docs dependencies",
       "groupSlug": "docs-dependencies"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchFileNames": ["docs/package.json"],
+      "matchDepTypes": ["overrides"],
+      "matchPackageNames": ["vite"],
+      "separateMajorMinor": true
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchFileNames": ["docs/package.json"],
+      "matchDepTypes": ["overrides"],
+      "matchPackageNames": ["vite"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "groupName": null
     },
     {
       "matchManagers": ["dockerfile"],
