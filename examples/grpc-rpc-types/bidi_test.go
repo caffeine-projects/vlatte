@@ -16,7 +16,7 @@ import (
 )
 
 func TestDispatchFileMocks(t *testing.T) {
-	setup := mockgrpc.Setup().ConfigSources().Silent().InMemory().
+	setup := mockgrpc.Setup().Silent().InMemory().
 		MockFiles("testdata/bidi.mock.yaml")
 	server := mockgrpc.MustNew(setup)
 	t.Cleanup(server.Close)
@@ -45,7 +45,7 @@ func TestDispatchFileMocks(t *testing.T) {
 }
 
 func TestDispatchProgrammaticMocks(t *testing.T) {
-	server := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().InMemory())
+	server := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory())
 	t.Cleanup(server.Close)
 	server.MustStart()
 

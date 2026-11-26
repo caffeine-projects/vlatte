@@ -13,7 +13,7 @@ import (
 )
 
 func TestFileMocks(t *testing.T) {
-	config := mockgrpc.Setup().ConfigSources().InMemory().Silent().Journal("").
+	config := mockgrpc.Setup().InMemory().Silent().Journal("").
 		MockFiles("testdata/lookup.mock.json")
 	m := mockgrpc.MustNew(config)
 	m.MustStart()
@@ -46,7 +46,7 @@ func TestFileMocks(t *testing.T) {
 }
 
 func TestProgrammaticMocks(t *testing.T) {
-	config := mockgrpc.Setup().ConfigSources().InMemory().Silent().Journal("")
+	config := mockgrpc.Setup().InMemory().Silent().Journal("")
 	m := mockgrpc.MustNew(config)
 	m.MustStart()
 	t.Cleanup(m.Close)

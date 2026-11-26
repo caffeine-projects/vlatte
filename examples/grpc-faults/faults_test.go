@@ -18,7 +18,7 @@ import (
 )
 
 func TestFileMocks(t *testing.T) {
-	m := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().InMemory().MockFiles("testdata/delay.mock.yaml"))
+	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory().MockFiles("testdata/delay.mock.yaml"))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -26,7 +26,7 @@ func TestFileMocks(t *testing.T) {
 }
 
 func TestProgrammaticMocks(t *testing.T) {
-	m := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Addr("127.0.0.1:0"))
+	m := mockgrpc.MustNew(mockgrpc.Setup().Addr("127.0.0.1:0"))
 	m.MustStart()
 	t.Cleanup(m.Close)
 

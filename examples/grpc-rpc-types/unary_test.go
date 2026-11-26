@@ -17,7 +17,7 @@ import (
 )
 
 func TestGetParcelFileMocks(t *testing.T) {
-	setup := mockgrpc.Setup().ConfigSources().Silent().InMemory().
+	setup := mockgrpc.Setup().Silent().InMemory().
 		MockFiles("testdata/unary.mock.yaml")
 	server := mockgrpc.MustNew(setup)
 	t.Cleanup(server.Close)
@@ -36,7 +36,7 @@ func TestGetParcelFileMocks(t *testing.T) {
 }
 
 func TestGetParcelProgrammaticMocks(t *testing.T) {
-	server := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().InMemory())
+	server := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory())
 	t.Cleanup(server.Close)
 	server.MustStart()
 

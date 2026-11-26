@@ -30,7 +30,7 @@ func TestFileMocks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "proxy.mock.yaml")
 	require.NoError(t, os.WriteFile(path, fixture, 0o600))
 
-	front := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().InMemory().MockFiles(path))
+	front := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory().MockFiles(path))
 	t.Cleanup(front.Close)
 	front.MustStart()
 
@@ -64,7 +64,7 @@ func TestFileMocks(t *testing.T) {
 func TestProgrammaticMocks(t *testing.T) {
 	upstream := startUpstream(t)
 
-	front := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().InMemory())
+	front := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory())
 	t.Cleanup(front.Close)
 	front.MustStart()
 	front.MustMock(
@@ -108,7 +108,7 @@ func TestProgrammaticMocks(t *testing.T) {
 func startUpstream(t *testing.T) *mockgrpc.Server {
 	t.Helper()
 
-	upstream := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().Addr("127.0.0.1:0"))
+	upstream := mockgrpc.MustNew(mockgrpc.Setup().Silent().Addr("127.0.0.1:0"))
 	t.Cleanup(upstream.Close)
 	upstream.MustStart()
 	upstream.MustMock(

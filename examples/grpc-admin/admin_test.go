@@ -18,7 +18,7 @@ import (
 )
 
 func TestFileMocks(t *testing.T) {
-	config := mockgrpc.Setup().ConfigSources().InMemory().Silent().Admin(admin.MustNew())
+	config := mockgrpc.Setup().InMemory().Silent().Admin(admin.MustNew())
 	m := mockgrpc.MustNew(config)
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -46,7 +46,7 @@ func TestFileMocks(t *testing.T) {
 }
 
 func TestProgrammaticMocks(t *testing.T) {
-	config := mockgrpc.Setup().ConfigSources().InMemory().Silent().Admin(admin.MustNew())
+	config := mockgrpc.Setup().InMemory().Silent().Admin(admin.MustNew())
 	m := mockgrpc.MustNew(config)
 	m.MustStart()
 	t.Cleanup(m.Close)

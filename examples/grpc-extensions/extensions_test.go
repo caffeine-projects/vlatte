@@ -42,7 +42,7 @@ func (scannerID) Parse(_ context.Context, _ *mockgrpc.Call, msg proto.Message) (
 
 func TestFileMocks(t *testing.T) {
 	audit, listener := auditListener(t)
-	config := mockgrpc.Setup().ConfigSources().InMemory().Silent().
+	config := mockgrpc.Setup().InMemory().Silent().
 		RequestParsers(scannerID{}).
 		OnCompleteListener("audit", listener).
 		MockFiles("testdata/parsed.mock.yaml")
@@ -70,7 +70,7 @@ func TestFileMocks(t *testing.T) {
 
 func TestProgrammaticMocks(t *testing.T) {
 	audit, listener := auditListener(t)
-	config := mockgrpc.Setup().ConfigSources().InMemory().Silent().
+	config := mockgrpc.Setup().InMemory().Silent().
 		RequestParsers(scannerID{}).
 		OnCompleteListener("audit", listener)
 	m := mockgrpc.MustNew(config)

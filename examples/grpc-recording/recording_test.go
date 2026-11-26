@@ -18,12 +18,12 @@ import (
 )
 
 func TestFileMocks(t *testing.T) {
-	upstream := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().Addr("127.0.0.1:0").
+	upstream := mockgrpc.MustNew(mockgrpc.Setup().Silent().Addr("127.0.0.1:0").
 		MockFiles("testdata/upstream.mock.yaml"))
 	t.Cleanup(upstream.Close)
 	upstream.MustStart()
 
-	recorder := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().InMemory())
+	recorder := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory())
 	t.Cleanup(recorder.Close)
 	recorder.MustStart()
 
@@ -55,7 +55,7 @@ func TestFileMocks(t *testing.T) {
 	upstream.Close()
 	recorder.Close()
 
-	replay := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().InMemory().MockFiles(glob))
+	replay := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory().MockFiles(glob))
 	t.Cleanup(replay.Close)
 	replay.MustStart()
 	played := pb.NewTrackingClient(replay.MustDial())
@@ -73,7 +73,7 @@ func TestFileMocks(t *testing.T) {
 }
 
 func TestProgrammaticMocks(t *testing.T) {
-	upstream := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().Addr("127.0.0.1:0"))
+	upstream := mockgrpc.MustNew(mockgrpc.Setup().Silent().Addr("127.0.0.1:0"))
 	t.Cleanup(upstream.Close)
 	upstream.MustStart()
 	upstream.MustMock(
@@ -89,7 +89,7 @@ func TestProgrammaticMocks(t *testing.T) {
 				Status(codes.Unavailable, "feed offline").Trailer("x-resume", "1")),
 	)
 
-	recorder := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().InMemory())
+	recorder := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory())
 	t.Cleanup(recorder.Close)
 	recorder.MustStart()
 
@@ -121,7 +121,7 @@ func TestProgrammaticMocks(t *testing.T) {
 	upstream.Close()
 	recorder.Close()
 
-	replay := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().InMemory().MockFiles(glob))
+	replay := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory().MockFiles(glob))
 	t.Cleanup(replay.Close)
 	replay.MustStart()
 	played := pb.NewTrackingClient(replay.MustDial())

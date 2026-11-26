@@ -11,7 +11,7 @@ import (
 )
 
 func TestFileMocks(t *testing.T) {
-	m := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().InMemory().MockFiles("testdata/lifecycle.mock.yaml"))
+	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory().MockFiles("testdata/lifecycle.mock.yaml"))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -27,7 +27,7 @@ func TestFileMocks(t *testing.T) {
 }
 
 func TestProgrammaticMocks(t *testing.T) {
-	m := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().InMemory())
+	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory())
 	m.MustStart()
 	t.Cleanup(m.Close)
 

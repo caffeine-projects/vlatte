@@ -27,13 +27,13 @@ const (
 )
 
 func TestFileMocks(t *testing.T) {
-	server := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().InMemory().
+	server := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory().
 		MockFiles("testdata/lookup.mock.yaml"))
 	t.Cleanup(server.Close)
 	server.MustStartTLS()
 	checkTLSLookup(t, server)
 
-	mutual := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().InMemory().
+	mutual := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory().
 		MockFiles("testdata/lookup.mock.yaml").
 		TLSMutual(_serverCert, _serverKey, _clientCert))
 	t.Cleanup(mutual.Close)
@@ -42,7 +42,7 @@ func TestFileMocks(t *testing.T) {
 }
 
 func TestProgrammaticMocks(t *testing.T) {
-	server := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().InMemory())
+	server := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory())
 	t.Cleanup(server.Close)
 	server.MustStartTLS()
 	server.MustMock(mockgrpc.Method(pb.Tracking_GetParcel_FullMethodName).
@@ -50,7 +50,7 @@ func TestProgrammaticMocks(t *testing.T) {
 		Reply(mockgrpc.Message(&pb.ParcelStatus{State: "in_transit"})))
 	checkTLSLookup(t, server)
 
-	mutual := mockgrpc.MustNew(mockgrpc.Setup().ConfigSources().Silent().InMemory().
+	mutual := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory().
 		TLSMutual(_serverCert, _serverKey, _clientCert))
 	t.Cleanup(mutual.Close)
 	mutual.MustStartTLS()
