@@ -897,3 +897,52 @@ func TestConfigBuilder_LogOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestSetup_MockSelectionsCompose(t *testing.T) {
+	patterns := []string{"kept/*.yaml"}
+	setup := Setup().ConfigSources().MockFilePatterns("discarded/*.yaml").MockFilePatterns(patterns...)
+	patterns[0] = "mutated/*.yaml"
+
+	first := MustNew(setup)
+	t.Cleanup(first.Close)
+	require.Equal(t, []string{"kept/*.yaml"}, first.Config().MockFileSearchPatterns)
+	first.Config().MockFileSearchPatterns[0] = "used/*.yaml"
+
+	second := MustNew(setup)
+	t.Cleanup(second.Close)
+	require.Equal(t, []string{"kept/*.yaml"}, second.Config().MockFileSearchPatterns)
+
+	empty := MustNew(setup, Setup().MockFilePatterns())
+	t.Cleanup(empty.Close)
+	require.Equal(t, []string{}, empty.Config().MockFileSearchPatterns)
+
+	raw := MustNew(setup, &Config{ConfigSources: []ConfigSource{}})
+	t.Cleanup(raw.Close)
+	require.Equal(t, ConfigMockFilePattern, raw.Config().MockFileSearchPatterns)
+}
+
+type httpMockPatterns []string
+
+func (patterns httpMockPatterns) Apply(conf *Config) error {
+	conf.MockFileSearchPatterns = patterns
+	return nil
+}
+
+func TestGoSetup_CustomNilReleasesEarlierSelection(t *testing.T) {
+	clearHTTPDiscoveryEnv(t, "VLATTE_CONFIG", "VLATTE_MOCK_FILES")
+	t.Chdir(t.TempDir())
+
+	setup := Setup().MockFilePatterns("earlier/*.yaml")
+	withoutSource := MustNew(setup, httpMockPatterns(nil))
+	t.Cleanup(withoutSource.Close)
+	require.Equal(t, ConfigMockFilePattern, withoutSource.Config().MockFileSearchPatterns)
+
+	t.Setenv("VLATTE_MOCK_FILES", "env/*.yaml")
+	withSource := MustNew(setup, httpMockPatterns(nil))
+	t.Cleanup(withSource.Close)
+	require.Equal(t, []string{"env/*.yaml"}, withSource.Config().MockFileSearchPatterns)
+
+	empty := MustNew(Setup().MockFilePatterns())
+	t.Cleanup(empty.Close)
+	require.Equal(t, []string{}, empty.Config().MockFileSearchPatterns)
+}

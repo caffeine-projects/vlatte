@@ -30,6 +30,80 @@ func requireProblems(t helperT, err error) []Problem {
 	return cfgErr.Problems
 }
 
+func TestServerSources_ResolvesOnlyRequestedInputs(t *testing.T) {
+	dir := t.TempDir()
+	selected := filepath.Join(dir, "selected.yaml")
+	conventional := filepath.Join(dir, ".vlatterc.yaml")
+	require.NoError(t, os.WriteFile(selected, []byte("name: selected\nport: 81\n"), 0o600))
+	require.NoError(t, os.WriteFile(conventional, []byte("name: conventional\nport: 82\n"), 0o600))
+	t.Setenv("TEST_SERVER_SOURCES_NAME", "env")
+	t.Setenv("TEST_SERVER_SOURCES_DEBUG", "true")
+
+	explicitFile := File("config", selected)
+	conventionalFile := File("config", ".vlatterc", dir)
+	env := Env("TEST_SERVER_SOURCES")
+	tests := []struct {
+		name         string
+		explicit     []Source
+		selectedFile Source
+		skipDefaults bool
+		wantName     string
+		wantPort     int64
+		wantDebug    bool
+	}{
+		{
+			name:      "conventional config plus env",
+			wantName:  "env",
+			wantPort:  82,
+			wantDebug: true,
+		},
+		{
+			name:         "required config plus env",
+			selectedFile: explicitFile,
+			wantName:     "env",
+			wantPort:     81,
+			wantDebug:    true,
+		},
+		{
+			name:         "required config with defaults skipped",
+			selectedFile: explicitFile,
+			skipDefaults: true,
+			wantName:     "selected",
+			wantPort:     81,
+		},
+		{
+			name:         "defaults skipped without a file",
+			skipDefaults: true,
+		},
+		{
+			name:         "explicit sources with defaults skipped",
+			explicit:     []Source{conventionalFile, env, Args([]string{"--name=arg"})},
+			selectedFile: explicitFile,
+			skipDefaults: true,
+			wantName:     "arg",
+			wantPort:     82,
+			wantDebug:    true,
+		},
+		{
+			name:         "explicit empty list overrides all sources",
+			explicit:     []Source{},
+			selectedFile: explicitFile,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var c testConfig
+			sources := ServerSources(tt.explicit, tt.selectedFile, conventionalFile, env, tt.skipDefaults)
+			_, err := testSchema().Load(&c, sources)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantName, c.Name)
+			require.Equal(t, tt.wantPort, c.Port)
+			require.Equal(t, tt.wantDebug, c.Debug)
+		})
+	}
+}
+
 func TestLoad_LaterSourcesOverrideEarlierOnes(t *testing.T) {
 	// Precedence is the order of the sources: each value comes from the last source that set its key,
 	// and keys no later source sets keep the earlier value.

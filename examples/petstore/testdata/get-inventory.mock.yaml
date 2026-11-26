@@ -1,0 +1,17 @@
+id: petstore-get-inventory
+name: Count pets by status
+scenario:
+  name: adoption
+  required_state: started
+request:
+  method: GET
+  path: /inventories
+response:
+  status: 200
+  header:
+    Content-Type: application/json
+  body:
+    AVAILABLE: 1
+    PENDING: 0
+    ADOPTED: 0
+    NOT_AVAILABLE: 0

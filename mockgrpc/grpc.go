@@ -121,6 +121,12 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: loading configuration sources: %w", err)
 	}
 
+	if conf.MockFiles == nil && !conf.SkipDefaults {
+		for _, format := range MockFileFormats() {
+			conf.MockFiles = append(conf.MockFiles, "testdata/vlatte/_mocks_grpc/*.mock."+format)
+		}
+	}
+
 	if conf.InMemory && conf.Listener != nil {
 		return nil, fmt.Errorf("server: %w", errInMemoryListener)
 	}

@@ -1,6 +1,18 @@
 # Mock files
 
-`Setup().MockFiles("testdata/grpc/*.yaml")` loads gRPC mock files at `Start`, and `m.Reload()` again; `mockgrpc.FromFile` and `FromBytes` build one. Their keys mirror the Go API, and [`mockgrpc/schema/grpc.schema.json`](/reference/schemas) describes them for editors:
+In Go, a gRPC server discovers `*.mock.yaml`, `*.mock.yml` and `*.mock.json` in `testdata/vlatte/_mocks_grpc/` under its root directory. It loads the files at `Start` and loads them again on `Reload`. For example, a test using the generated `Tracking` service can serve its fixtures and register a response for another RPC in Go.
+
+```go
+m := mockgrpc.MustNew(mockgrpc.Setup().InMemory())
+t.Cleanup(m.Close)
+m.MustStart()
+m.MustMock(mockgrpc.Method(pb.Tracking_Dispatch_FullMethodName).
+    Reply(mockgrpc.Status(codes.Unavailable, "maintenance")))
+```
+
+Use `Setup().MockFilePatterns("fixtures/*.yaml")` to replace the fixture patterns. The existing `MockFiles(...)` method adds patterns to an explicit Go selection. The CLI takes its paths from `grpc.mock_files` or `--grpc-mock-files`. Use `mockgrpc.FromFile` or `FromBytes` to build one mock explicitly.
+
+The keys in a mock file mirror the Go API. Editors can validate them with the [gRPC mock schema](/reference/schemas).
 
 ```yaml
 id: denied

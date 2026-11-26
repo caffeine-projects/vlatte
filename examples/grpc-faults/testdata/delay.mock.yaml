@@ -1,0 +1,8 @@
+request:
+  method: /parcel.v1.Tracking/WatchParcel
+response:
+  header:
+    x-feed: open
+  message_delay: 1h
+  message:
+    state: accepted

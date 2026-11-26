@@ -249,3 +249,147 @@ func getLoadedMock(t *testing.T, app *mockhttp.Server, path string) (int, string
 	require.NoError(t, res.Body.Close())
 	return res.StatusCode, string(body)
 }
+
+func TestDiscovery_FileAndGoMocksSurviveReload(t *testing.T) {
+	clearHTTPDiscoveryEnv(t)
+	t.Chdir(t.TempDir())
+	app := newHTTPDiscoveryServer(t, mockhttp.Setup())
+	app.MustMock(mockhttp.Getf("/go").Reply(mockhttp.OK().PlainText("from Go")))
+	require.NoError(t, app.Start())
+	require.NoError(t, app.Reload())
+	status, _ := getLoadedMock(t, app, "/fixture")
+	require.Equal(t, mockhttp.StatusNoMatch, status)
+
+	writeHTTPDiscoveryFile(t, "testdata/vlatte/_mocks_grpc/neighbor.mock.yaml", "request: [")
+	path := "testdata/vlatte/_mocks/discovered.mock.yaml"
+	writeHTTPDiscoveryFile(t, path, "request: {path: /fixture}\nresponse: {body: initial}\n")
+	restarted := newHTTPDiscoveryServer(t, mockhttp.Setup())
+	restarted.MustMock(mockhttp.Getf("/go").Reply(mockhttp.OK().PlainText("from Go")))
+	require.NoError(t, restarted.Start())
+	requireHTTPDiscoveryReply(t, restarted, "/fixture", "initial")
+	requireHTTPDiscoveryReply(t, restarted, "/go", "from Go")
+
+	writeHTTPDiscoveryFile(t, path, "request: {path: /fixture}\nresponse: {body: updated}\n")
+	require.NoError(t, restarted.Reload())
+	requireHTTPDiscoveryReply(t, restarted, "/fixture", "updated")
+	requireHTTPDiscoveryReply(t, restarted, "/go", "from Go")
+
+	writeHTTPDiscoveryFile(t, path, "request: [")
+	requireHTTPDiscoveryError(t, restarted.Reload(), config.CodeParseError, "discovered.mock.yaml")
+	requireHTTPDiscoveryReply(t, restarted, "/fixture", "updated")
+	requireHTTPDiscoveryReply(t, restarted, "/go", "from Go")
+}
+
+func TestSkipDefaults_LoadsOnlySelectedFixtures(t *testing.T) {
+	clearHTTPDiscoveryEnv(t)
+
+	t.Run("malformed default config", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		writeHTTPDiscoveryFile(t, ".vlatterc.yaml", "request: [")
+		_, err := mockhttp.New(mockhttp.Setup())
+		requireHTTPDiscoveryError(t, err, config.CodeParseError, ".vlatterc.yaml")
+		requireOnlySelectedHTTPFixtures(t)
+	})
+
+	t.Run("hostile environment redirect", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		t.Setenv("VLATTE_CONFIG", "absent.yaml")
+		_, err := mockhttp.New(mockhttp.Setup())
+		requireHTTPDiscoveryError(t, err, config.CodeFileNotFound, "absent.yaml")
+		requireOnlySelectedHTTPFixtures(t)
+	})
+
+	t.Run("malformed conventional fixture", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		writeHTTPDiscoveryFile(t, "testdata/vlatte/_mocks/broken.mock.yaml", "request: [")
+		ordinary := newHTTPDiscoveryServer(t, mockhttp.Setup())
+		requireHTTPDiscoveryError(t, ordinary.Start(), config.CodeParseError, "broken.mock.yaml")
+		requireOnlySelectedHTTPFixtures(t)
+	})
+}
+
+func requireOnlySelectedHTTPFixtures(t *testing.T) {
+	t.Helper()
+	writeHTTPDiscoveryFile(t, "selected.mock.yaml", "request: {path: /selected}\nresponse: {body: selected fixture}\n")
+	skip := newHTTPDiscoveryServer(t, mockhttp.Setup().SkipDefaults().MockFilePatterns("selected.mock.yaml"))
+	skip.MustMock(mockhttp.Getf("/go").Reply(mockhttp.OK().PlainText("explicit Go mock")))
+	require.NoError(t, skip.Start())
+	requireHTTPDiscoveryReply(t, skip, "/selected", "selected fixture")
+	requireHTTPDiscoveryReply(t, skip, "/go", "explicit Go mock")
+}
+
+type appendHTTPMockPattern string
+
+func (pattern appendHTTPMockPattern) Apply(conf *mockhttp.Config) error {
+	conf.MockFileSearchPatterns = append(conf.MockFileSearchPatterns, string(pattern))
+	return nil
+}
+
+func TestDiscovery_CustomOptionSelectsHTTPFixtures(t *testing.T) {
+	clearHTTPDiscoveryEnv(t)
+	t.Chdir(t.TempDir())
+	writeHTTPDiscoveryFile(t, "testdata/vlatte/_mocks/conventional.mock.yaml", "request: {path: /conventional}\nresponse: {body: conventional}\n")
+	writeHTTPDiscoveryFile(t, "added.mock.yaml", "request: {path: /added}\nresponse: {body: added}\n")
+	writeHTTPDiscoveryFile(t, "source.mock.yaml", "request: {path: /source}\nresponse: {body: source}\n")
+	added := appendHTTPMockPattern("added.mock.yaml")
+	t.Setenv("VLATTE_MOCK_FILES", "source.mock.yaml")
+
+	tests := []struct {
+		name    string
+		options []mockhttp.Option
+	}{
+		{"without sources", []mockhttp.Option{mockhttp.Setup().ConfigSources(), added}},
+		{"with environment settings", []mockhttp.Option{added}},
+		{"before SkipDefaults", []mockhttp.Option{added, mockhttp.Setup().SkipDefaults()}},
+		{"after SkipDefaults", []mockhttp.Option{mockhttp.Setup().SkipDefaults(), added}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := newHTTPDiscoveryServer(t, tt.options...)
+			require.NoError(t, app.Start())
+			requireHTTPDiscoveryReply(t, app, "/added", "added")
+
+			status, _ := getLoadedMock(t, app, "/conventional")
+			require.Equal(t, mockhttp.StatusNoMatch, status)
+			status, _ = getLoadedMock(t, app, "/source")
+			require.Equal(t, mockhttp.StatusNoMatch, status)
+		})
+	}
+}
+
+func newHTTPDiscoveryServer(t *testing.T, options ...mockhttp.Option) *mockhttp.Server {
+	t.Helper()
+	app := mockhttp.MustNew(append(options, mockhttp.Setup().Silent().Addr("127.0.0.1:0"))...)
+	t.Cleanup(app.Close)
+	return app
+}
+
+func writeHTTPDiscoveryFile(t *testing.T, path, content string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+}
+
+func requireHTTPDiscoveryError(t *testing.T, err error, code, file string) {
+	t.Helper()
+	cfgErr, ok := errors.AsType[*config.Error](err)
+	require.True(t, ok, "%v", err)
+	require.Len(t, cfgErr.Problems, 1)
+	require.Equal(t, code, cfgErr.Problems[0].Code)
+	require.ErrorContains(t, err, file)
+}
+
+func requireHTTPDiscoveryReply(t *testing.T, app *mockhttp.Server, path, want string) {
+	t.Helper()
+	status, body := getLoadedMock(t, app, path)
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, want, body)
+}
+
+func clearHTTPDiscoveryEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"VLATTE_ADDR", "VLATTE_CONFIG", "VLATTE_MOCK_FILES", "VLATTE_NAME", "VLATTE_ROOT_DIR", "VLATTE_WORKDIR"} {
+		t.Setenv(key, "")
+		require.NoError(t, os.Unsetenv(key))
+	}
+}

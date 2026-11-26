@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/mockfile"
 )
+
+var _globDirectoryEscaper = strings.NewReplacer("[", "[[]", "*", "[*]", "?", "[?]")
 
 // fileLoader loads the mock files matching the server's patterns.
 type fileLoader struct {
@@ -56,7 +59,7 @@ func (l *fileLoader) loadLocked(app *Server, swap vlatte.Swap[*Mock]) error {
 	globs := make([]string, 0, len(app.config.MockFiles)+len(l.saved)*len(MockFileFormats()))
 	for _, pattern := range app.config.MockFiles {
 		if !filepath.IsAbs(pattern) && app.config.RootDir != "" {
-			pattern = filepath.Join(app.config.RootDir, pattern)
+			pattern = joinLiteralGlob(app.config.RootDir, pattern)
 		}
 
 		globs = append(globs, pattern)
@@ -65,7 +68,7 @@ func (l *fileLoader) loadLocked(app *Server, swap vlatte.Swap[*Mock]) error {
 	// The saved directories start at the root directory already.
 	for _, dir := range l.saved {
 		for _, format := range MockFileFormats() {
-			globs = append(globs, filepath.Join(dir, "*.mock."+format))
+			globs = append(globs, joinLiteralGlob(dir, "*.mock."+format))
 		}
 	}
 
@@ -109,6 +112,17 @@ func (l *fileLoader) loadLocked(app *Server, swap vlatte.Swap[*Mock]) error {
 	l.scope = scope
 
 	return nil
+}
+
+// joinLiteralGlob joins a literal directory to a glob, keeping the volume and path separators intact.
+func joinLiteralGlob(dir, pattern string) string {
+	volume := filepath.VolumeName(dir)
+	dir = dir[len(volume):]
+	if filepath.Separator != '\\' {
+		dir = strings.ReplaceAll(dir, `\`, `\\`)
+	}
+
+	return filepath.Join(volume+_globDirectoryEscaper.Replace(dir), pattern)
 }
 
 // Reload loads the mock files of Config.MockFiles again, and the mocks of the admin API's persistent store, if any:

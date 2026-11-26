@@ -1,0 +1,26 @@
+request:
+  method: /parcel.v1.Tracking/GetParcel
+  fields:
+    id: retry
+response_sequence:
+  responses:
+    - status:
+        code: UNAVAILABLE
+        message: retry
+    - message:
+        state: ready
+  after_ended:
+    message:
+      state: cached
+---
+request:
+  method: /parcel.v1.Tracking/GetParcel
+  fields:
+    id: random
+response_random:
+  seed: 42
+  responses:
+    - message:
+        state: north
+    - message:
+        state: south

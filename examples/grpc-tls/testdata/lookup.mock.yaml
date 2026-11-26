@@ -1,0 +1,7 @@
+request:
+  method: /parcel.v1.Tracking/GetParcel
+  message:
+    id: P1
+response:
+  message:
+    state: in_transit

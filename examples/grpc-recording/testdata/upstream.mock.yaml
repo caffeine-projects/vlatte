@@ -1,0 +1,23 @@
+request:
+  method: /parcel.v1.Tracking/GetParcel
+  message:
+    id: P1
+response_sequence:
+  responses:
+    - message:
+        state: accepted
+    - message:
+        state: delivered
+---
+request:
+  method: /parcel.v1.Tracking/WatchParcel
+  message:
+    id: P2
+response:
+  messages:
+    - state: accepted
+  status:
+    code: UNAVAILABLE
+    message: feed offline
+  trailer:
+    x-resume: "1"

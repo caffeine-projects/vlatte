@@ -84,7 +84,9 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Set: func(c *Config, v config.Value) error { c.RootDir = v.Str; return nil },
 		},
 		field{
-			Key: "grpc.mock_files", Kind: config.List, Usage: "Glob patterns of gRPC mock files, loaded at start.",
+			Key: "grpc.mock_files", Kind: config.List,
+			Usage: "Glob patterns of gRPC mock files, loaded at start and on reload. Go servers " +
+				"discover testdata/vlatte/_mocks_grpc/*.mock.{json,yaml,yml} when no patterns are supplied and defaults are enabled.",
 			Set: func(c *Config, v config.Value) error { c.MockFiles = v.List; return nil },
 		},
 		field{
@@ -358,8 +360,9 @@ func ConfigArgs(args []string) ConfigSource {
 	return config.Args(args)
 }
 
-// DefaultConfigSources lists the sources a server reads when Config.ConfigSources is nil, lowest precedence first:
-// the config file, VLATTE_GRPC_* environment variables, then args.
+// DefaultConfigSources lists the CLI settings sources, lowest precedence first: the config file from
+// [DefaultConfigDirectories], VLATTE_GRPC_* environment variables, then args. Go callers can pass the list to
+// [ConfigBuilder.ConfigSources] to use the same lookup.
 func DefaultConfigSources(args []string) []ConfigSource {
 	return []ConfigSource{ConfigFile(DefaultConfigFileName, DefaultConfigDirectories...), ConfigEnv(), ConfigArgs(args)}
 }
@@ -374,14 +377,12 @@ func ConfigFlags() []ConfigFlag {
 	return _schema().Flags()
 }
 
-// loadConfigSources applies the settings of conf.ConfigSources to conf. It returns flag.ErrHelp when the arguments ask
+// loadConfigSources applies the server's settings sources to conf. It returns flag.ErrHelp when the arguments ask
 // for help, or a *config.Error listing every problem found.
 func loadConfigSources(conf *Config) error {
-	sources := conf.ConfigSources
-	if sources == nil {
-		sources = DefaultConfigSources(nil)
-	}
-
+	patterns := conf.MockFiles
+	sources := config.ServerSources(conf.ConfigSources, conf.selectedConfigFile, ConfigFile(DefaultConfigFileName, "."),
+		ConfigEnv(), conf.SkipDefaults)
 	if len(sources) == 0 {
 		return nil
 	}
@@ -397,6 +398,9 @@ func loadConfigSources(conf *Config) error {
 	}
 
 	values, err := _schema().Load(conf, sources)
+	if patterns != nil {
+		conf.MockFiles = patterns
+	}
 
 	var problems []config.Problem
 	if err != nil {

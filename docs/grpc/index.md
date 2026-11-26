@@ -4,7 +4,7 @@
 
 A gRPC mock server serves any method of the services whose generated code the program imports: it needs no implementation registered. A mock names its method, matches the calls, and answers them, whatever their type: unary, server streaming, client streaming or bidi streaming.
 
-Here, `pb` is the generated code for a `greeter.proto` such as the one in [examples/03-grpc-greeter](https://github.com/caffeine-projects/vlatte/tree/main/examples/03-grpc-greeter). Use your own service's generated code in its place.
+Here, `pb` is the generated code for a `greeter.proto` such as the one in [examples/grpc-greeter](https://github.com/caffeine-projects/vlatte/tree/main/examples/grpc-greeter). Use your own service's generated code in its place.
 
 ```go
 import (
@@ -36,6 +36,22 @@ func TestGreeter(t *testing.T) {
 ```
 
 `Setup().InMemory()` serves on an in-memory listener, with no port: only `m.Dial()` reaches it, and `m.Close()` closes the connections it returns. Without it, the server listens on a local port, which `m.Addr()` names, for clients of any language.
+
+## Runnable examples
+
+The [parcel tracking example](https://github.com/caffeine-projects/vlatte/tree/main/examples/grpc-rpc-types) compares unary, server-streaming, client-streaming and bidirectional calls. Each exchange runs with both Go and YAML mocks. Its README also shows how to call the files with `grpcurl`.
+
+| Example | What you can try |
+|---|---|
+| [Proxying](https://github.com/caffeine-projects/vlatte/tree/main/examples/grpc-proxying) | Answer locally or forward a call and its metadata to an upstream. |
+| [Recording and replay](https://github.com/caffeine-projects/vlatte/tree/main/examples/grpc-recording) | Record a live exchange, then serve it after the upstream shuts down. |
+| [TLS and mutual TLS](https://github.com/caffeine-projects/vlatte/tree/main/examples/grpc-tls) | Test server trust and required client certificates. |
+| [Scenarios](https://github.com/caffeine-projects/vlatte/tree/main/examples/grpc-scenarios) | Advance and reset the state of individual parcels. |
+| [Reply strategies](https://github.com/caffeine-projects/vlatte/tree/main/examples/grpc-replies) | Return a sequence, repeat seeded choices, or echo a bidi stream. |
+| [Faults](https://github.com/caffeine-projects/vlatte/tree/main/examples/grpc-faults) | Cancel a delayed stream or cut its connection after one update. |
+| [Verification](https://github.com/caffeine-projects/vlatte/tree/main/examples/grpc-verification) | Count matched and unmatched calls in the journal. |
+| [Admin API](https://github.com/caffeine-projects/vlatte/tree/main/examples/grpc-admin) | Load and toggle a mock over HTTP while the gRPC client is running. |
+| [Extensions](https://github.com/caffeine-projects/vlatte/tree/main/examples/grpc-extensions) | Match a parsed request, render a reply, and observe completion. |
 
 ## Mock features
 

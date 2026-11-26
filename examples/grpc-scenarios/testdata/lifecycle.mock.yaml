@@ -1,0 +1,31 @@
+request:
+  method: /parcel.v1.Tracking/GetParcel
+scenario:
+  name: tracking
+  key: '{{ .Request.Message.id }}'
+  required_state: started
+  new_state: in_transit
+response:
+  template: true
+  message: '{"state": "{{ .Scenarios.StateOf "tracking" .Request.Message.id }}"}'
+---
+request:
+  method: /parcel.v1.Tracking/GetParcel
+scenario:
+  name: tracking
+  key: '{{ .Request.Message.id }}'
+  required_state: in_transit
+  new_state: delivered
+response:
+  template: true
+  message: '{"state": "{{ .Scenarios.StateOf "tracking" .Request.Message.id }}"}'
+---
+request:
+  method: /parcel.v1.Tracking/GetParcel
+scenario:
+  name: tracking
+  key: '{{ .Request.Message.id }}'
+  required_state: delivered
+response:
+  template: true
+  message: '{"state": "{{ .Scenarios.StateOf "tracking" .Request.Message.id }}"}'

@@ -24,6 +24,28 @@ type Source interface {
 	load(c *catalog, higher lookup) ([]entry, []Problem, error)
 }
 
+// ServerSources selects a server's settings sources in increasing precedence.
+// A non-nil explicit list takes precedence over all other inputs. Otherwise an
+// explicitly selected file is read even when skipDefaults is true.
+func ServerSources(explicit []Source, selectedFile, conventionalFile, env Source, skipDefaults bool) []Source {
+	if explicit != nil {
+		return explicit
+	}
+
+	var sources []Source
+	if selectedFile != nil {
+		sources = append(sources, selectedFile)
+	} else if !skipDefaults {
+		sources = append(sources, conventionalFile)
+	}
+
+	if !skipDefaults {
+		sources = append(sources, env)
+	}
+
+	return sources
+}
+
 // Load reads the sources and applies their values to dst through each field's Set.
 // Sources are listed lowest precedence first: a later source overrides an earlier one.
 //

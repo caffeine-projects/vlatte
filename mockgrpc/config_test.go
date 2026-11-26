@@ -296,3 +296,93 @@ func TestSetup_KVIsTheStoreTheServerReads(t *testing.T) {
 	require.Equal(t, codes.OK, code)
 	require.Equal(t, "hello", got)
 }
+
+func TestSetup_MockSelectionsCompose(t *testing.T) {
+	tests := []struct {
+		name string
+		opts []Option
+		want []string
+	}{
+		{"repeat", []Option{Setup().MockFilePatterns("one").MockFilePatterns("two")}, []string{"two"}},
+		{"replace then append", []Option{Setup().MockFilePatterns("one").MockFiles("two")}, []string{"one", "two"}},
+		{"append then replace", []Option{Setup().MockFiles("one"), Setup().MockFilePatterns("two")}, []string{"two"}},
+		{"explicit empty", []Option{Setup().MockFiles("one").MockFilePatterns().MockFiles()}, []string{}},
+		{"empty append", []Option{Setup().MockFiles()}, nil},
+		{"raw config resets selection", []Option{Setup().MockFilePatterns("one"), &Config{}}, nil},
+		{"raw config then append", []Option{&Config{MockFiles: []string{"one"}}, Setup().MockFiles("two")}, []string{"one", "two"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := append(tt.opts, Setup().SkipDefaults())
+			m := MustNew(opts...)
+			t.Cleanup(m.Close)
+			require.Equal(t, tt.want, m.Config().MockFiles)
+		})
+	}
+
+	t.Run("reused builders own their pattern lists", func(t *testing.T) {
+		replacement := []string{"one"}
+		addition := []string{"two"}
+		setup := Setup().SkipDefaults().MockFilePatterns(replacement...)
+		appendPatterns := Setup().MockFiles(addition...)
+		replacement[0] = "changed"
+		addition[0] = "changed"
+
+		first := MustNew(setup)
+		t.Cleanup(first.Close)
+		require.Equal(t, []string{"one"}, first.Config().MockFiles)
+		first.Config().MockFiles[0] = "changed"
+
+		second := MustNew(setup, appendPatterns)
+		t.Cleanup(second.Close)
+		require.Equal(t, []string{"one", "two"}, second.Config().MockFiles)
+	})
+
+	t.Run("raw config owns its pattern list", func(t *testing.T) {
+		conf := &Config{MockFiles: []string{"one"}}
+		m := MustNew(conf, Setup().SkipDefaults())
+		t.Cleanup(m.Close)
+		conf.MockFiles[0] = "changed"
+		require.Equal(t, []string{"one"}, m.Config().MockFiles)
+	})
+}
+
+type discoveryOption func(*Config) error
+
+func (fn discoveryOption) Apply(conf *Config) error {
+	return fn(conf)
+}
+
+func TestGoSetup_CustomNilReleasesEarlierSelection(t *testing.T) {
+	clearPatterns := discoveryOption(func(conf *Config) error {
+		conf.MockFiles = nil
+		return nil
+	})
+	source := ConfigArgs([]string{"--grpc-mock-files=source"})
+	conventional := []string{
+		"testdata/vlatte/_mocks_grpc/*.mock.json",
+		"testdata/vlatte/_mocks_grpc/*.mock.yaml",
+		"testdata/vlatte/_mocks_grpc/*.mock.yml",
+	}
+
+	tests := []struct {
+		name string
+		opts []Option
+		want []string
+	}{
+		{"source patterns", []Option{Setup().ConfigSources(source).MockFilePatterns("go"), clearPatterns}, []string{"source"}},
+		{"conventional patterns", []Option{Setup().ConfigSources().MockFilePatterns("go"), clearPatterns}, conventional},
+		{"raw nil uses conventional patterns", []Option{Setup().MockFilePatterns("go"), &Config{ConfigSources: []ConfigSource{}}}, conventional},
+		{"explicit empty with source patterns", []Option{Setup().ConfigSources(source).MockFilePatterns()}, []string{}},
+		{"explicit empty without source patterns", []Option{Setup().ConfigSources().MockFilePatterns()}, []string{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := MustNew(tt.opts...)
+			t.Cleanup(m.Close)
+			require.Equal(t, tt.want, m.Config().MockFiles)
+		})
+	}
+}

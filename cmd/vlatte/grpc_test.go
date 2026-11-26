@@ -113,6 +113,33 @@ response:
 	require.Equal(t, 0, stop(), "a stopped command exits cleanly")
 }
 
+func TestCLI_GRPCUsesOnlyConfiguredFixturePatterns(t *testing.T) {
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	dir := filepath.Join("testdata", "vlatte", "_mocks_grpc")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken.mock.yaml"), []byte("request: [\n"), 0o600))
+
+	set, file := healthSet(t, "cli.health.v1")
+	grpcAddr := randomAddr(t)
+	stop := start(t, "--addr", randomAddr(t), "--grpc-addr", grpcAddr, "--grpc-descriptors", set)
+
+	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	msgs := file.Messages()
+	req := dynamicpb.NewMessage(msgs.ByName("HealthCheckRequest"))
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res := dynamicpb.NewMessage(msgs.ByName("HealthCheckResponse"))
+		err := conn.Invoke(t.Context(), "/cli.health.v1.Health/Check", req, res)
+		assert.Equal(c, codes.NotFound, status.Code(err), "%v", err)
+	}, 10*time.Second, 100*time.Millisecond)
+
+	require.Equal(t, 0, stop(), "a stopped command exits cleanly")
+}
+
 func TestCLI_GRPCMocksReadTheKVFile(t *testing.T) {
 	// kv.file fills the store of both servers: a gRPC mock's template reads it as an HTTP mock's does.
 	withoutDockerHost(t)

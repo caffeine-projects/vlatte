@@ -351,3 +351,127 @@ func TestConfigSources_TLSFilesNeedEachOther(t *testing.T) {
 		})
 	}
 }
+
+func TestGoSetup_SelectsConfigAndFixturesIndependently(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("VLATTE_CONFIG", "")
+	t.Setenv("VLATTE_GRPC_ADDR", "")
+	t.Setenv("VLATTE_GRPC_NAME", "")
+	t.Setenv("VLATTE_GRPC_MOCK_FILES", "")
+
+	require.NoError(t, os.Mkdir("testdata", 0o700))
+	writeFile(t, "testdata", ".vlatterc.yaml", "grpc: {name: testdata}")
+	implicit := MustNew(Setup())
+	t.Cleanup(implicit.Close)
+	require.Empty(t, implicit.Config().Name)
+	legacy := MustNew(Setup().ConfigSources(DefaultConfigSources(nil)...))
+	t.Cleanup(legacy.Close)
+	require.Equal(t, "testdata", legacy.Config().Name)
+
+	writeFile(t, ".", ".vlatterc.yaml", "grpc: {name: working-directory}")
+	implicit = MustNew(Setup())
+	t.Cleanup(implicit.Close)
+	require.Equal(t, "working-directory", implicit.Config().Name)
+	writeFile(t, ".", ".vlatterc.json", `{"grpc":{"name":"ambiguous"}}`)
+	_, err := New(Setup())
+	assertConfigProblem(t, err, config.CodeFileAmbiguous, "")
+
+	t.Setenv("VLATTE_CONFIG", "hostile.yaml")
+	t.Setenv("VLATTE_GRPC_ADDR", ":4567")
+	writeFile(t, "testdata", "selected.yaml", "grpc: {name: exact, addr: ':1234', mock_files: [exact.mock.yaml]}")
+	selected := "testdata/selected.yaml"
+
+	tests := []struct {
+		name    string
+		setup   *ConfigBuilder
+		address string
+		server  string
+		pattern []string
+	}{
+		{"exact plus env", Setup().ConfigFile(selected), ":4567", "exact", []string{"exact.mock.yaml"}},
+		{"skip then exact", Setup().SkipDefaults().ConfigFile(selected), ":1234", "exact", []string{"exact.mock.yaml"}},
+		{"exact then skip", Setup().ConfigFile(selected).SkipDefaults().SkipDefaults(), ":1234", "exact", []string{"exact.mock.yaml"}},
+		{"skip with explicit env", Setup().SkipDefaults().ConfigSources(ConfigEnv()), ":4567", "", nil},
+		{"sources replace exact", Setup().SkipDefaults().ConfigFile(selected).ConfigSources(), "127.0.0.1:0", "", nil},
+		{"exact replaces sources", Setup().SkipDefaults().ConfigSources().ConfigFile(selected), ":1234", "exact", []string{"exact.mock.yaml"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := MustNew(tt.setup)
+			t.Cleanup(m.Close)
+			require.Equal(t, tt.address, m.Config().Addr)
+			require.Equal(t, tt.server, m.Config().Name)
+			require.Equal(t, tt.pattern, m.Config().MockFiles)
+			require.Empty(t, m.Config().RootDir, "the config directory does not relocate fixtures")
+		})
+	}
+
+	_, err = New(Setup().ConfigFile("missing.yaml"))
+	assertConfigProblem(t, err, config.CodeFileNotFound, "")
+	_, err = New(Setup().ConfigFile(""))
+	assertConfigProblem(t, err, config.CodeUnsupportedFormat, "")
+}
+
+func TestConfig_SkipDefaults(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("VLATTE_CONFIG", "missing.yaml")
+
+	m, err := New(&Config{SkipDefaults: true})
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+	require.Nil(t, m.Config().MockFiles)
+}
+
+func TestGoSetup_ExplicitMockPatternsWin(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("VLATTE_GRPC_ADDR", "")
+	t.Setenv("VLATTE_GRPC_MOCK_FILES", "env.mock.yaml")
+	path := writeFile(t, ".", "selected.yaml", "grpc: {addr: ':1234', mock_files: [file.mock.yaml]}")
+	empty := writeFile(t, ".", "empty.yaml", "grpc: {addr: ':1234', mock_files: []}")
+	invalid := writeFile(t, ".", "invalid.yaml", "grpc: {mock_files: 42}")
+	selectPatterns := discoveryOption(func(conf *Config) error {
+		conf.MockFiles = []string{"go.mock.yaml"}
+		return nil
+	})
+
+	tests := []struct {
+		name string
+		opts []Option
+		want []string
+	}{
+		{"Go replacement", []Option{Setup().ConfigFile(path).MockFilePatterns("go.mock.yaml")}, []string{"go.mock.yaml"}},
+		{"Go additive", []Option{Setup().ConfigFile(path).MockFiles("go.mock.yaml")}, []string{"go.mock.yaml"}},
+		{"custom Go selection", []Option{Setup().ConfigFile(path), selectPatterns}, []string{"go.mock.yaml"}},
+		{"Go empty", []Option{Setup().ConfigFile(path).MockFilePatterns()}, []string{}},
+		{"raw list", []Option{&Config{MockFiles: []string{"raw.mock.yaml"}}, Setup().ConfigFile(path)}, []string{"raw.mock.yaml"}},
+		{"raw empty", []Option{&Config{MockFiles: []string{}}, Setup().ConfigFile(path)}, []string{}},
+		{"raw nil lets sources supply patterns", []Option{Setup().MockFilePatterns("go.mock.yaml"), &Config{}, Setup().ConfigFile(path)}, []string{"env.mock.yaml"}},
+		{"Go list replaces an empty file list", []Option{Setup().SkipDefaults().ConfigFile(empty).MockFilePatterns("go.mock.yaml")}, []string{"go.mock.yaml"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := MustNew(tt.opts...)
+			t.Cleanup(m.Close)
+			require.Equal(t, tt.want, m.Config().MockFiles)
+			require.Equal(t, ":1234", m.Config().Addr)
+		})
+	}
+
+	m := MustNew(Setup().ConfigSources(ConfigFile(empty)))
+	t.Cleanup(m.Close)
+	require.Equal(t, []string{}, m.Config().MockFiles, "an empty file list also disables the conventional fallback")
+	_, err := New(Setup().ConfigFile(invalid).MockFilePatterns("go.mock.yaml"))
+	assertConfigProblem(t, err, config.CodeInvalidValue, "grpc.mock_files")
+}
+
+func assertConfigProblem(t *testing.T, err error, code, key string) {
+	t.Helper()
+
+	problem, ok := errors.AsType[*config.Error](err)
+	require.True(t, ok, "%v", err)
+	require.Len(t, problem.Problems, 1)
+	require.Equal(t, code, problem.Problems[0].Code)
+	require.Equal(t, key, problem.Problems[0].Key)
+}
