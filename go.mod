@@ -12,7 +12,7 @@ ignore (
 tool mvdan.cc/gofumpt
 
 require (
-	github.com/alicebob/miniredis/v2 v2.40.0
+	github.com/alicebob/miniredis/v2 v2.41.0
 	github.com/antchfx/xpath v1.3.9
 	github.com/getkin/kin-openapi v0.153.0
 	github.com/google/go-jsonnet v0.22.0
@@ -21,8 +21,8 @@ require (
 	github.com/mattn/go-colorable v0.1.16
 	github.com/mattn/go-isatty v0.0.24
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/ohler55/ojg v1.28.9
-	github.com/redis/go-redis/v9 v9.23.0
+	github.com/ohler55/ojg v1.28.10
+	github.com/redis/go-redis/v9 v9.24.0
 	github.com/rs/zerolog v1.35.1
 	github.com/ryanuber/go-glob v1.0.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
@@ -31,7 +31,7 @@ require (
 	go.uber.org/goleak v1.3.0
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/net v0.63.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261123191846-1e707ab9fbc2
 	google.golang.org/grpc v1.85.0
 	google.golang.org/protobuf v1.36.12
 	pgregory.net/rapid v1.3.0

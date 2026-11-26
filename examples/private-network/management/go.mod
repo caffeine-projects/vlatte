@@ -3,8 +3,8 @@ module github.com/caffeine-projects/vlatte/examples/private-network/management
 go 1.27.0
 
 require (
-	github.com/caffeine-projects/vlatte v1.2.0
-	github.com/netbirdio/netbird v0.82.1
+	github.com/caffeine-projects/vlatte v1.3.1
+	github.com/netbirdio/netbird v0.83.2
 	github.com/stretchr/testify v1.12.1
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	google.golang.org/grpc v1.85.0
@@ -38,7 +38,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mholt/acmez/v2 v2.0.1 // indirect
 	github.com/miekg/dns v1.1.72 // indirect
-	github.com/ohler55/ojg v1.28.9 // indirect
+	github.com/ohler55/ojg v1.28.10 // indirect
 	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
@@ -54,7 +54,7 @@ require (
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261123191846-1e707ab9fbc2 // indirect
 )
 
 replace github.com/caffeine-projects/vlatte => ../../..
