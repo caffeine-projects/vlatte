@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -318,12 +319,8 @@ func (kv redisKV) Del(ctx context.Context, k string) error {
 }
 
 func (kv redisKV) Keys(ctx context.Context) ([]string, error) {
-	var keys []string
-
 	it := kv.c.Scan(ctx, 0, "*", 0).Iterator()
-	for it.Next(ctx) {
-		keys = append(keys, it.Val())
-	}
+	keys := slices.Collect(it.Vals(ctx))
 
 	return keys, it.Err()
 }
