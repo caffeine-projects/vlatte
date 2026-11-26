@@ -94,13 +94,16 @@ type Config struct {
 	TemplateKeys []string
 
 	// ConfigSources lists where settings are read from after code, lowest precedence first.
-	// Nil uses the Go defaults: an optional working-directory config file, then VLATTE_* environment variables.
+	// Nil uses the Go defaults unless SkipDefaults is true: an optional working-directory config file,
+	// then VLATTE_* environment variables.
 	// An empty, non-nil slice reads nothing, so only code and defaults apply.
 	ConfigSources []ConfigSource
 
-	explicitMockPatterns bool
-	skipDefaults         bool
-	selectedConfigFile   ConfigSource
+	// SkipDefaults skips implicit config file lookup, environment settings and conventional fixture globs.
+	// Explicit config sources, config files and fixture patterns still apply.
+	SkipDefaults bool
+
+	selectedConfigFile ConfigSource
 
 	// ReadTimeout bounds reading an entire request, headers and body included, on the default backend and
 	// intercepted HTTPS connections. Zero or negative leaves it unbounded. It does not limit response writes.
@@ -132,16 +135,20 @@ type Config struct {
 	CORS                              *CORSConfig
 	BackendFactory                    BackendFactory
 	HandlerDecorator                  func(handler http.Handler) http.Handler
-	MockFileSearchPatterns            []string
-	Loaders                           []Loader
-	Proxy                             *ProxyConfig
-	Record                            *RecordConfig
-	Admin                             AdminAPI
-	AdminStore                        AdminStore
-	Journal                           *JournalConfig
-	MockFileHandlers                  []MockFileHandler
-	HeaderNamesToRedact               map[string]struct{}
-	UseHTTPS                          bool
+
+	// MockFileSearchPatterns controls which fixtures load from globs. Nil lets settings choose the patterns
+	// and otherwise uses [ConfigMockFilePattern] unless SkipDefaults is true. An empty, non-nil slice
+	// disables fixture globs. A nonempty slice selects its own fixtures.
+	MockFileSearchPatterns []string
+	Loaders                []Loader
+	Proxy                  *ProxyConfig
+	Record                 *RecordConfig
+	Admin                  AdminAPI
+	AdminStore             AdminStore
+	Journal                *JournalConfig
+	MockFileHandlers       []MockFileHandler
+	HeaderNamesToRedact    map[string]struct{}
+	UseHTTPS               bool
 
 	// NoMatchRenderer answers the requests no mock matches. Nil uses [DefaultNoMatchRenderer] in NoMatchFormat.
 	NoMatchRenderer NoMatchRenderer
@@ -209,7 +216,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.TemplateDataProviders = c.TemplateDataProviders
 	conf.DebugFn = c.DebugFn
 	conf.ConfigSources = c.ConfigSources
-	conf.skipDefaults = c.skipDefaults
+	conf.SkipDefaults = c.SkipDefaults
 	conf.selectedConfigFile = c.selectedConfigFile
 	conf.Addr = c.Addr
 	conf.Listener = c.Listener
@@ -232,7 +239,6 @@ func (c *Config) Apply(conf *Config) error {
 	conf.CORS = c.CORS
 	conf.BackendFactory = c.BackendFactory
 	conf.HandlerDecorator = c.HandlerDecorator
-	conf.explicitMockPatterns = c.MockFileSearchPatterns != nil
 	conf.MockFileSearchPatterns = slices.Clone(c.MockFileSearchPatterns)
 	conf.Loaders = c.Loaders
 	conf.Proxy = c.Proxy
@@ -325,7 +331,6 @@ func defaultConfig() *Config {
 		RequestWasNotMatchedStatusCode:    StatusNoMatch,
 		MCPRequestWasNotMatchedStatusCode: http.StatusOK,
 		ErrorStatusCode:                   StatusNoMatch,
-		MockFileSearchPatterns:            slices.Clone(ConfigMockFilePattern),
 		RequestBodyParsers:                make([]RequestBodyParser, 0),
 		Middlewares:                       make([]func(http.Handler) http.Handler, 0),
 		Loaders:                           make([]Loader, 0),
@@ -574,7 +579,6 @@ func (cb *ConfigBuilder) MockFilePatterns(patterns ...string) *ConfigBuilder {
 
 	return cb.set(func(conf *Config) {
 		conf.MockFileSearchPatterns = slices.Clone(patterns)
-		conf.explicitMockPatterns = true
 	})
 }
 
@@ -730,15 +734,10 @@ func (cb *ConfigBuilder) DebugFn(dfn DebugFn) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.DebugFn = dfn })
 }
 
-// SkipDefaults skips implicit config file lookup, environment settings and conventional fixture globs.
-// Explicit config sources, config files and fixture patterns still apply.
+// SkipDefaults sets [Config.SkipDefaults] to skip implicit config file lookup, environment settings and
+// conventional fixture globs.
 func (cb *ConfigBuilder) SkipDefaults() *ConfigBuilder {
-	return cb.set(func(conf *Config) {
-		conf.skipDefaults = true
-		if !conf.explicitMockPatterns {
-			conf.MockFileSearchPatterns = nil
-		}
-	})
+	return cb.set(func(conf *Config) { conf.SkipDefaults = true })
 }
 
 // ConfigFile selects a required JSON or YAML config file. Relative paths start at the process working directory.

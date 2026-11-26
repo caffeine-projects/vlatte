@@ -44,8 +44,13 @@ type Config struct {
 	Name string
 
 	// ConfigSources are the settings sources New reads after Go options. Explicit Go mock patterns take precedence.
-	// Nil uses the normal working-directory config lookup and environment. An empty list reads no settings sources.
+	// Nil uses the normal working-directory config lookup and environment unless SkipDefaults is set. An empty list
+	// reads no settings sources.
 	ConfigSources []ConfigSource
+
+	// SkipDefaults disables implicit config file lookup, environment settings and conventional mock file discovery.
+	// Explicit config sources and mock file patterns still apply.
+	SkipDefaults bool
 
 	// Serve reports whether the settings turned the grpc section on: the vlatte command serves gRPC mocks then.
 	Serve bool
@@ -148,8 +153,10 @@ type Config struct {
 	// RootDir is where relative MockFiles patterns start. Empty is the working directory.
 	RootDir string
 
-	// MockFiles are glob patterns of the mock files the server loads at Start and on Reload. A non-nil list in a
-	// Config passed to New overrides the list from settings sources.
+	// MockFiles are glob patterns of the mock files the server loads at Start and on Reload. After Go options,
+	// nil uses the patterns from settings sources or, if none are set and defaults are enabled, the conventional
+	// patterns in testdata/vlatte/_mocks_grpc. An empty non-nil slice disables fixture globbing. A populated slice
+	// selects those patterns and overrides settings sources and conventional discovery.
 	MockFiles []string
 
 	// ShutdownTimeout is how long Close waits for the calls in flight before it cuts them. 0 means 5s.
@@ -186,10 +193,7 @@ type Config struct {
 	OutboundAllow []netip.Prefix
 	OutboundDeny  []netip.Prefix
 
-	skipDefaults         bool
-	selectedConfigFile   ConfigSource
-	explicitMockPatterns bool
-	useConventionalMocks bool
+	selectedConfigFile ConfigSource
 }
 
 // AdminAPI is a handle to the built-in admin API: a RESTful HTTP server of its own, the same as HTTP mock servers have.
@@ -221,7 +225,6 @@ type JournalConfig struct {
 // Apply implements Option: it sets every field of conf to c's.
 func (c *Config) Apply(conf *Config) error {
 	*conf = *c
-	conf.explicitMockPatterns = c.MockFiles != nil
 	conf.MockFiles = slices.Clone(c.MockFiles)
 	return nil
 }
@@ -237,9 +240,8 @@ func (c *Config) path(p string) string {
 
 func defaultConfig() *Config {
 	return &Config{
-		Addr:                 "127.0.0.1:0",
-		LogLevel:             vlatte.LogLevelInfo,
-		useConventionalMocks: true,
+		Addr:     "127.0.0.1:0",
+		LogLevel: vlatte.LogLevelInfo,
 	}
 }
 
@@ -499,7 +501,6 @@ func (cb *ConfigBuilder) MockFiles(patterns ...string) *ConfigBuilder {
 	patterns = slices.Clone(patterns)
 	return cb.set(func(conf *Config) {
 		conf.MockFiles = append(slices.Clone(conf.MockFiles), patterns...)
-		conf.explicitMockPatterns = true
 	})
 }
 
@@ -513,7 +514,6 @@ func (cb *ConfigBuilder) MockFilePatterns(patterns ...string) *ConfigBuilder {
 
 	return cb.set(func(conf *Config) {
 		conf.MockFiles = slices.Clone(patterns)
-		conf.explicitMockPatterns = true
 	})
 }
 
@@ -523,15 +523,9 @@ func (cb *ConfigBuilder) ShutdownTimeout(d time.Duration) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.ShutdownTimeout = d })
 }
 
-// SkipDefaults disables implicit config file lookup, environment settings and conventional mock file discovery.
-// Explicit config sources and mock file patterns still apply.
+// SkipDefaults disables implicit settings and mock file discovery. See [Config.SkipDefaults].
 func (cb *ConfigBuilder) SkipDefaults() *ConfigBuilder {
-	return cb.set(func(conf *Config) {
-		conf.skipDefaults = true
-		if !conf.explicitMockPatterns {
-			conf.MockFiles = nil
-		}
-	})
+	return cb.set(func(conf *Config) { conf.SkipDefaults = true })
 }
 
 // ConfigFile selects the exact settings file New reads, relative to the working directory. It replaces any earlier

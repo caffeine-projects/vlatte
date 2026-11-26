@@ -918,13 +918,13 @@ func TestSetup_MockSelectionsCompose(t *testing.T) {
 
 	raw := MustNew(setup, &Config{ConfigSources: []ConfigSource{}})
 	t.Cleanup(raw.Close)
-	require.Nil(t, raw.Config().MockFileSearchPatterns)
+	require.Equal(t, ConfigMockFilePattern, raw.Config().MockFileSearchPatterns)
 }
 
-type clearHTTPMockPatterns struct{}
+type httpMockPatterns []string
 
-func (clearHTTPMockPatterns) Apply(conf *Config) error {
-	conf.MockFileSearchPatterns = nil
+func (patterns httpMockPatterns) Apply(conf *Config) error {
+	conf.MockFileSearchPatterns = patterns
 	return nil
 }
 
@@ -933,12 +933,12 @@ func TestGoSetup_CustomNilReleasesEarlierSelection(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	setup := Setup().MockFilePatterns("earlier/*.yaml")
-	withoutSource := MustNew(setup, clearHTTPMockPatterns{})
+	withoutSource := MustNew(setup, httpMockPatterns(nil))
 	t.Cleanup(withoutSource.Close)
-	require.Nil(t, withoutSource.Config().MockFileSearchPatterns)
+	require.Equal(t, ConfigMockFilePattern, withoutSource.Config().MockFileSearchPatterns)
 
 	t.Setenv("VLATTE_MOCK_FILES", "env/*.yaml")
-	withSource := MustNew(setup, clearHTTPMockPatterns{})
+	withSource := MustNew(setup, httpMockPatterns(nil))
 	t.Cleanup(withSource.Close)
 	require.Equal(t, []string{"env/*.yaml"}, withSource.Config().MockFileSearchPatterns)
 

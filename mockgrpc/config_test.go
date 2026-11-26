@@ -373,6 +373,7 @@ func TestGoSetup_CustomNilReleasesEarlierSelection(t *testing.T) {
 	}{
 		{"source patterns", []Option{Setup().ConfigSources(source).MockFilePatterns("go"), clearPatterns}, []string{"source"}},
 		{"conventional patterns", []Option{Setup().ConfigSources().MockFilePatterns("go"), clearPatterns}, conventional},
+		{"raw nil uses conventional patterns", []Option{Setup().MockFilePatterns("go"), &Config{ConfigSources: []ConfigSource{}}}, conventional},
 		{"explicit empty with source patterns", []Option{Setup().ConfigSources(source).MockFilePatterns()}, []string{}},
 		{"explicit empty without source patterns", []Option{Setup().ConfigSources().MockFilePatterns()}, []string{}},
 	}

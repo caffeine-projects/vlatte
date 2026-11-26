@@ -413,6 +413,16 @@ func TestGoSetup_SelectsConfigAndFixturesIndependently(t *testing.T) {
 	assertConfigProblem(t, err, config.CodeUnsupportedFormat, "")
 }
 
+func TestConfig_SkipDefaults(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("VLATTE_CONFIG", "missing.yaml")
+
+	m, err := New(&Config{SkipDefaults: true})
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+	require.Nil(t, m.Config().MockFiles)
+}
+
 func TestGoSetup_ExplicitMockPatternsWin(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("VLATTE_GRPC_ADDR", "")
@@ -420,6 +430,10 @@ func TestGoSetup_ExplicitMockPatternsWin(t *testing.T) {
 	path := writeFile(t, ".", "selected.yaml", "grpc: {addr: ':1234', mock_files: [file.mock.yaml]}")
 	empty := writeFile(t, ".", "empty.yaml", "grpc: {addr: ':1234', mock_files: []}")
 	invalid := writeFile(t, ".", "invalid.yaml", "grpc: {mock_files: 42}")
+	selectPatterns := discoveryOption(func(conf *Config) error {
+		conf.MockFiles = []string{"go.mock.yaml"}
+		return nil
+	})
 
 	tests := []struct {
 		name string
@@ -428,6 +442,7 @@ func TestGoSetup_ExplicitMockPatternsWin(t *testing.T) {
 	}{
 		{"Go replacement", []Option{Setup().ConfigFile(path).MockFilePatterns("go.mock.yaml")}, []string{"go.mock.yaml"}},
 		{"Go additive", []Option{Setup().ConfigFile(path).MockFiles("go.mock.yaml")}, []string{"go.mock.yaml"}},
+		{"custom Go selection", []Option{Setup().ConfigFile(path), selectPatterns}, []string{"go.mock.yaml"}},
 		{"Go empty", []Option{Setup().ConfigFile(path).MockFilePatterns()}, []string{}},
 		{"raw list", []Option{&Config{MockFiles: []string{"raw.mock.yaml"}}, Setup().ConfigFile(path)}, []string{"raw.mock.yaml"}},
 		{"raw empty", []Option{&Config{MockFiles: []string{}}, Setup().ConfigFile(path)}, []string{}},

@@ -932,6 +932,16 @@ func TestGoSetup_SelectsConfigAndFixturesIndependently(t *testing.T) {
 	})
 }
 
+func TestConfig_SkipDefaults(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("VLATTE_CONFIG", "missing.yaml")
+
+	app, err := New(&Config{SkipDefaults: true})
+	require.NoError(t, err)
+	t.Cleanup(app.Close)
+	require.Nil(t, app.Config().MockFileSearchPatterns)
+}
+
 func TestGoSetup_ExplicitMockPatternsWin(t *testing.T) {
 	clearHTTPDiscoveryEnv(t, "VLATTE_NAME")
 	t.Chdir(t.TempDir())
@@ -946,7 +956,9 @@ func TestGoSetup_ExplicitMockPatternsWin(t *testing.T) {
 	}{
 		{"sources", []Option{Setup().ConfigFile(path)}, []string{"env/*.yaml"}},
 		{"builder", []Option{Setup().ConfigFile(path).MockFilePatterns("go/*.yaml")}, []string{"go/*.yaml"}},
+		{"custom option", []Option{Setup().ConfigFile(path), httpMockPatterns{"go.mock.yaml"}}, []string{"go.mock.yaml"}},
 		{"explicit empty", []Option{Setup().ConfigFile(path).MockFilePatterns()}, []string{}},
+		{"empty source suppresses conventional patterns", []Option{Setup().ConfigSources(ConfigFile(emptyPath))}, []string{}},
 		{"empty source list", []Option{Setup().SkipDefaults().ConfigFile(emptyPath)}, []string{}},
 		{"empty source cannot replace Go patterns", []Option{Setup().MockFilePatterns("go/*.yaml").SkipDefaults().ConfigFile(emptyPath)}, []string{"go/*.yaml"}},
 		{"raw patterns", []Option{&Config{MockFileSearchPatterns: []string{"raw/*.yaml"}}, Setup().ConfigFile(path)}, []string{"raw/*.yaml"}},

@@ -73,9 +73,8 @@ func ConfigFlags() []ConfigFlag {
 // It returns flag.ErrHelp when the arguments ask for help, or a *config.Error listing every problem found.
 func loadConfigSources(conf *Config) error {
 	patterns := conf.MockFileSearchPatterns
-	restorePatterns := conf.explicitMockPatterns && patterns != nil
 	sources := config.ServerSources(conf.ConfigSources, conf.selectedConfigFile,
-		ConfigFile(DefaultConfigFileName, "."), ConfigEnv(), conf.skipDefaults)
+		ConfigFile(DefaultConfigFileName, "."), ConfigEnv(), conf.SkipDefaults)
 
 	if len(sources) == 0 {
 		return nil
@@ -112,7 +111,7 @@ func loadConfigSources(conf *Config) error {
 	}
 
 	values, err := _schema().Load(conf, sources)
-	if restorePatterns {
+	if patterns != nil {
 		conf.MockFileSearchPatterns = patterns
 	}
 
@@ -231,7 +230,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Set: func(c *Config, v config.Value) error { c.WorkDir = v.Str; return nil },
 		},
 		{
-			Key: "mock_files", Kind: config.List, Default: strings.Join(d.MockFileSearchPatterns, ","),
+			Key: "mock_files", Kind: config.List, Default: strings.Join(ConfigMockFilePattern, ","),
 			Usage: "Glob patterns of the mock files to load on start.",
 			Set:   func(c *Config, v config.Value) error { c.MockFileSearchPatterns = v.List; return nil },
 		},

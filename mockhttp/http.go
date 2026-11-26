@@ -135,6 +135,10 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: loading the configuration sources: %w", err)
 	}
 
+	if conf.MockFileSearchPatterns == nil && !conf.SkipDefaults {
+		conf.MockFileSearchPatterns = slices.Clone(ConfigMockFilePattern)
+	}
+
 	if err := conf.checkName(); err != nil {
 		return nil, fmt.Errorf("server: %w", err)
 	}

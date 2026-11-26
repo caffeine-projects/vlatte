@@ -325,39 +325,36 @@ func (pattern appendHTTPMockPattern) Apply(conf *mockhttp.Config) error {
 	return nil
 }
 
-func TestDiscovery_CustomOptionCanAppendToHTTPDefaults(t *testing.T) {
+func TestDiscovery_CustomOptionSelectsHTTPFixtures(t *testing.T) {
 	clearHTTPDiscoveryEnv(t)
 	t.Chdir(t.TempDir())
 	writeHTTPDiscoveryFile(t, "testdata/vlatte/_mocks/conventional.mock.yaml", "request: {path: /conventional}\nresponse: {body: conventional}\n")
 	writeHTTPDiscoveryFile(t, "added.mock.yaml", "request: {path: /added}\nresponse: {body: added}\n")
 	writeHTTPDiscoveryFile(t, "source.mock.yaml", "request: {path: /source}\nresponse: {body: source}\n")
 	added := appendHTTPMockPattern("added.mock.yaml")
-	setup := mockhttp.Setup()
-
-	ordinary := newHTTPDiscoveryServer(t, setup, added)
-	require.NoError(t, ordinary.Start())
-	requireHTTPDiscoveryReply(t, ordinary, "/conventional", "conventional")
-	requireHTTPDiscoveryReply(t, ordinary, "/added", "added")
-
 	t.Setenv("VLATTE_MOCK_FILES", "source.mock.yaml")
-	fromSource := newHTTPDiscoveryServer(t, setup, added)
-	require.NoError(t, fromSource.Start())
-	requireHTTPDiscoveryReply(t, fromSource, "/source", "source")
-	status, _ := getLoadedMock(t, fromSource, "/added")
-	require.Equal(t, mockhttp.StatusNoMatch, status)
 
-	cleared := newHTTPDiscoveryServer(t, setup, added, mockhttp.Setup().SkipDefaults())
-	require.NoError(t, cleared.Start())
-	status, _ = getLoadedMock(t, cleared, "/conventional")
-	require.Equal(t, mockhttp.StatusNoMatch, status)
-	status, _ = getLoadedMock(t, cleared, "/added")
-	require.Equal(t, mockhttp.StatusNoMatch, status)
+	tests := []struct {
+		name    string
+		options []mockhttp.Option
+	}{
+		{"without sources", []mockhttp.Option{mockhttp.Setup().ConfigSources(), added}},
+		{"with environment settings", []mockhttp.Option{added}},
+		{"before SkipDefaults", []mockhttp.Option{added, mockhttp.Setup().SkipDefaults()}},
+		{"after SkipDefaults", []mockhttp.Option{mockhttp.Setup().SkipDefaults(), added}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := newHTTPDiscoveryServer(t, tt.options...)
+			require.NoError(t, app.Start())
+			requireHTTPDiscoveryReply(t, app, "/added", "added")
 
-	afterSkip := newHTTPDiscoveryServer(t, mockhttp.Setup().SkipDefaults(), added)
-	require.NoError(t, afterSkip.Start())
-	requireHTTPDiscoveryReply(t, afterSkip, "/added", "added")
-	status, _ = getLoadedMock(t, afterSkip, "/conventional")
-	require.Equal(t, mockhttp.StatusNoMatch, status)
+			status, _ := getLoadedMock(t, app, "/conventional")
+			require.Equal(t, mockhttp.StatusNoMatch, status)
+			status, _ = getLoadedMock(t, app, "/source")
+			require.Equal(t, mockhttp.StatusNoMatch, status)
+		})
+	}
 }
 
 func newHTTPDiscoveryServer(t *testing.T, options ...mockhttp.Option) *mockhttp.Server {

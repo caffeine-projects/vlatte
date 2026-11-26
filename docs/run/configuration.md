@@ -117,7 +117,24 @@ setup := mockhttp.Setup().
 m := mockhttp.MustNew(setup)
 ```
 
-When migrating, check whether a config file previously replaced a fixture path supplied in Go. To let the file choose the fixtures, omit the Go pattern setter. To retain the older search in both `.` and `testdata`, or a customized `DefaultConfigDirectories`, use `mockhttp.Setup().ConfigSources(mockhttp.DefaultConfigSources(nil)...)` or the corresponding `mockgrpc` functions. Calling `ConfigSources()` with no arguments skips external settings and still permits conventional fixtures.
+With a config literal or custom option, set `mockhttp.Config.MockFileSearchPatterns` or `mockgrpc.Config.MockFiles`. Both fields follow the same rules after all Go options have run.
+
+| Pattern slice | Files selected by glob |
+| --- | --- |
+| `nil` | Read `mock_files` (gRPC uses `grpc.mock_files`). If the setting is absent, use the conventional patterns unless `SkipDefaults` is true. |
+| `[]string{}` | Disable discovery through the fixture patterns. Programmatic mocks and separately configured recordings still work. |
+| A populated slice | Use exactly those patterns. Other settings still come from the configured sources. |
+
+A zero-value config such as `&mockgrpc.Config{}` enables discovery. To skip the implicit config file, environment and fixture lookup in a literal, set `SkipDefaults: true` in either package.
+
+If you previously appended to `MockFileSearchPatterns` in a custom HTTP option, the slice now starts nil. To let the config file choose fixtures, leave it nil. To keep conventional fixtures alongside your own, include both sets of patterns explicitly.
+
+```go
+patterns := slices.Concat(mockhttp.ConfigMockFilePattern, []string{"fixtures/refunds/*.yaml"})
+m := mockhttp.MustNew(mockhttp.Setup().MockFilePatterns(patterns...))
+```
+
+To retain the older config search in both `.` and `testdata`, or a customized `DefaultConfigDirectories`, use `mockhttp.Setup().ConfigSources(mockhttp.DefaultConfigSources(nil)...)` or the corresponding `mockgrpc` functions. Calling `ConfigSources()` with no arguments skips external settings and still permits conventional fixtures.
 
 ## gRPC settings
 

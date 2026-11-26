@@ -85,7 +85,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		},
 		field{
 			Key: "grpc.mock_files", Kind: config.List,
-			Usage: "Glob patterns of gRPC mock files, loaded at start and on reload. Go servers built with Setup " +
+			Usage: "Glob patterns of gRPC mock files, loaded at start and on reload. Go servers " +
 				"discover testdata/vlatte/_mocks_grpc/*.mock.{json,yaml,yml} when no patterns are supplied and defaults are enabled.",
 			Set: func(c *Config, v config.Value) error { c.MockFiles = v.List; return nil },
 		},
@@ -381,15 +381,8 @@ func ConfigFlags() []ConfigFlag {
 // for help, or a *config.Error listing every problem found.
 func loadConfigSources(conf *Config) error {
 	patterns := conf.MockFiles
-	restorePatterns := conf.explicitMockPatterns && patterns != nil
-	if conf.useConventionalMocks && !conf.skipDefaults && patterns == nil {
-		for _, format := range MockFileFormats() {
-			conf.MockFiles = append(conf.MockFiles, "testdata/vlatte/_mocks_grpc/*.mock."+format)
-		}
-	}
-
 	sources := config.ServerSources(conf.ConfigSources, conf.selectedConfigFile, ConfigFile(DefaultConfigFileName, "."),
-		ConfigEnv(), conf.skipDefaults)
+		ConfigEnv(), conf.SkipDefaults)
 	if len(sources) == 0 {
 		return nil
 	}
@@ -405,7 +398,7 @@ func loadConfigSources(conf *Config) error {
 	}
 
 	values, err := _schema().Load(conf, sources)
-	if restorePatterns {
+	if patterns != nil {
 		conf.MockFiles = patterns
 	}
 
