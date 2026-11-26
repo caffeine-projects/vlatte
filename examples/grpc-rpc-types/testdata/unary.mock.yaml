@@ -1,0 +1,28 @@
+request:
+  method: /parcel.v1.Tracking/GetParcel
+  header:
+    x-tenant: demo
+  fields:
+    id: P1
+response:
+  message:
+    state: in_transit
+  header:
+    x-depot: north
+  trailer:
+    x-source: tracker
+---
+request:
+  method: /parcel.v1.Tracking/GetParcel
+  header:
+    x-tenant: demo
+  fields:
+    id: P404
+response:
+  status:
+    code: NOT_FOUND
+    message: parcel missing
+    details:
+      - "@type": type.googleapis.com/google.rpc.ResourceInfo
+        resourceType: parcel
+        resourceName: P404

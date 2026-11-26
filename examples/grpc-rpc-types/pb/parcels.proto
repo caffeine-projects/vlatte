@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package parcel.v1;
+
+option go_package = "github.com/caffeine-projects/vlatte/examples/grpc-rpc-types/pb";
+
+service Tracking {
+  rpc GetParcel(ParcelRef) returns (ParcelStatus);
+  rpc WatchParcel(ParcelRef) returns (stream ParcelStatus);
+  rpc UploadScans(stream Scan) returns (Receipt);
+  rpc Dispatch(stream DispatchMessage) returns (stream DispatchMessage);
+}
+
+message ParcelRef {
+  string id = 1;
+}
+
+message ParcelStatus {
+  string state = 1;
+}
+
+message Scan {
+  string site = 1;
+}
+
+message Receipt {
+  uint32 accepted = 1;
+}
+
+message DispatchMessage {
+  string text = 1;
+}

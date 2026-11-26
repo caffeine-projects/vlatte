@@ -25,7 +25,7 @@ const (
 	EnvPrefix = "VLATTE"
 )
 
-// DefaultConfigDirectories are the directories searched for the config file, in order.
+// DefaultConfigDirectories are the directories [DefaultConfigSources] searches for the config file, in order.
 var DefaultConfigDirectories = []string{".", "testdata"}
 
 // _keyConfigFile names the config file to load, as in --config or VLATTE_CONFIG.
@@ -53,8 +53,8 @@ func ConfigArgs(args []string) ConfigSource {
 	return config.Args(args)
 }
 
-// DefaultConfigSources lists the sources a server reads when Config.ConfigSources is nil, lowest precedence first:
-// the config file, VLATTE_* environment variables, then args.
+// DefaultConfigSources lists the config file lookup in [DefaultConfigDirectories], VLATTE_* environment variables,
+// and args, lowest precedence first. Pass it to [ConfigBuilder.ConfigSources] to use this lookup in Go.
 func DefaultConfigSources(args []string) []ConfigSource {
 	return []ConfigSource{ConfigFile(DefaultConfigFileName, DefaultConfigDirectories...), ConfigEnv(), ConfigArgs(args)}
 }
@@ -72,10 +72,10 @@ func ConfigFlags() []ConfigFlag {
 // loadConfigSources applies the settings of conf.ConfigSources to conf.
 // It returns flag.ErrHelp when the arguments ask for help, or a *config.Error listing every problem found.
 func loadConfigSources(conf *Config) error {
-	sources := conf.ConfigSources
-	if sources == nil {
-		sources = DefaultConfigSources(nil)
-	}
+	patterns := conf.MockFileSearchPatterns
+	restorePatterns := conf.explicitMockPatterns && patterns != nil
+	sources := config.ServerSources(conf.ConfigSources, conf.selectedConfigFile,
+		ConfigFile(DefaultConfigFileName, "."), ConfigEnv(), conf.skipDefaults)
 
 	if len(sources) == 0 {
 		return nil
@@ -112,6 +112,9 @@ func loadConfigSources(conf *Config) error {
 	}
 
 	values, err := _schema().Load(conf, sources)
+	if restorePatterns {
+		conf.MockFileSearchPatterns = patterns
+	}
 
 	var problems []config.Problem
 	if err != nil {

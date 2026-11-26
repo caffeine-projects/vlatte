@@ -1,0 +1,24 @@
+request:
+  method: /parcel.v1.Tracking/GetParcel
+  message:
+    id: local
+response:
+  message:
+    state: cached
+---
+priority: 10
+request:
+  method: /parcel.v1.Tracking/GetParcel
+proxy:
+  target: 127.0.0.1:50052
+  header:
+    x-tenant: demo
+  remove_headers:
+    - x-drop
+---
+request:
+  method: /parcel.v1.Tracking/WatchParcel
+  message:
+    id: P2
+proxy:
+  target: 127.0.0.1:50052

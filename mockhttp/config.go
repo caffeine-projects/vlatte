@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -93,9 +94,13 @@ type Config struct {
 	TemplateKeys []string
 
 	// ConfigSources lists where settings are read from after code, lowest precedence first.
-	// Nil reads DefaultConfigSources(nil): the config file, then VLATTE_* environment variables.
+	// Nil uses the Go defaults: an optional working-directory config file, then VLATTE_* environment variables.
 	// An empty, non-nil slice reads nothing, so only code and defaults apply.
 	ConfigSources []ConfigSource
+
+	explicitMockPatterns bool
+	skipDefaults         bool
+	selectedConfigFile   ConfigSource
 
 	// ReadTimeout bounds reading an entire request, headers and body included, on the default backend and
 	// intercepted HTTPS connections. Zero or negative leaves it unbounded. It does not limit response writes.
@@ -204,6 +209,8 @@ func (c *Config) Apply(conf *Config) error {
 	conf.TemplateDataProviders = c.TemplateDataProviders
 	conf.DebugFn = c.DebugFn
 	conf.ConfigSources = c.ConfigSources
+	conf.skipDefaults = c.skipDefaults
+	conf.selectedConfigFile = c.selectedConfigFile
 	conf.Addr = c.Addr
 	conf.Listener = c.Listener
 	conf.ReadTimeout = c.ReadTimeout
@@ -225,7 +232,8 @@ func (c *Config) Apply(conf *Config) error {
 	conf.CORS = c.CORS
 	conf.BackendFactory = c.BackendFactory
 	conf.HandlerDecorator = c.HandlerDecorator
-	conf.MockFileSearchPatterns = c.MockFileSearchPatterns
+	conf.explicitMockPatterns = c.MockFileSearchPatterns != nil
+	conf.MockFileSearchPatterns = slices.Clone(c.MockFileSearchPatterns)
 	conf.Loaders = c.Loaders
 	conf.Proxy = c.Proxy
 	conf.Record = c.Record
@@ -317,7 +325,7 @@ func defaultConfig() *Config {
 		RequestWasNotMatchedStatusCode:    StatusNoMatch,
 		MCPRequestWasNotMatchedStatusCode: http.StatusOK,
 		ErrorStatusCode:                   StatusNoMatch,
-		MockFileSearchPatterns:            ConfigMockFilePattern,
+		MockFileSearchPatterns:            slices.Clone(ConfigMockFilePattern),
 		RequestBodyParsers:                make([]RequestBodyParser, 0),
 		Middlewares:                       make([]func(http.Handler) http.Handler, 0),
 		Loaders:                           make([]Loader, 0),
@@ -555,10 +563,19 @@ func (cb *ConfigBuilder) KV(kv vlatte.KV) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.KV = kv })
 }
 
-// MockFilePatterns sets custom Glob patterns to load mock from the file system, which may start with WorkDirVar.
-// Defaults to ConfigMockFilePattern.
+// MockFilePatterns replaces the fixture globs, including any mock_files from settings.
+// Relative patterns start at [Config.RootDir] and may use [WorkDirVar].
+// With no arguments, the server loads no fixtures from globs.
 func (cb *ConfigBuilder) MockFilePatterns(patterns ...string) *ConfigBuilder {
-	return cb.set(func(conf *Config) { conf.MockFileSearchPatterns = patterns })
+	patterns = slices.Clone(patterns)
+	if patterns == nil {
+		patterns = []string{}
+	}
+
+	return cb.set(func(conf *Config) {
+		conf.MockFileSearchPatterns = slices.Clone(patterns)
+		conf.explicitMockPatterns = true
+	})
 }
 
 // Loader configures an additional Loader.
@@ -713,15 +730,41 @@ func (cb *ConfigBuilder) DebugFn(dfn DebugFn) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.DebugFn = dfn })
 }
 
-// ConfigSources sets where settings are read from after code, lowest precedence first,
-// replacing DefaultConfigSources. With no arguments, only code and defaults apply.
+// SkipDefaults skips implicit config file lookup, environment settings and conventional fixture globs.
+// Explicit config sources, config files and fixture patterns still apply.
+func (cb *ConfigBuilder) SkipDefaults() *ConfigBuilder {
+	return cb.set(func(conf *Config) {
+		conf.skipDefaults = true
+		if !conf.explicitMockPatterns {
+			conf.MockFileSearchPatterns = nil
+		}
+	})
+}
+
+// ConfigFile selects a required JSON or YAML config file. Relative paths start at the process working directory.
+// Environment settings still apply unless [ConfigBuilder.SkipDefaults] is used. VLATTE_CONFIG cannot redirect this path.
+// A later [ConfigBuilder.ConfigSources] replaces this selection.
+func (cb *ConfigBuilder) ConfigFile(path string) *ConfigBuilder {
+	file := ConfigFile(path)
+
+	return cb.set(func(conf *Config) {
+		conf.selectedConfigFile = file
+		conf.ConfigSources = nil
+	})
+}
+
+// ConfigSources sets where settings are read from after code, lowest precedence first.
+// It replaces any earlier config file selection. With no arguments, no external settings are read.
 // A Config applied later resets it, since it sets every field.
 func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
 	if sources == nil {
 		sources = []ConfigSource{}
 	}
 
-	return cb.set(func(conf *Config) { conf.ConfigSources = sources })
+	return cb.set(func(conf *Config) {
+		conf.ConfigSources = sources
+		conf.selectedConfigFile = nil
+	})
 }
 
 // Admin serves the admin API api, such as admin.MustNew(admin.Addr("127.0.0.1:8081")), on an HTTP server of its own.

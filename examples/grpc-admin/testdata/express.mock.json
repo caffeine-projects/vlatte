@@ -1,0 +1,14 @@
+{
+  "id": "express",
+  "request": {
+    "method": "/parcel.v1.Tracking/GetParcel",
+    "fields": {
+      "id": "express"
+    }
+  },
+  "response": {
+    "message": {
+      "state": "priority"
+    }
+  }
+}

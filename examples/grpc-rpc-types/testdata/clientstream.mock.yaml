@@ -1,0 +1,16 @@
+request:
+  method: /parcel.v1.Tracking/UploadScans
+  messages:
+    - site: north
+    - site: south
+response:
+  template: true
+  message: '{"accepted":{{ len .Request.Message }}}'
+---
+priority: 10
+request:
+  method: /parcel.v1.Tracking/UploadScans
+response:
+  status:
+    code: INVALID_ARGUMENT
+    message: expected north then south

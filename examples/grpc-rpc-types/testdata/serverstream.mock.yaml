@@ -1,0 +1,26 @@
+request:
+  method: /parcel.v1.Tracking/WatchParcel
+  message:
+    id: P1
+response:
+  body_file: route.json
+---
+request:
+  method: /parcel.v1.Tracking/WatchParcel
+  message:
+    id: P0
+response:
+  messages: []
+---
+request:
+  method: /parcel.v1.Tracking/WatchParcel
+  message:
+    id: P2
+response:
+  messages:
+    - state: accepted
+  status:
+    code: UNAVAILABLE
+    message: feed offline
+  trailer:
+    x-resume: "1"

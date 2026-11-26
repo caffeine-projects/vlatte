@@ -46,6 +46,7 @@ func newGRPC(args []string, s settings, httpConf *mockhttp.Config, wh *webhook.W
 		Reflection().
 		LogOutput(logOutput).
 		OnCompleteListener("webhook", wh).
+		SkipDefaults().
 		ConfigSources(mockgrpc.DefaultConfigSources(args)...))
 }
 

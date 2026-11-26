@@ -850,3 +850,130 @@ func TestConfigSources_TheCAKeysTurnTheProxyOn(t *testing.T) {
 		ConfigArgs([]string{"--proxy-ca-cert", filepath.Join(dir, "missing.pem"), "--proxy-ca-key", caKey}))
 	require.ErrorContains(t, err, "can't load the CA's certificate and key")
 }
+
+func TestGoSetup_SelectsConfigAndFixturesIndependently(t *testing.T) {
+	clearHTTPDiscoveryEnv(t, "VLATTE_CONFIG", "VLATTE_MOCK_FILES", "VLATTE_NAME")
+
+	t.Run("implicit lookup stays in the working directory", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		require.NoError(t, os.Mkdir("testdata", 0o700))
+		writeConfigFile(t, "testdata", ".vlatterc.yaml", "name: legacy")
+		implicit := MustNew(Setup())
+		t.Cleanup(implicit.Close)
+		require.Equal(t, "", implicit.Config().Name)
+		require.Equal(t, ConfigMockFilePattern, implicit.Config().MockFileSearchPatterns)
+
+		legacy := MustNew(Setup().ConfigSources(DefaultConfigSources(nil)...))
+		t.Cleanup(legacy.Close)
+		require.Equal(t, "legacy", legacy.Config().Name)
+
+		writeConfigFile(t, ".", ".vlatterc.yaml", "name: root\nmock_files: [root/*.yaml]")
+		root := MustNew(Setup())
+		t.Cleanup(root.Close)
+		require.Equal(t, "root", root.Config().Name)
+		require.Equal(t, []string{"root/*.yaml"}, root.Config().MockFileSearchPatterns)
+
+		writeConfigFile(t, ".", ".vlatterc.json", "{}")
+		_, err := New(Setup())
+		problems := configProblems(t, err)
+		require.Len(t, problems, 1)
+		require.Equal(t, config.CodeFileAmbiguous, problems[0].Code)
+	})
+
+	t.Run("required exact file with ordinary environment settings", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		t.Setenv("VLATTE_CONFIG", "missing.yaml")
+		t.Setenv("VLATTE_ADDR", "127.0.0.1:1234")
+		require.NoError(t, os.Mkdir("configs", 0o700))
+		path := writeConfigFile(t, "configs", "selected.yaml", "name: exact\naddr: :9000\nmock_files: [selected/*.yaml]")
+		app := MustNew(Setup().ConfigFile(path))
+		t.Cleanup(app.Close)
+		require.Equal(t, "exact", app.Config().Name)
+		require.Equal(t, "127.0.0.1:1234", app.Config().Addr)
+		require.Equal(t, []string{"selected/*.yaml"}, app.Config().MockFileSearchPatterns)
+
+		for _, setup := range []*ConfigBuilder{Setup().SkipDefaults().ConfigFile(path), Setup().ConfigFile(path).SkipDefaults()} {
+			skipped := MustNew(setup)
+			t.Cleanup(skipped.Close)
+			require.Equal(t, "exact", skipped.Config().Name)
+			require.Equal(t, ":9000", skipped.Config().Addr)
+			require.Equal(t, []string{"selected/*.yaml"}, skipped.Config().MockFileSearchPatterns)
+		}
+
+		_, err := New(Setup().ConfigFile("other.yaml"))
+		problems := configProblems(t, err)
+		require.Len(t, problems, 1)
+		require.Equal(t, config.CodeFileNotFound, problems[0].Code)
+		require.Equal(t, "file other.yaml", problems[0].Origin)
+
+		_, err = New(Setup().ConfigFile(""))
+		problems = configProblems(t, err)
+		require.Len(t, problems, 1)
+		require.Equal(t, config.CodeUnsupportedFormat, problems[0].Code)
+	})
+
+	t.Run("last source selector wins and explicit sources can opt back in", func(t *testing.T) {
+		t.Setenv("VLATTE_NAME", "env")
+		path := writeConfigFile(t, t.TempDir(), "selected.yaml", "name: file")
+		sourceList := MustNew(Setup().ConfigFile(path).SkipDefaults().ConfigSources(ConfigEnv()))
+		t.Cleanup(sourceList.Close)
+		require.Equal(t, "env", sourceList.Config().Name)
+		require.Nil(t, sourceList.Config().MockFileSearchPatterns)
+
+		exact := MustNew(Setup().ConfigSources(ConfigEnv()).SkipDefaults().ConfigFile(path))
+		t.Cleanup(exact.Close)
+		require.Equal(t, "file", exact.Config().Name)
+		require.Nil(t, exact.Config().MockFileSearchPatterns)
+
+		empty := MustNew(Setup().ConfigFile("missing.yaml").ConfigSources())
+		t.Cleanup(empty.Close)
+		require.Equal(t, "", empty.Config().Name)
+		require.Equal(t, ConfigMockFilePattern, empty.Config().MockFileSearchPatterns)
+	})
+}
+
+func TestGoSetup_ExplicitMockPatternsWin(t *testing.T) {
+	clearHTTPDiscoveryEnv(t, "VLATTE_NAME")
+	t.Chdir(t.TempDir())
+	path := writeConfigFile(t, ".", "settings.yaml", "name: settings\nmock_files: [file/*.yaml]")
+	emptyPath := writeConfigFile(t, ".", "empty.yaml", "name: settings\nmock_files: []")
+	t.Setenv("VLATTE_MOCK_FILES", "env/*.yaml")
+
+	tests := []struct {
+		name     string
+		options  []Option
+		patterns []string
+	}{
+		{"sources", []Option{Setup().ConfigFile(path)}, []string{"env/*.yaml"}},
+		{"builder", []Option{Setup().ConfigFile(path).MockFilePatterns("go/*.yaml")}, []string{"go/*.yaml"}},
+		{"explicit empty", []Option{Setup().ConfigFile(path).MockFilePatterns()}, []string{}},
+		{"empty source list", []Option{Setup().SkipDefaults().ConfigFile(emptyPath)}, []string{}},
+		{"empty source cannot replace Go patterns", []Option{Setup().MockFilePatterns("go/*.yaml").SkipDefaults().ConfigFile(emptyPath)}, []string{"go/*.yaml"}},
+		{"raw patterns", []Option{&Config{MockFileSearchPatterns: []string{"raw/*.yaml"}}, Setup().ConfigFile(path)}, []string{"raw/*.yaml"}},
+		{"raw empty", []Option{&Config{MockFileSearchPatterns: []string{}}, Setup().ConfigFile(path)}, []string{}},
+		{"raw nil releases selection", []Option{Setup().MockFilePatterns("go/*.yaml"), &Config{}, Setup().ConfigFile(path)}, []string{"env/*.yaml"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := MustNew(tt.options...)
+			t.Cleanup(app.Close)
+			require.Equal(t, "settings", app.Config().Name)
+			require.Equal(t, tt.patterns, app.Config().MockFileSearchPatterns)
+		})
+	}
+
+	invalid := writeConfigFile(t, ".", "invalid.yaml", "mock_files: true")
+	_, err := New(Setup().ConfigFile(invalid).MockFilePatterns("go/*.yaml"))
+	problems := configProblems(t, err)
+	require.Len(t, problems, 1)
+	require.Equal(t, "mock_files", problems[0].Key)
+	require.Equal(t, config.CodeInvalidValue, problems[0].Code)
+}
+
+func clearHTTPDiscoveryEnv(t *testing.T, keys ...string) {
+	t.Helper()
+	for _, key := range keys {
+		t.Setenv(key, "")
+		require.NoError(t, os.Unsetenv(key))
+	}
+}

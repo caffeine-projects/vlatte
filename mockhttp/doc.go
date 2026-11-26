@@ -15,7 +15,8 @@
 // [Reply.EventStream] replies with Server-Sent Events, sent event by event.
 // Mocks can also come from YAML or JSON files; see [FromFile] and [ConfigBuilder.MockFilePatterns].
 //
-// Settings come from code, then from a .vlatterc.json, .vlatterc.yaml or .vlatterc.yml file and VLATTE_*
-// environment variables, each overriding the one before. [ConfigBuilder.ConfigSources] picks the sources,
+// Settings come from code, then from a .vlatterc.json, .vlatterc.yaml or .vlatterc.yml file in the working
+// directory and VLATTE_* environment variables, each overriding the one before. Explicit Go fixture patterns
+// take precedence over mock_files from those sources. [ConfigBuilder.ConfigSources] picks the sources,
 // and [ConfigUsage] lists every setting.
 package mockhttp

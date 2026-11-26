@@ -1,0 +1,5 @@
+[
+  {"state": "accepted"},
+  {"state": "in_transit"},
+  {"state": "delivered"}
+]

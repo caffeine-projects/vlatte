@@ -1,0 +1,14 @@
+{
+  "id": "lookup",
+  "request": {
+    "method": "/parcel.v1.Tracking/GetParcel",
+    "fields": {
+      "id": "P1"
+    }
+  },
+  "response": {
+    "message": {
+      "state": "in_transit"
+    }
+  }
+}

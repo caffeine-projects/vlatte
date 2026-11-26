@@ -1,10 +1,10 @@
 # Configuration
 
-A server's settings come from these sources, each overriding the ones before it:
+A server reads these settings in order. Later sources take precedence. The Go API gives an explicit fixture selection precedence over the `mock_files` setting.
 
 1. Defaults.
 2. Code: the options passed to `mockhttp.New`, such as `mockhttp.Setup().Addr(":8080")`.
-3. A `.vlatterc.json`, `.vlatterc.yaml` or `.vlatterc.yml` file in the working directory or in `testdata`. `--config` or `VLATTE_CONFIG` names another file.
+3. A `.vlatterc.json`, `.vlatterc.yaml` or `.vlatterc.yml` file in the working directory. The CLI also searches `testdata`. `VLATTE_CONFIG` or the CLI's `--config` flag can select another file.
 4. `VLATTE_*` environment variables.
 5. Command-line flags, for the `vlatte` command.
 
@@ -97,12 +97,27 @@ server: loading the configuration sources: config: 2 problems
 
 ## Sources in tests
 
-Servers in tests read the file and the environment too. Pick the sources with `ConfigSources`, or pass none to use code only:
+In both Go packages, `New` reads settings from the working directory (usually the test package directory) and the environment. `Start` and `Reload` load the fixture files. You can register a mock with `MustMock` alongside them.
+
+| To select | Use |
+| --- | --- |
+| A specific config file | `Setup().ConfigFile("configs/test.yaml")` |
+| A different set of fixtures | `Setup().MockFilePatterns("fixtures/refunds/*.yaml")` |
+| Built-in settings and Go mocks only | `Setup().SkipDefaults()` |
+
+An explicit config filename is relative to the working directory. A missing file fails at `New`. Relative mock globs start at the server's root directory, even if the selected config is elsewhere. A glob with no matches loads no fixtures. An invalid matching fixture fails at `Start` or `Reload`.
+
+For example, this server uses the refund fixtures and the other settings from `configs/test.yaml`. `SkipDefaults()` skips the conventional config, fixtures and `VLATTE_*` settings, including `VLATTE_CONFIG`. Omit that call to keep ordinary environment settings.
 
 ```go
-m := mockhttp.MustNew(mockhttp.Setup().ConfigSources())
-m = mockhttp.MustNew(mockhttp.Setup().ConfigSources(mockhttp.ConfigFile("testdata/server.yaml")))
+setup := mockhttp.Setup().
+    SkipDefaults().
+    ConfigFile("configs/test.yaml").
+    MockFilePatterns("fixtures/refunds/*.yaml")
+m := mockhttp.MustNew(setup)
 ```
+
+When migrating, check whether a config file previously replaced a fixture path supplied in Go. To let the file choose the fixtures, omit the Go pattern setter. To retain the older search in both `.` and `testdata`, or a customized `DefaultConfigDirectories`, use `mockhttp.Setup().ConfigSources(mockhttp.DefaultConfigSources(nil)...)` or the corresponding `mockgrpc` functions. Calling `ConfigSources()` with no arguments skips external settings and still permits conventional fixtures.
 
 ## gRPC settings
 

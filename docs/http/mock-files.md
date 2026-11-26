@@ -6,6 +6,15 @@ Mocks can also live in YAML or JSON files (`.json`, `.yaml` or `.yml`).
 - **To load a file with multiple mocks,** set `Setup().MockFilePatterns(path)`. To build one mock explicitly, use `m.MustMock(mockhttp.FromFile(path))`.
 - **`m.Reload()`** replaces the mocks of the files with what they hold now, in one step. When a file has problems, it returns them and the mocks stay as they were.
 
+For example, this test serves the discovered fixtures and adds a health endpoint in Go.
+
+```go
+m := mockhttp.MustNew()
+t.Cleanup(m.Close)
+m.MustStart()
+m.MustMock(mockhttp.Getf("/health").Reply(mockhttp.OK()))
+```
+
 ```yaml
 # testdata/vlatte/_mocks/hello_mock.yaml
 id: hello            # optional: names the mock, as in the admin API's /mocks/hello

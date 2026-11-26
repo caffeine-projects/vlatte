@@ -260,7 +260,7 @@ A gRPC mock renders its messages with `Template(texts...)`, `template` in a [gRP
 | `.KV`, `.Data`, `.Provided.<key>` | As for HTTP: `m.SetData` sets `.Data`, and `Setup().TemplateDataProviders(providers)` provide `.Provided`. |
 | `.Scenarios.State "name"`, `.Scenarios.StateOf "name" "key"` | The state of a [scenario](/scenarios/). |
 
-For the Greeter service of [examples/03-grpc-greeter](https://github.com/caffeine-projects/vlatte/tree/main/examples/03-grpc-greeter), whose generated code the test imports:
+For the Greeter service of [examples/grpc-greeter](https://github.com/caffeine-projects/vlatte/tree/main/examples/grpc-greeter), whose generated code the test imports:
 
 ```go
 m.MustMock(mockgrpc.Method("greeter.Greeter/SayHello").

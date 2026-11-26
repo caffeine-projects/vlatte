@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/netip"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -42,8 +43,8 @@ type Config struct {
 	// Name names the server in its log lines.
 	Name string
 
-	// ConfigSources are the sources of settings New reads after the options, which they override: see
-	// DefaultConfigSources, which nil reads. An empty list reads none.
+	// ConfigSources are the settings sources New reads after Go options. Explicit Go mock patterns take precedence.
+	// Nil uses the normal working-directory config lookup and environment. An empty list reads no settings sources.
 	ConfigSources []ConfigSource
 
 	// Serve reports whether the settings turned the grpc section on: the vlatte command serves gRPC mocks then.
@@ -147,7 +148,8 @@ type Config struct {
 	// RootDir is where relative MockFiles patterns start. Empty is the working directory.
 	RootDir string
 
-	// MockFiles are glob patterns of the mock files the server loads at Start and on Reload.
+	// MockFiles are glob patterns of the mock files the server loads at Start and on Reload. A non-nil list in a
+	// Config passed to New overrides the list from settings sources.
 	MockFiles []string
 
 	// ShutdownTimeout is how long Close waits for the calls in flight before it cuts them. 0 means 5s.
@@ -183,6 +185,11 @@ type Config struct {
 	// own transport, dials on its own, and they don't apply.
 	OutboundAllow []netip.Prefix
 	OutboundDeny  []netip.Prefix
+
+	skipDefaults         bool
+	selectedConfigFile   ConfigSource
+	explicitMockPatterns bool
+	useConventionalMocks bool
 }
 
 // AdminAPI is a handle to the built-in admin API: a RESTful HTTP server of its own, the same as HTTP mock servers have.
@@ -214,6 +221,8 @@ type JournalConfig struct {
 // Apply implements Option: it sets every field of conf to c's.
 func (c *Config) Apply(conf *Config) error {
 	*conf = *c
+	conf.explicitMockPatterns = c.MockFiles != nil
+	conf.MockFiles = slices.Clone(c.MockFiles)
 	return nil
 }
 
@@ -228,8 +237,9 @@ func (c *Config) path(p string) string {
 
 func defaultConfig() *Config {
 	return &Config{
-		Addr:     "127.0.0.1:0",
-		LogLevel: vlatte.LogLevelInfo,
+		Addr:                 "127.0.0.1:0",
+		LogLevel:             vlatte.LogLevelInfo,
+		useConventionalMocks: true,
 	}
 }
 
@@ -479,10 +489,32 @@ func (cb *ConfigBuilder) RootDir(dir string) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.RootDir = dir })
 }
 
-// MockFiles adds glob patterns of mock files, such as "testdata/grpc/*.yaml", which the server loads at Start, before
-// it serves, and again on Reload. See FromFile for their format.
+// MockFiles appends glob patterns to the current Go selection, overriding patterns from settings sources and
+// conventional discovery. Calling it without patterns leaves the selection as it is. See [Config.MockFiles].
 func (cb *ConfigBuilder) MockFiles(patterns ...string) *ConfigBuilder {
-	return cb.set(func(conf *Config) { conf.MockFiles = append(conf.MockFiles, patterns...) })
+	if len(patterns) == 0 {
+		return cb
+	}
+
+	patterns = slices.Clone(patterns)
+	return cb.set(func(conf *Config) {
+		conf.MockFiles = append(slices.Clone(conf.MockFiles), patterns...)
+		conf.explicitMockPatterns = true
+	})
+}
+
+// MockFilePatterns replaces the current Go selection of mock file globs and overrides patterns from settings
+// sources and conventional discovery. Calling it without patterns disables fixture globbing.
+func (cb *ConfigBuilder) MockFilePatterns(patterns ...string) *ConfigBuilder {
+	patterns = slices.Clone(patterns)
+	if patterns == nil {
+		patterns = []string{}
+	}
+
+	return cb.set(func(conf *Config) {
+		conf.MockFiles = slices.Clone(patterns)
+		conf.explicitMockPatterns = true
+	})
 }
 
 // ShutdownTimeout sets how long Close waits for the calls in flight, such as a stream a client never ends, before it
@@ -491,11 +523,34 @@ func (cb *ConfigBuilder) ShutdownTimeout(d time.Duration) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.ShutdownTimeout = d })
 }
 
-// ConfigSources sets the sources of settings New reads after the options, which they override: see
-// DefaultConfigSources. Without it, New reads DefaultConfigSources(nil): the grpc section of .vlatterc, and the
-// VLATTE_GRPC_* environment variables. Call it with none to read none.
+// SkipDefaults disables implicit config file lookup, environment settings and conventional mock file discovery.
+// Explicit config sources and mock file patterns still apply.
+func (cb *ConfigBuilder) SkipDefaults() *ConfigBuilder {
+	return cb.set(func(conf *Config) {
+		conf.skipDefaults = true
+		if !conf.explicitMockPatterns {
+			conf.MockFiles = nil
+		}
+	})
+}
+
+// ConfigFile selects the exact settings file New reads, relative to the working directory. It replaces any earlier
+// [ConfigBuilder.ConfigSources] selection. VLATTE_CONFIG cannot redirect it, and other environment settings still
+// apply unless [ConfigBuilder.SkipDefaults] is set.
+func (cb *ConfigBuilder) ConfigFile(path string) *ConfigBuilder {
+	return cb.set(func(conf *Config) {
+		conf.selectedConfigFile = ConfigFile(path)
+		conf.ConfigSources = nil
+	})
+}
+
+// ConfigSources replaces the sources of settings New reads, including any earlier [ConfigBuilder.ConfigFile]
+// selection. Call it with no sources to disable settings sources while keeping conventional mock file discovery.
 func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
-	return cb.set(func(conf *Config) { conf.ConfigSources = append(make([]ConfigSource, 0, len(sources)), sources...) })
+	return cb.set(func(conf *Config) {
+		conf.ConfigSources = append(make([]ConfigSource, 0, len(sources)), sources...)
+		conf.selectedConfigFile = nil
+	})
 }
 
 // Admin serves the admin API api, such as admin.MustNew(admin.Addr("127.0.0.1:8081")), on an HTTP server of its own.

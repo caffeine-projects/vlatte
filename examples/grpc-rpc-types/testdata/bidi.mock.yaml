@@ -1,0 +1,32 @@
+request:
+  method: /parcel.v1.Tracking/Dispatch
+bidi:
+  on:
+    - when:
+        - field
+        - text
+        -
+          - eq
+          - route
+      response:
+        messages:
+          - text: north
+          - text: south
+    - when:
+        - field
+        - text
+        -
+          - eq
+          - stop
+      response:
+        status:
+          code: FAILED_PRECONDITION
+          message: dispatch closed
+  otherwise:
+    message:
+      text: unknown
+  on_end:
+    message:
+      text: bye
+  trailer:
+    x-dispatch: complete
