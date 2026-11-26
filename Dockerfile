@@ -2,7 +2,7 @@
 
 # The build stage runs on the build machine's platform and cross-compiles for the target one, so a multi-platform
 # build needs no emulation.
-FROM --platform=$BUILDPLATFORM golang:1.27-trixie@sha256:c124b9ad3452f46061b5054607d26ea51730dae5372c5e469920063ba2bc6dcc AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-trixie@sha256:430985542100b871e108ccc00e8dcc5eef08ca14ee5825e98ebf563d8ffec4ee AS build
 
 WORKDIR /src
 
