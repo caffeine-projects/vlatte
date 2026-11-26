@@ -3,10 +3,10 @@ module github.com/caffeine-projects/vlatte/examples
 go 1.27.0
 
 require (
-	github.com/caffeine-projects/vlatte v1.2.0
+	github.com/caffeine-projects/vlatte v1.3.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/stretchr/testify v1.12.1
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261123191846-1e707ab9fbc2
 	google.golang.org/grpc v1.85.0
 	google.golang.org/protobuf v1.36.12
 )
@@ -16,7 +16,7 @@ require (
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
-	github.com/ohler55/ojg v1.28.9 // indirect
+	github.com/ohler55/ojg v1.28.10 // indirect
 	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
