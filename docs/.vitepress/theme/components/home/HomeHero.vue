@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { withBase } from 'vitepress'
 
-const install = 'go get github.com/caffeine-projects/vlatte@v1.3.1'
+const install = 'go get github.com/caffeine-projects/vlatte@v1.4.0'
 const copied = ref(false)
 
 async function copy() {
